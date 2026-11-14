@@ -152,8 +152,9 @@ impl Document {
         self.layers.iter().find(|layer|layer.id==id)
     }
     pub fn visible_objects(&self)->impl Iterator<Item=&Object>{
-        self.objects.iter().filter(|obj|
-            self.layer(obj.layer_id).map(|l|l.visible).unwrap_or(false))
+        let visible:HashSet<u64>=self.layers.iter().filter(|layer|layer.visible)
+            .map(|layer|layer.id).collect();
+        self.objects.iter().filter(move |obj|visible.contains(&obj.layer_id))
     }
     pub fn get_mut(&mut self,id:u64) -> Option<&mut Object> {
         self.objects.iter_mut().find(|o|o.id==id)
@@ -162,9 +163,10 @@ impl Document {
         let n=self.objects.len(); self.objects.retain(|o|o.id!=id); self.objects.len()!=n
     }
     pub fn hit_test(&self,p:Point,tolerance:f32) -> Option<u64> {
+        let editable:HashSet<u64>=self.layers.iter()
+            .filter(|layer|layer.visible&&!layer.locked).map(|layer|layer.id).collect();
         self.objects.iter().rev().find(|o|
-            self.layer(o.layer_id).map(|l|l.visible&&!l.locked).unwrap_or(false)
-            && o.shape.bounds().contains(p,tolerance)
+            editable.contains(&o.layer_id) && o.shape.bounds().contains(p,tolerance)
         ).map(|o|o.id)
     }
     pub fn validate(&self)->Result<(),String>{

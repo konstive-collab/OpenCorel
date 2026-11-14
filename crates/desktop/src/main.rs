@@ -186,6 +186,7 @@ impl Editor{
     fn undo(&mut self){
         if let Some(prev)=self.undo.pop(){
             self.redo.push(std::mem::replace(&mut self.doc,prev));
+            self.fill_cache.entries.clear();
             self.selected=None;self.curve_draft=None;self.curve_start=None;
             self.status="Отменено".into();
         }
@@ -193,6 +194,7 @@ impl Editor{
     fn redo(&mut self){
         if let Some(next)=self.redo.pop(){
             self.undo.push(std::mem::replace(&mut self.doc,next));
+            self.fill_cache.entries.clear();
             self.selected=None;self.curve_draft=None;self.curve_start=None;
             self.status="Повторено".into();
         }
@@ -270,11 +272,13 @@ impl Editor{
             .add_filter("OpenCorel", &["ocd"])
             .add_filter("SVG", &["svg"])
             .pick_file(){
+            let previous=self.file.clone();
             self.file=path.to_string_lossy().into_owned();
             if path.extension().and_then(|e|e.to_str())
                 .map(|e|e.eq_ignore_ascii_case("svg")).unwrap_or(false){
                 self.import_svg();
             }else{self.open();}
+            if self.status.starts_with("Ошибка"){self.file=previous;}
         }
     }
     fn save_as_picker(&mut self){
@@ -501,10 +505,12 @@ impl eframe::App for Editor{
             (i.key_pressed(egui::Key::Z)&&i.modifiers.shift)));
         if undo{self.undo();}
         if redo{self.redo();}
-        if ctx.input(|i|i.modifiers.command&&i.key_pressed(egui::Key::S)){self.save();}
+        let save_as=ctx.input(|i|i.modifiers.command&&i.modifiers.shift
+            && i.key_pressed(egui::Key::S));
+        if save_as{self.save_as_picker();}
+        else if ctx.input(|i|i.modifiers.command&&i.key_pressed(egui::Key::S)){self.save();}
         if ctx.input(|i|i.modifiers.command&&i.key_pressed(egui::Key::O)){self.open_picker();}
-        if ctx.input(|i|i.modifiers.command&&i.modifiers.shift&&i.key_pressed(egui::Key::S)){self.save_as_picker();}
-        if !ctx.wants_keyboard_input() && ctx.input(|i|i.key_pressed(egui::Key::Delete)){
+         if !ctx.wants_keyboard_input() && ctx.input(|i|i.key_pressed(egui::Key::Delete)){
             if let Some(id)=self.selected{
                 if self.doc.layer(self.doc.objects.iter().find(|o|o.id==id).map(|o|o.layer_id).unwrap_or(0))
                     .map(|l|!l.locked).unwrap_or(false){

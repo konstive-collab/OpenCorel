@@ -26,6 +26,7 @@ impl Editor {
     pub(super) fn new_document(&mut self) {
         self.checkpoint();
         self.doc=Default::default();
+        self.fill_cache.entries.clear();
         self.selected=None;
         self.active_layer=1;
         self.pan=Vec2::ZERO;
