@@ -9,3 +9,5 @@ opencorel-core = { path = "../core" }
 eframe = { version = "0.31", default-features = false, features = ["default_fonts", "glow", "x11", "wayland"] }
 
 opencorel-export = { path = "../export" }
+
+earcutr = "0.5"

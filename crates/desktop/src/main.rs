@@ -1,12 +1,42 @@
 use eframe::egui::{self,Align2,Color32,FontId,Pos2,Rect,Sense,Stroke,Vec2};
 use opencorel_core::{Bounds,CubicSegment,Document,Object,Point,Shape,Style,valid_color,valid_paint};
-use std::f32::consts::TAU;
+use std::{f32::consts::TAU,collections::HashMap,hash::{Hash,Hasher},collections::hash_map::DefaultHasher};
 mod workspace;
 use workspace::InspectorTab;
 
 #[derive(Clone,Copy,PartialEq)]
 enum Tool { Select, Rect, Ellipse, Text, Curve }
 
+#[derive(Default)]
+struct FillCache { entries:HashMap<u64,(u64,Vec<usize>)> }
+impl FillCache {
+    fn fill(&mut self,p:&egui::Painter,id:u64,pts:&[Point],v:View,color:Color32) {
+        if color.a()==0 || pts.len()<3{return;}
+        let mut hash=DefaultHasher::new();
+        pts.len().hash(&mut hash);
+        for pt in pts{
+            pt.x.to_bits().hash(&mut hash);
+            pt.y.to_bits().hash(&mut hash);
+        }
+        let key=hash.finish();
+        if self.entries.get(&id).map(|(old,_)|*old!=key).unwrap_or(true) {
+            let xy:Vec<f64>=pts.iter().flat_map(|p|[p.x as f64,p.y as f64]).collect();
+            let tri=earcutr::earcut(&xy,&[],2).unwrap_or_default();
+            self.entries.insert(id,(key,tri));
+        }
+        if let Some((_,indices))=self.entries.get(&id) {
+            if indices.is_empty(){return;}
+            let mut mesh=egui::Mesh::default();
+            mesh.reserve_vertices(pts.len());
+            mesh.reserve_triangles(indices.len()/3);
+            for &pt in pts{mesh.colored_vertex(v.screen(pt),color);}
+            for tri in indices.chunks_exact(3){
+                mesh.add_triangle(tri[0] as u32,tri[1] as u32,tri[2] as u32);
+            }
+            p.add(egui::Shape::mesh(mesh));
+        }
+    }
+}
 struct Editor{
     doc:Document,
     selected:Option<u64>,
@@ -29,6 +59,7 @@ struct Editor{
     show_rulers:bool,
     light_theme:bool,
     cursor_mm:Option<Point>,
+    fill_cache:FillCache,
 }
 impl Default for Editor{
     fn default()->Self{
@@ -44,7 +75,7 @@ impl Default for Editor{
             curve_start:None,curve_draft:None,active_layer:1,pan:Vec2::ZERO,
             undo:Vec::new(),redo:Vec::new(),
             inspector_tab:InspectorTab::Objects,show_grid:false,snap_grid:false,
-            show_rulers:true,light_theme:true,cursor_mm:None}
+            show_rulers:true,light_theme:true,cursor_mm:None,fill_cache:FillCache::default()}
     }
 }
 #[derive(Clone,Copy)]
@@ -88,9 +119,13 @@ fn cubic(p0:Point,p1:Point,p2:Point,p3:Point,t:f32)->Point {
     let d=t*t*t;
     Point{x:a*p0.x+b*p1.x+c*p2.x+d*p3.x,y:a*p0.y+b*p1.y+c*p2.y+d*p3.y}
 }
-fn paint(p:&egui::Painter,obj:&Object,v:View){
+fn paint(p:&egui::Painter,obj:&Object,v:View,cache:&mut FillCache){
     let fill=color(&obj.style.fill);
-    let stroke=Stroke::new(obj.style.stroke_width_mm*v.scale,color(&obj.style.stroke));
+    let stroke=if obj.style.stroke=="none" {
+        Stroke::new(0.0,Color32::TRANSPARENT)
+    } else {
+        Stroke::new(obj.style.stroke_width_mm*v.scale,color(&obj.style.stroke))
+    };
     match &obj.shape{
         Shape::Rectangle{x,y,w,h}=>{
             let r=v.bounds(Bounds{x:*x,y:*y,w:*w,h:*h});
@@ -111,24 +146,34 @@ fn paint(p:&egui::Painter,obj:&Object,v:View){
                 FontId::proportional((size_mm*v.scale).clamp(1.0,400.0)),fill);
         }
         Shape::Bezier{start,segments,closed}=>{
-            let mut vertices=vec![v.screen(*start)];
+            let mut contour=vec![*start];
             let mut previous=*start;
-            for segment in segments {
-                for i in 1..=32 {
-                    let t=(i as f32)/32.0;
-                    vertices.push(v.screen(cubic(previous,segment.control1,segment.control2,segment.end,t)));
+            let cap=(20_000usize/segments.len().max(1)).clamp(4,48);
+            for seg in segments {
+                let approx=((seg.end.x-previous.x).hypot(seg.end.y-previous.y)
+                    +(seg.control1.x-previous.x).hypot(seg.control1.y-previous.y)
+                    +(seg.control2.x-seg.end.x).hypot(seg.control2.y-seg.end.y))*v.scale;
+                let steps=((approx/10.0).ceil() as usize).clamp(4,cap);
+                for i in 1..=steps{
+                    contour.push(cubic(previous,seg.control1,seg.control2,seg.end,
+                        i as f32/steps as f32));
                 }
-                previous=segment.end;
+                previous=seg.end;
             }
-            if *closed{vertices.push(v.screen(*start));}
-            if vertices.len()>1 {
-                p.add(egui::Shape::line(vertices,Stroke::new(stroke.width.max(1.0),stroke.color)));
+            if *closed {cache.fill(p,obj.id,&contour,v,fill);}
+            if stroke.width>0.0 {
+                let mut vertices:Vec<Pos2>=contour.iter().map(|&pt|v.screen(pt)).collect();
+                if *closed{vertices.push(v.screen(*start));}
+                if vertices.len()>1{p.add(egui::Shape::line(vertices,stroke));}
             }
         }
         Shape::Polyline{points,closed}=>{
-            let mut ps:Vec<Pos2>=points.iter().map(|pt|v.screen(*pt)).collect();
-            if *closed && !ps.is_empty(){ps.push(ps[0]);}
-            if ps.len()>1{p.add(egui::Shape::line(ps,stroke));}
+            if *closed{cache.fill(p,obj.id,points,v,fill);}
+            if stroke.width>0.0{
+                let mut vertices:Vec<Pos2>=points.iter().map(|&pt|v.screen(pt)).collect();
+                if *closed && !vertices.is_empty(){vertices.push(vertices[0]);}
+                if vertices.len()>1{p.add(egui::Shape::line(vertices,stroke));}
+            }
         }
     }
 }
@@ -205,6 +250,7 @@ impl Editor{
             Ok(d)=>{
                 self.checkpoint();
                 self.doc=d;
+                self.fill_cache.entries.clear();
                 self.file=std::path::Path::new(&path).with_extension("ocd").to_string_lossy().into_owned();
                 self.selected=None;self.active_layer=1;
                 self.curve_start=None;self.curve_draft=None;
@@ -222,6 +268,7 @@ impl Editor{
     fn open(&mut self){
         match Document::read(&self.file){
             Ok(d)=>{self.doc=d;self.selected=None;self.active_layer=1;
+                self.fill_cache.entries.clear();
                 self.undo.clear();self.redo.clear();self.curve_start=None;self.curve_draft=None;
                 self.status="Открыто".into();},
             Err(e)=>self.status=format!("Ошибка открытия: {e}"),
@@ -327,7 +374,7 @@ impl Editor{
             self.draw_grid_rulers(&painter,&page_painter,v,response.rect);
             for obj in self.doc.visible_objects(){
                 if v.bounds(obj.shape.bounds()).intersects(v.rect.intersect(response.rect)){
-                    paint(&page_painter,obj,v);
+                    paint(&page_painter,obj,v,&mut self.fill_cache);
                 }
             }
             if let Some(id)=self.selected{
