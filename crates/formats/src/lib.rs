@@ -1,8 +1,8 @@
 //! File format router and deliberately labeled compatibility adapters.
 //! External formats are not lossless CorelDRAW project files.
-use flate2::read::GzDecoder;
+use flate2::{read::GzDecoder,write::GzEncoder,Compression};
 use opencorel_core::{kdr,svg_import,Document,Shape,Style};
-use std::{fs,io::Read,path::Path,process::{Command,Stdio},time::Duration};
+use std::{fs,io::{Read,Write},path::Path,process::{Command,Stdio},time::Duration};
 use wait_timeout::ChildExt;
 
 const MAX_EXTERNAL_FILE:u64=128*1024*1024;
@@ -31,7 +31,7 @@ pub const IMPORT_EXTENSIONS:&[&str]=&[
     "kdr","ocd","svg","svgz","pdf","cdr","cmx","ai","eps","ps",
     "odg","fodg","dxf","wmf","emf","wpg","vsd","vsdx","sxd"
 ];
-pub const EXPORT_EXTENSIONS:&[&str]=&["kdr","ocd","svg","pdf"];
+pub const EXPORT_EXTENSIONS:&[&str]=&["kdr","ocd","svg","svgz","pdf"];
 
 fn check_file_size(path:&Path)->Result<(),String>{
     if fs::metadata(path).map_err(|e|e.to_string())?.len()>MAX_EXTERNAL_FILE{
@@ -236,6 +236,20 @@ pub fn save_document(doc:&Document,path:impl AsRef<Path>)->Result<(),String>{
         "kdr"=>kdr::save_kdr(doc,path),
         "ocd"=>doc.write(path),
         "svg"=>doc.validate().and_then(|_|doc.export_svg(path).map_err(|e|e.to_string())),
+        "svgz"=>{
+            doc.validate()?;
+            let mut encoder=GzEncoder::new(Vec::new(),Compression::default());
+            encoder.write_all(doc.to_svg().as_bytes()).map_err(|e|e.to_string())?;
+            let bytes=encoder.finish().map_err(|e|e.to_string())?;
+            let parent=path.parent().filter(|p|!p.as_os_str().is_empty())
+                .unwrap_or_else(||Path::new("."));
+            let mut tmp=tempfile::Builder::new().prefix(".svgz-write-").tempfile_in(parent)
+                .map_err(|e|e.to_string())?;
+            tmp.write_all(&bytes).map_err(|e|e.to_string())?;
+            tmp.as_file().sync_all().map_err(|e|e.to_string())?;
+            tmp.persist(path).map_err(|e|e.error.to_string())?;
+            Ok(())
+        },
         "pdf"=>opencorel_export::export_pdf(doc,path),
         "cdr"=>Err("CDR export is not implemented. Save as .kdr or export SVG/PDF; do not rename files.".into()),
         other=>Err(format!("Saving .{other} is unsupported. Supported: {}",EXPORT_EXTENSIONS.join(", ")))
@@ -252,6 +266,16 @@ mod tests{
             save_document(&doc,&p).unwrap();
             assert_eq!(open_any(&p).unwrap().document,doc);
         }
+    }
+    #[test] fn svgz_roundtrip(){
+        let dir=tempfile::tempdir().unwrap();
+        let mut doc=Document::default();
+        doc.add(Shape::Rectangle{x:10.0,y:10.0,w:40.0,h:25.0},Style::default());
+        let path=dir.path().join("drawing.svgz");
+        save_document(&doc,&path).unwrap();
+        let imported=open_any(&path).unwrap();
+        assert_eq!(imported.quality,ImportQuality::SimplifiedEditable);
+        assert_eq!(imported.document.objects.len(),1);
     }
     #[test] fn svg_rect_is_editable(){
         let dir=tempfile::tempdir().unwrap();
