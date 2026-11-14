@@ -1,0 +1,10 @@
+[package]
+name = "opencorel-export"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+opencorel-core = { path = "../core" }
+svg2pdf = "0.13"
+tempfile = "3"

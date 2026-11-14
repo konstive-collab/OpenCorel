@@ -227,6 +227,13 @@ impl Editor{
             Err(e)=>self.status=format!("Ошибка открытия: {e}"),
         }
     }
+    fn pdf(&mut self){
+        let path=std::path::Path::new(&self.file).with_extension("pdf");
+        self.status=match opencorel_export::export_pdf(&self.doc,&path){
+            Ok(())=>format!("PDF (RGB, не PDF/X) экспортирован: {}",path.display()),
+            Err(e)=>format!("Ошибка PDF: {e}"),
+        };
+    }
     fn svg(&mut self){
         let path=std::path::Path::new(&self.file).with_extension("svg");
         self.status=match self.doc.validate(){

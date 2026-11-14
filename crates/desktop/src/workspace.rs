@@ -47,6 +47,7 @@ impl Editor {
                     if ui.button("Импорт SVG").clicked(){self.import_svg();ui.close_menu();}
                     if ui.button("Сохранить           Ctrl+S").clicked(){self.save();ui.close_menu();}
                     if ui.button("Экспорт SVG").clicked(){self.svg();ui.close_menu();}
+                    if ui.button("Экспорт PDF (RGB)").clicked(){self.pdf();ui.close_menu();}
                 });
                 ui.menu_button("Правка",|ui|{
                     if ui.add_enabled(!self.undo.is_empty(),egui::Button::new("Отменить      Ctrl+Z")).clicked(){self.undo();ui.close_menu();}
@@ -95,6 +96,7 @@ impl Editor {
                 ui.separator();
                 if ui.button("Импорт SVG").clicked(){self.import_svg();}
                 if ui.button("SVG ↗").on_hover_text("Экспорт SVG").clicked(){self.svg();}
+                if ui.button("PDF ↗").on_hover_text("PDF для просмотра (RGB, не PDF/X)").clicked(){self.pdf();}
                 ui.separator();
                 ui.label("Масштаб");
                 if ui.small_button("−").clicked(){self.zoom=(self.zoom/1.25).max(0.2);}
