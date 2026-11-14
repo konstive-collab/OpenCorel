@@ -317,6 +317,13 @@ impl Editor{
             Err(e)=>format!("Ошибка PDF: {e}"),
         };
     }
+    fn svgz(&mut self){
+        let path=std::path::Path::new(&self.file).with_extension("svgz");
+        self.status=match opencorel_formats::save_document(&self.doc,&path){
+            Ok(())=>format!("SVGZ экспортирован: {}",path.display()),
+            Err(e)=>format!("Ошибка SVGZ: {e}"),
+        };
+    }
     fn svg(&mut self){
         let path=std::path::Path::new(&self.file).with_extension("svg");
         self.status=match self.doc.validate(){

@@ -50,6 +50,7 @@ impl Editor {
                     if ui.button("Сохранить           Ctrl+S").clicked(){self.save();ui.close_menu();}
                     if ui.button("Сохранить как...  Ctrl+Shift+S").clicked(){self.save_as_picker();ui.close_menu();}
                     if ui.button("Экспорт SVG").clicked(){self.svg();ui.close_menu();}
+                    if ui.button("Экспорт SVGZ").clicked(){self.svgz();ui.close_menu();}
                     if ui.button("Экспорт PDF (RGB)").clicked(){self.pdf();ui.close_menu();}
                 });
                 ui.menu_button("Правка",|ui|{

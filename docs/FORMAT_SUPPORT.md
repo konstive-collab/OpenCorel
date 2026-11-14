@@ -7,7 +7,7 @@
 | **KDR** | Native | Native | Kodi Draw v1 ZIP, JSON document, SVG preview, SHA-256 integrity |
 | **OCD** | Native (legacy) | Native (legacy) | Older JSON document file |
 | **SVG** | Editable subset; otherwise placed artwork | Basic SVG | SVG gradients/transforms/masks/complex paths not broken into editable shapes |
-| **SVGZ** | Editable subset; otherwise placed artwork | No | Gzip compressed SVG |
+| **SVGZ** | Editable subset; otherwise placed artwork | Basic SVGZ | Gzip compressed SVG |
 | **PDF** | Placed artwork (first page) | RGB vector preview | Requires `pdftocairo`; no PDF/X, not CMYK |
 | **CDR** | Adapter, experimental | **No** | LibreOffice Draw import to PDF, then `pdftocairo`; compatibility depends on CDR version & filters |
 | **CMX** | Adapter, experimental | No | LibreOffice Draw |
