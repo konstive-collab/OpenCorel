@@ -27,13 +27,14 @@ impl Editor {
         self.checkpoint();
         self.doc=Default::default();
         self.fill_cache.entries.clear();
+        self.vector_cache.clear();
         self.selected=None;
         self.active_layer=1;
         self.pan=Vec2::ZERO;
         self.zoom=1.0;
         self.curve_start=None;
         self.curve_draft=None;
-        self.file="untitled.ocd".into();
+        self.file="untitled.kdr".into();
         self.status="Создан новый документ".into();
     }
 
@@ -45,7 +46,7 @@ impl Editor {
                 ui.menu_button("Файл",|ui|{
                     if ui.button("Новый                 Ctrl+N").clicked(){self.new_document();ui.close_menu();}
                     if ui.button("Открыть...         Ctrl+O").clicked(){self.open_picker();ui.close_menu();}
-                    if ui.button("Импорт SVG...").clicked(){self.import_svg_picker();ui.close_menu();}
+                    if ui.button("Импорт SVG/SVGZ...").clicked(){self.import_svg_picker();ui.close_menu();}
                     if ui.button("Сохранить           Ctrl+S").clicked(){self.save();ui.close_menu();}
                     if ui.button("Сохранить как...  Ctrl+Shift+S").clicked(){self.save_as_picker();ui.close_menu();}
                     if ui.button("Экспорт SVG").clicked(){self.svg();ui.close_menu();}
@@ -228,6 +229,7 @@ impl Editor {
                     Shape::Text{value,..}=>format!("T  {}",value.chars().take(24).collect::<String>()),
                     Shape::Bezier{..}=>"⌁  Кривая Безье".into(),
                     Shape::Polyline{..}=>"⌁  Линия".into(),
+                    Shape::EmbeddedSvg{source_format,..}=>format!("▧  Вектор {source_format}"),
                 };
                 let visible=self.doc.layer(layer_id).map(|l|l.visible).unwrap_or(false);
                 if ui.add_enabled(visible,egui::Button::new(name)
@@ -281,6 +283,18 @@ impl Editor {
                         });
                     }
                     *size_mm=size_mm.max(0.1);
+                }
+                Shape::EmbeddedSvg{x,y,w,h,source_format,..}=>{
+                    ui.colored_label(Color32::from_rgb(187,105,28),
+                        format!("{source_format}: единый векторный объект"));
+                    ui.label("Внутренние контуры пока не редактируются.");
+                    for (label,num) in [("X мм",x),("Y мм",y),("Ширина",w),("Высота",h)]{
+                        ui.horizontal(|ui|{
+                            ui.label(label);
+                            changed|=ui.add(egui::DragValue::new(num).speed(1.0)).changed();
+                        });
+                    }
+                    *w=w.max(1.0);*h=h.max(1.0);
                 }
                 Shape::Polyline{points,closed}=>{
                     ui.label(format!("Узлов: {}",points.len()));

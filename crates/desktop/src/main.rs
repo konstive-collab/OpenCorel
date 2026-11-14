@@ -2,6 +2,8 @@ use eframe::egui::{self,Align2,Color32,FontId,Pos2,Rect,Sense,Stroke,Vec2};
 use opencorel_core::{Bounds,CubicSegment,Document,Object,Point,Shape,Style,valid_color,valid_paint};
 use std::{f32::consts::TAU,collections::HashMap,hash::{Hash,Hasher},collections::hash_map::DefaultHasher};
 mod workspace;
+mod vector_preview;
+use vector_preview::VectorCache;
 use workspace::InspectorTab;
 
 #[derive(Clone,Copy,PartialEq)]
@@ -60,6 +62,7 @@ struct Editor{
     light_theme:bool,
     cursor_mm:Option<Point>,
     fill_cache:FillCache,
+    vector_cache:VectorCache,
 }
 impl Default for Editor{
     fn default()->Self{
@@ -69,13 +72,14 @@ impl Default for Editor{
             Style{fill:"#244A87".into(),stroke:"#244A87".into(),stroke_width_mm:0.0});
         doc.add(Shape::Text{x:120.0,y:200.0,value:"ВАША РЕКЛАМА".into(),size_mm:42.0},
             Style{fill:"#FFFFFF".into(),stroke:"#FFFFFF".into(),stroke_width_mm:0.0});
-        Self{doc,selected:None,tool:Tool::Select,file:"project.ocd".into(),
+        Self{doc,selected:None,tool:Tool::Select,file:"project.kdr".into(),
             text:"Новый текст".into(),status:"Экспериментальный прототип".into(),
             zoom:1.0,drag_start:None,creation_start:None,
             curve_start:None,curve_draft:None,active_layer:1,pan:Vec2::ZERO,
             undo:Vec::new(),redo:Vec::new(),
             inspector_tab:InspectorTab::Objects,show_grid:false,snap_grid:false,
-            show_rulers:true,light_theme:true,cursor_mm:None,fill_cache:FillCache::default()}
+            show_rulers:true,light_theme:true,cursor_mm:None,
+            fill_cache:FillCache::default(),vector_cache:VectorCache::default()}
     }
 }
 #[derive(Clone,Copy)]
@@ -119,7 +123,8 @@ fn cubic(p0:Point,p1:Point,p2:Point,p3:Point,t:f32)->Point {
     let d=t*t*t;
     Point{x:a*p0.x+b*p1.x+c*p2.x+d*p3.x,y:a*p0.y+b*p1.y+c*p2.y+d*p3.y}
 }
-fn paint(p:&egui::Painter,obj:&Object,v:View,cache:&mut FillCache){
+fn paint(p:&egui::Painter,obj:&Object,v:View,cache:&mut FillCache,
+    vectors:&mut VectorCache,ctx:&egui::Context){
     let fill=color(&obj.style.fill);
     let stroke=if obj.style.stroke=="none" {
         Stroke::new(0.0,Color32::TRANSPARENT)
@@ -167,6 +172,10 @@ fn paint(p:&egui::Painter,obj:&Object,v:View,cache:&mut FillCache){
                 if vertices.len()>1{p.add(egui::Shape::line(vertices,stroke));}
             }
         }
+        Shape::EmbeddedSvg{x,y,w,h,svg,..}=>{
+            vectors.paint(ctx,p,obj.id,svg,
+                v.bounds(Bounds{x:*x,y:*y,w:*w,h:*h}));
+        }
         Shape::Polyline{points,closed}=>{
             if *closed{cache.fill(p,obj.id,points,v,fill);}
             if stroke.width>0.0{
@@ -187,6 +196,7 @@ impl Editor{
         if let Some(prev)=self.undo.pop(){
             self.redo.push(std::mem::replace(&mut self.doc,prev));
             self.fill_cache.entries.clear();
+            self.vector_cache.clear();
             self.selected=None;self.curve_draft=None;self.curve_start=None;
             self.status="Отменено".into();
         }
@@ -195,6 +205,7 @@ impl Editor{
         if let Some(next)=self.redo.pop(){
             self.undo.push(std::mem::replace(&mut self.doc,next));
             self.fill_cache.entries.clear();
+            self.vector_cache.clear();
             self.selected=None;self.curve_draft=None;self.curve_start=None;
             self.status="Повторено".into();
         }
@@ -243,66 +254,60 @@ impl Editor{
         }
         self.status="Точка добавлена; двойной щелчок завершает кривую".into();
     }
-    fn import_svg(&mut self){
-        let path=self.file.clone();
-        let result=std::fs::read_to_string(&path)
-            .map_err(|e|e.to_string())
-            .and_then(|content|opencorel_core::svg_import::parse_svg(&content));
-        match result{
-            Ok(d)=>{
-                self.checkpoint();
-                self.doc=d;
-                self.fill_cache.entries.clear();
-                self.file=std::path::Path::new(&path).with_extension("ocd").to_string_lossy().into_owned();
-                self.selected=None;self.active_layer=1;
-                self.curve_start=None;self.curve_draft=None;
-                self.status="SVG импортирован. Сохранение будет выполнено в .ocd".into();
-            },
-            Err(e)=>self.status=format!("Ошибка импорта SVG: {e}"),
-        }
-    }
+    fn import_svg(&mut self){self.open();}
     fn save(&mut self){
-        self.status=match self.doc.write(&self.file){
+        self.status=match opencorel_formats::save_document(&self.doc,&self.file){
             Ok(())=>format!("Сохранено: {}",self.file),
             Err(e)=>format!("Ошибка сохранения: {e}"),
         };
     }
     fn open_picker(&mut self){
         if let Some(path)=rfd::FileDialog::new()
-            .add_filter("OpenCorel", &["ocd"])
-            .add_filter("SVG", &["svg"])
-            .pick_file(){
+            .add_filter("Документы и графика",&[
+                "kdr","ocd","svg","svgz","cdr","cmx","pdf","ai","eps","ps",
+                "odg","fodg","dxf","wmf","emf","wpg","vsd","vsdx","sxd"
+            ]).pick_file(){
             let previous=self.file.clone();
             self.file=path.to_string_lossy().into_owned();
-            if path.extension().and_then(|e|e.to_str())
-                .map(|e|e.eq_ignore_ascii_case("svg")).unwrap_or(false){
-                self.import_svg();
-            }else{self.open();}
+            self.open();
             if self.status.starts_with("Ошибка"){self.file=previous;}
         }
     }
     fn save_as_picker(&mut self){
         if let Some(path)=rfd::FileDialog::new()
-            .add_filter("OpenCorel (.ocd)", &["ocd"])
-            .set_file_name("project.ocd")
+            .add_filter("Kodi Draw (.kdr)",&["kdr"])
+            .add_filter("Старый OpenCorel (.ocd)",&["ocd"])
+            .set_file_name("project.kdr")
             .save_file(){
-            self.file=path.with_extension("ocd").to_string_lossy().into_owned();
+            let chosen=if path.extension().is_none(){path.with_extension("kdr")}else{path};
+            self.file=chosen.to_string_lossy().into_owned();
             self.save();
         }
     }
     fn import_svg_picker(&mut self){
-        if let Some(path)=rfd::FileDialog::new().add_filter("SVG", &["svg"]).pick_file(){
+        if let Some(path)=rfd::FileDialog::new().add_filter("SVG / SVGZ",&["svg","svgz"]).pick_file(){
             self.file=path.to_string_lossy().into_owned();
-            self.import_svg();
+            self.open();
         }
     }
     fn open(&mut self){
-        match Document::read(&self.file){
-            Ok(d)=>{self.doc=d;self.selected=None;self.active_layer=1;
-                self.fill_cache.entries.clear();
-                self.undo.clear();self.redo.clear();self.curve_start=None;self.curve_draft=None;
-                self.status="Открыто".into();},
-            Err(e)=>self.status=format!("Ошибка открытия: {e}"),
+        match opencorel_formats::open_any(&self.file){
+            Ok(result)=>{
+                self.checkpoint();
+                self.doc=result.document;
+                self.selected=None;self.active_layer=1;
+                self.fill_cache.entries.clear();self.vector_cache.clear();
+                self.curve_start=None;self.curve_draft=None;
+                let source=opencorel_formats::extension(std::path::Path::new(&self.file));
+                if source!="kdr"&&source!="ocd"{
+                    self.file=std::path::Path::new(&self.file)
+                        .with_extension("kdr").to_string_lossy().into_owned();
+                }
+                self.status=if result.warning.is_empty(){
+                    "Проект открыт".into()
+                }else{format!("Импорт: {}",result.warning)};
+            }
+            Err(e)=>self.status=format!("Ошибка открытия: {e}")
         }
     }
     fn pdf(&mut self){
@@ -405,7 +410,7 @@ impl Editor{
             self.draw_grid_rulers(&painter,&page_painter,v,response.rect);
             for obj in self.doc.visible_objects(){
                 if v.bounds(obj.shape.bounds()).intersects(v.rect.intersect(response.rect)){
-                    paint(&page_painter,obj,v,&mut self.fill_cache);
+                    paint(&page_painter,obj,v,&mut self.fill_cache,&mut self.vector_cache,ctx);
                 }
             }
             if let Some(id)=self.selected{
