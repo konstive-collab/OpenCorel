@@ -1,0 +1,30 @@
+name: Rust checks
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Linux GUI dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libwayland-dev libasound2-dev libudev-dev
+      - name: Tests
+        run: cargo test --workspace
+      - name: Build desktop
+        run: cargo build --release -p opencorel-desktop
+      - name: Upload executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: opencorel-${{ runner.os }}-x64
+          path: |
+            target/release/opencorel-desktop
+            target/release/opencorel-desktop.exe
+          if-no-files-found: error

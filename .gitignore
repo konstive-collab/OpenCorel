@@ -1,0 +1,6 @@
+/target/
+*.tmp
+*.bak
+.idea/
+.vscode/
+.DS_Store

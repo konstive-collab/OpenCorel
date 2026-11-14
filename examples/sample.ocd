@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "name": "Рекламный баннер",
+  "page": { "width_mm": 3000.0, "height_mm": 2000.0 },
+  "objects": [
+    { "id": 1, "shape": { "type":"rectangle","x":100.0,"y":100.0,"w":2800.0,"h":1800.0 },
+      "style": { "fill":"#244A87","stroke":"#244A87","stroke_width_mm":0.0 } },
+    { "id": 2, "shape": { "type":"text","x":450.0,"y":850.0,"value":"ВАША РЕКЛАМА","size_mm":160.0 },
+      "style": { "fill":"#FFFFFF","stroke":"#FFFFFF","stroke_width_mm":0.0 } }
+  ],
+  "next_id": 3
+}
