@@ -1,5 +1,5 @@
 use eframe::egui::{self,Align2,Color32,FontId,Pos2,Rect,Sense,Stroke,Vec2};
-use opencorel_core::{Bounds,CubicSegment,Document,Object,Point,Shape,Style,valid_color};
+use opencorel_core::{Bounds,CubicSegment,Document,Object,Point,Shape,Style,valid_color,valid_paint};
 use std::f32::consts::TAU;
 
 #[derive(Clone,Copy,PartialEq)]
@@ -59,6 +59,7 @@ impl View{
     }
 }
 fn color(s:&str)->Color32{
+    if s=="none"{return Color32::TRANSPARENT;}
     if !valid_color(s){return Color32::GRAY;}
     let c=|a,b|u8::from_str_radix(&s[a..b],16).unwrap_or(0);
     Color32::from_rgb(c(1,3),c(3,5),c(5,7))
@@ -185,6 +186,23 @@ impl Editor{
         }
         self.status="Точка добавлена; двойной щелчок завершает кривую".into();
     }
+    fn import_svg(&mut self){
+        let path=self.file.clone();
+        let result=std::fs::read_to_string(&path)
+            .map_err(|e|e.to_string())
+            .and_then(|content|opencorel_core::svg_import::parse_svg(&content));
+        match result{
+            Ok(d)=>{
+                self.checkpoint();
+                self.doc=d;
+                self.file=std::path::Path::new(&path).with_extension("ocd").to_string_lossy().into_owned();
+                self.selected=None;self.active_layer=1;
+                self.curve_start=None;self.curve_draft=None;
+                self.status="SVG импортирован. Сохранение будет выполнено в .ocd".into();
+            },
+            Err(e)=>self.status=format!("Ошибка импорта SVG: {e}"),
+        }
+    }
     fn save(&mut self){
         self.status=match self.doc.write(&self.file){
             Ok(())=>format!("Сохранено: {}",self.file),
@@ -219,6 +237,7 @@ impl Editor{
                 if ui.button("Открыть").clicked(){self.open();}
                 if ui.button("Сохранить").clicked(){self.save();}
                 if ui.button("Экспорт SVG").clicked(){self.svg();}
+                if ui.button("Импорт SVG").clicked(){self.import_svg();}
                 ui.separator();
                 if ui.add_enabled(!self.undo.is_empty(),egui::Button::new("↶ Отменить")).clicked(){self.undo();}
                 if ui.add_enabled(!self.redo.is_empty(),egui::Button::new("↷ Повторить")).clicked(){self.redo();}
@@ -329,16 +348,16 @@ impl Editor{
                     }
                 }
             }
-            ui.label("Заливка #RRGGBB");
+            ui.label("Заливка #RRGGBB или none");
             changed|=ui.text_edit_singleline(&mut obj.style.fill).changed();
-            ui.label("Контур #RRGGBB");
+            ui.label("Контур #RRGGBB или none");
             changed|=ui.text_edit_singleline(&mut obj.style.stroke).changed();
             changed|=ui.add(egui::DragValue::new(&mut obj.style.stroke_width_mm).speed(0.1).range(0.0..=1000.0)).changed();
             if changed{
-                if valid_color(&obj.style.fill)&&valid_color(&obj.style.stroke){
+                if valid_paint(&obj.style.fill)&&valid_paint(&obj.style.stroke){
                     self.checkpoint();self.doc.objects[index]=obj;
                 }else{
-                    self.status="Цвет должен быть в формате #RRGGBB".into();
+                    self.status="Цвет: #RRGGBB или none".into();
                 }
             }
             ui.separator();

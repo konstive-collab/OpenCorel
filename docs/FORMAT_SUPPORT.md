@@ -1,11 +1,11 @@
-# File compatibility status (prototype v0.1)
+# File format support (development branch)
 
-| Format | Open | Export | Notes |
+| Format | Import | Export | Notes |
 |---|---|---|---|
-| OCD | Yes | Yes | Own JSON schema v1 |
-| SVG | No | Basic | Simple shapes and text only |
-| CDR | No | No | CorelDRAW interoperability research needed |
-| CMX, AI, EPS, PDF | No | No | Planned |
-| TIFF, PNG, JPG, PSD | No | No | Planned |
+| OCD | Yes | Yes | Native JSON schema v1 with backward-compatible layers |
+| SVG | **Limited** | Basic | Import rect, ellipse, circle, line, polyline, polygon, text and M/L/H/V/C/S/Q/T/Z paths; rejects arcs, transforms, masks, filters, images and advanced CSS |
+| CDR | No | No | Independent interoperability research required |
+| CMX, AI, EPS, PDF | No | No | Planned; no compatibility claim |
+| PNG, JPG, TIFF, PSD | No | No | Planned |
 
-Import/export compatibility is version-specific. No commitment to 100% fidelity has been verified.
+SVG import is deliberately strict: unsupported graphics are reported as errors instead of silently discarded. Complex art with gradients, transparency, text shaping or transforms is NOT preserved. Validate all jobs before production.
