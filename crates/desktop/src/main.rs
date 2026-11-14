@@ -336,7 +336,7 @@ impl Editor{
             changed|=ui.add(egui::DragValue::new(&mut obj.style.stroke_width_mm).speed(0.1).range(0.0..=1000.0)).changed();
             if changed{
                 if valid_color(&obj.style.fill)&&valid_color(&obj.style.stroke){
-                    self.checkpoint();self.doc.objects[index]=obj;
+                    self.checkpoint();self.doc.objects[index]=obj.clone();
                 }else{
                     self.status="Цвет должен быть в формате #RRGGBB".into();
                 }
