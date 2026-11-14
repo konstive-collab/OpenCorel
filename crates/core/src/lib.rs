@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, fs, io::{self, Write}, path::Path};
 
 pub mod svg_import;
+pub mod kdr;
 
 pub const SCHEMA_VERSION: u32 = 1;
 
