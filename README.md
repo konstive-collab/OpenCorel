@@ -1,47 +1,54 @@
 # OpenCorel
 
-**Experimental Rust vector graphics editor for posters, maps and large-format advertising.**
+**Independent, community-driven vector editor written in Rust**, focused on posters, maps and large-format advertising on low-end Windows and Linux workstations.
 
-[Русская версия](README.ru.md) · [Roadmap](docs/ROADMAP.md) · [Contributing](CONTRIBUTING.md) · [File formats](docs/FORMAT_SUPPORT.md)
+[Русский README](README.ru.md) · [Roadmap](docs/ROADMAP.md) · [Contributing](CONTRIBUTING.md) · [QA matrix](docs/QA_MATRIX.md) · [Compatibility](docs/FORMAT_SUPPORT.md)
 
-OpenCorel is an independent community-driven Rust experiment designed to explore low-resource, cross-platform vector drawing workflows for print shops and design departments.
+> **Alpha / experimental software — not a full CorelDRAW replacement.** No affiliation with Corel Corporation. OpenCorel is a working title; its trademark status needs review before distribution.
 
-> **Not production ready.** No CDR/CMX/AI/PDF import or export, no print-ready CMYK/PDF/X and no validated Windows 7 support yet. No affiliation with Corel Corporation.
+## Current capabilities (v0.2 development preview)
 
-## Present capabilities
+- Familiar graphics-workspace layout: menu, properties bar, vertical toolbox, layers/objects panel, swatches, rulers, status bar and page tab.
+- Rectangle, ellipse, text, polyline and Bézier editing; editable control points in object properties.
+- Object ordering, duplication, undo/redo, visible/locked layers and keyboard shortcuts.
+- Large page sizes specified in **millimetres**, grid, snapping and pan/zoom.
+- Native open/save dialogs, OCD document storage, subset SVG import, basic SVG export.
+- **RGB vector PDF proof export**, with a current 5,000 mm page dimension limit; not PDF/X and not certified for print shops.
+- Cached triangulation for filled closed contours, safer temporary-file saves and stronger geometry checks.
+- Automated Windows/Linux unit tests and builds, plus a CLI benchmark for document-engine performance.
 
-- Workspace with independent document core and native desktop GUI.
-- Rectangle, ellipse and text objects, object selection, drag to move and property changes.
-- Millimetre-based sheet dimensions (including large advertising banners).
-- OCD (experimental JSON) open/save, basic SVG export.
-- CLI inspector, document example, test suite and GitHub Actions builds for Windows and Linux.
+## Not yet implemented
 
-## Run
+Native CDR read/write or precise cross-version CorelDRAW interoperability; AI/CMX/EPS/PSD and raster artwork workflows; multipage documents; professional font layout; verified CMYK/ICC/PDF/X print pipeline; 32-bit and Windows 7 compatibility. We need lawful CDR sample files and actual printed test jobs before any compatibility percentage can be stated.
 
-Install stable Rust. On Linux, install graphics/windowing development libraries for eframe.
+## Build and run
 
-~~~sh
+Install stable Rust and Git.
+
+```sh
+git clone https://github.com/konstive-collab/OpenCorel.git
+cd OpenCorel
 cargo test --workspace
 cargo run --release -p opencorel-desktop
-cargo run -- -h
-~~~
+```
 
-CLI example:
+Linux builds with GTK3 native file dialogs may require `libgtk-3-dev` plus standard X11/Wayland development packages. On Windows 10/11, release-build artifacts are uploaded by [GitHub Actions](https://github.com/konstive-collab/OpenCorel/actions) when checks succeed. These artifacts are not equivalent to a signed installer.
 
-~~~sh
-cargo run -p opencorel-cli -- new poster.ocd
-cargo run -p opencorel-cli -- inspect poster.ocd
-cargo run -p opencorel-cli -- export-svg poster.ocd poster.svg
-~~~
+CLI examples:
 
-The GUI's file field accepts local file paths. It is a functional technical prototype, not a mature graphic design workflow.
+```sh
+cargo run --release -p opencorel-cli -- new poster.ocd
+cargo run --release -p opencorel-cli -- inspect poster.ocd
+cargo run --release -p opencorel-cli -- export-svg poster.ocd poster.svg
+cargo run --release -p opencorel-cli -- export-pdf poster.ocd poster.pdf
+cargo run --release -p opencorel-cli -- import-svg poster.svg copy.ocd
+cargo run --release -p opencorel-cli -- benchmark 10000
+```
 
-## Platforms
+## Contributing
 
-Windows 10/11 x64 and Linux x64 are primary targets. Windows 7 compatibility requires a separate toolchain/renderer evaluation and on-device testing. Linux support does not mean any distribution is tested.
+Contributions are welcome in English or Russian. Read [CONTRIBUTING.md](CONTRIBUTING.md), review the [issue tracker](https://github.com/konstive-collab/OpenCorel/issues), and submit Pull Requests with tests.
 
-## Help build it
+The code is available under the MIT License. Do not upload proprietary source, copied CorelDRAW artwork/icons, unauthorized fonts, customer maps or confidential company documents.
 
-Contributions are welcome in English or Russian. See [CONTRIBUTING.md](CONTRIBUTING.md), [issues](https://github.com/konstive-collab/OpenCorel/issues), and [workflow runs](https://github.com/konstive-collab/OpenCorel/actions). Please do not upload proprietary code, fonts, commercial assets, or confidential customer designs.
-
-The source is offered under the MIT License. **OpenCorel is a temporary working name:** trademark clearance and possible rebranding are needed before distribution.
+This is an **independent clean-room-inspired implementation**, not a copy of CorelDRAW source code or a guarantee of file fidelity.
