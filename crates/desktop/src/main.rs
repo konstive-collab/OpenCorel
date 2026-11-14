@@ -540,6 +540,45 @@ impl eframe::App for Editor{
         self.canvas(ctx);
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn grid_snapping_uses_millimetres(){
+        let mut editor=Editor::default();
+        editor.snap_grid=true;
+        assert_eq!(editor.snapped(Point{x:14.0,y:26.0}),
+            Point{x:10.0,y:30.0});
+        editor.snap_grid=false;
+        assert_eq!(editor.snapped(Point{x:14.0,y:26.0}),
+            Point{x:14.0,y:26.0});
+    }
+    #[test]
+    fn undo_redo_recovers_geometry(){
+        let mut editor=Editor::default();
+        let original=editor.doc.objects.len();
+        editor.add_shape(Shape::Rectangle{x:1.0,y:1.0,w:10.0,h:10.0},Style::default());
+        assert_eq!(editor.doc.objects.len(),original+1);
+        editor.undo();
+        assert_eq!(editor.doc.objects.len(),original);
+        editor.redo();
+        assert_eq!(editor.doc.objects.len(),original+1);
+    }
+    #[test]
+    fn concave_polygon_fill_is_triangulated(){
+        let xy:Vec<f64>=vec![0.0,0.0, 20.0,0.0, 20.0,20.0, 10.0,5.0, 0.0,20.0];
+        let indices=earcutr::earcut(&xy,&[],2).unwrap();
+        assert_eq!(indices.len(),9);
+        let mut area=0.0;
+        for t in indices.chunks_exact(3){
+            let a=(xy[2*t[0]],xy[2*t[0]+1]);
+            let b=(xy[2*t[1]],xy[2*t[1]+1]);
+            let c=(xy[2*t[2]],xy[2*t[2]+1]);
+            area+=((b.0-a.0)*(c.1-a.1)-(b.1-a.1)*(c.0-a.0)).abs()*0.5;
+        }
+        assert!((area-250.0).abs()<0.001);
+    }
+}
 fn main()->eframe::Result<()>{
     let options=eframe::NativeOptions{
         viewport:egui::ViewportBuilder::default().with_inner_size([1280.0,780.0])
