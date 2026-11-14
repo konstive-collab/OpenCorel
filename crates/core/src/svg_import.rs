@@ -197,7 +197,7 @@ pub fn parse_svg(xml:&str)->Result<Document,String>{
                 !nums.iter().all(|v|v.is_finite()){return Err("Invalid SVG viewBox".into());}
             ViewBox{x:nums[0],y:nums[1],sx:width/nums[2],sy:height/nums[3]}
         },
-        None=>ViewBox{x:0.0,y:0.0,sx:1.0,sy:1.0},
+        None=>ViewBox{x:0.0,y:0.0,sx:25.4/96.0,sy:25.4/96.0},
     };
     let mut doc=Document::default();
     doc.name="Imported SVG".into();
@@ -221,6 +221,9 @@ pub fn parse_svg(xml:&str)->Result<Document,String>{
         match name {
             "svg"|"g"|"title"|"desc"|"metadata"=>{},
             "rect"=>{
+                if node.attribute("rx").is_some() || node.attribute("ry").is_some(){
+                    return Err("SVG rounded rectangles are not supported yet".into());
+                }
                 let x=number_or(node,"x",0.0)?;let y=number_or(node,"y",0.0)?;
                 let w=required_number(node,"width")?;let h=required_number(node,"height")?;
                 if w<0.0||h<0.0{return Err("Negative rectangle dimensions".into());}
@@ -256,6 +259,9 @@ pub fn parse_svg(xml:&str)->Result<Document,String>{
                     value:node.text().unwrap_or("").to_string(),size_mm:size*vb.sy});
             }
             "path"=>{
+                if styles.as_ref().map(|s|s.fill.as_str())!=Some("none"){
+                    return Err("Filled SVG paths require a geometry fill renderer (not implemented)".into());
+                }
                 shapes=parse_path(node.attribute("d").ok_or("SVG path d missing")?,vb)?;
             }
             other=>return Err(format!("Unsupported SVG element: <{other}>")),
@@ -277,7 +283,7 @@ mod tests{
         doc.validate().unwrap();
     }
     #[test] fn bezier_path_roundtrip(){
-        let svg=r#"<svg width="100mm" height="100mm" viewBox="0 0 100 100"><path fill="none" stroke="#000000" d="M 10 10 C 20 20 30 20 40 10 L 50 50 Z"/></svg>"#;
+        let svg=r##"<svg width="100mm" height="100mm" viewBox="0 0 100 100"><path fill="none" stroke="#000000" d="M 10 10 C 20 20 30 20 40 10 L 50 50 Z"/></svg>"##;
         let doc=parse_svg(svg).unwrap();
         assert_eq!(doc.objects.len(),1);
         assert!(doc.to_svg().contains("C 20 20"));
