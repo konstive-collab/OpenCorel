@@ -265,6 +265,33 @@ impl Editor{
             Err(e)=>format!("Ошибка сохранения: {e}"),
         };
     }
+    fn open_picker(&mut self){
+        if let Some(path)=rfd::FileDialog::new()
+            .add_filter("OpenCorel", &["ocd"])
+            .add_filter("SVG", &["svg"])
+            .pick_file(){
+            self.file=path.to_string_lossy().into_owned();
+            if path.extension().and_then(|e|e.to_str())
+                .map(|e|e.eq_ignore_ascii_case("svg")).unwrap_or(false){
+                self.import_svg();
+            }else{self.open();}
+        }
+    }
+    fn save_as_picker(&mut self){
+        if let Some(path)=rfd::FileDialog::new()
+            .add_filter("OpenCorel (.ocd)", &["ocd"])
+            .set_file_name("project.ocd")
+            .save_file(){
+            self.file=path.with_extension("ocd").to_string_lossy().into_owned();
+            self.save();
+        }
+    }
+    fn import_svg_picker(&mut self){
+        if let Some(path)=rfd::FileDialog::new().add_filter("SVG", &["svg"]).pick_file(){
+            self.file=path.to_string_lossy().into_owned();
+            self.import_svg();
+        }
+    }
     fn open(&mut self){
         match Document::read(&self.file){
             Ok(d)=>{self.doc=d;self.selected=None;self.active_layer=1;
@@ -475,7 +502,8 @@ impl eframe::App for Editor{
         if undo{self.undo();}
         if redo{self.redo();}
         if ctx.input(|i|i.modifiers.command&&i.key_pressed(egui::Key::S)){self.save();}
-        if ctx.input(|i|i.modifiers.command&&i.key_pressed(egui::Key::O)){self.open();}
+        if ctx.input(|i|i.modifiers.command&&i.key_pressed(egui::Key::O)){self.open_picker();}
+        if ctx.input(|i|i.modifiers.command&&i.modifiers.shift&&i.key_pressed(egui::Key::S)){self.save_as_picker();}
         if !ctx.wants_keyboard_input() && ctx.input(|i|i.key_pressed(egui::Key::Delete)){
             if let Some(id)=self.selected{
                 if self.doc.layer(self.doc.objects.iter().find(|o|o.id==id).map(|o|o.layer_id).unwrap_or(0))

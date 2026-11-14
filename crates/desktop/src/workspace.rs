@@ -43,9 +43,10 @@ impl Editor {
                 ui.separator();
                 ui.menu_button("Файл",|ui|{
                     if ui.button("Новый                 Ctrl+N").clicked(){self.new_document();ui.close_menu();}
-                    if ui.button("Открыть OCD      Ctrl+O").clicked(){self.open();ui.close_menu();}
-                    if ui.button("Импорт SVG").clicked(){self.import_svg();ui.close_menu();}
+                    if ui.button("Открыть...         Ctrl+O").clicked(){self.open_picker();ui.close_menu();}
+                    if ui.button("Импорт SVG...").clicked(){self.import_svg_picker();ui.close_menu();}
                     if ui.button("Сохранить           Ctrl+S").clicked(){self.save();ui.close_menu();}
+                    if ui.button("Сохранить как...  Ctrl+Shift+S").clicked(){self.save_as_picker();ui.close_menu();}
                     if ui.button("Экспорт SVG").clicked(){self.svg();ui.close_menu();}
                     if ui.button("Экспорт PDF (RGB)").clicked(){self.pdf();ui.close_menu();}
                 });
@@ -88,13 +89,13 @@ impl Editor {
         egui::TopBottomPanel::top("main_toolbar").exact_height(40.0).show(ctx,|ui|{
             ui.horizontal(|ui|{
                 if ui.button("▤ Новый").on_hover_text("Ctrl+N").clicked(){self.new_document();}
-                if ui.button("▣ Открыть").on_hover_text("Ctrl+O").clicked(){self.open();}
+                if ui.button("▣ Открыть").on_hover_text("Ctrl+O").clicked(){self.open_picker();}
                 if ui.button("▣ Сохранить").on_hover_text("Ctrl+S").clicked(){self.save();}
                 ui.separator();
                 if ui.add_enabled(!self.undo.is_empty(),egui::Button::new("↶")).on_hover_text("Отменить").clicked(){self.undo();}
                 if ui.add_enabled(!self.redo.is_empty(),egui::Button::new("↷")).on_hover_text("Повторить").clicked(){self.redo();}
                 ui.separator();
-                if ui.button("Импорт SVG").clicked(){self.import_svg();}
+                if ui.button("Импорт SVG").clicked(){self.import_svg_picker();}
                 if ui.button("SVG ↗").on_hover_text("Экспорт SVG").clicked(){self.svg();}
                 if ui.button("PDF ↗").on_hover_text("PDF для просмотра (RGB, не PDF/X)").clicked(){self.pdf();}
                 ui.separator();

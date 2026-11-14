@@ -11,3 +11,5 @@ eframe = { version = "0.31", default-features = false, features = ["default_font
 opencorel-export = { path = "../export" }
 
 earcutr = "0.5"
+
+rfd = { version = "0.15.4", default-features = false, features = ["gtk3"] }
