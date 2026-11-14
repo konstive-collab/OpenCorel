@@ -280,7 +280,9 @@ impl Editor{
                 let mut locked=layer.locked;
                 ui.horizontal(|ui|{
                     ui.label(&layer.name);
-                    if ui.checkbox(&mut visible,"Вид.").changed() || ui.checkbox(&mut locked,"Зам.").changed(){
+                    let visibility_changed=ui.checkbox(&mut visible,"Вид.").changed();
+                    let lock_changed=ui.checkbox(&mut locked,"Зам.").changed();
+                    if visibility_changed || lock_changed {
                         self.checkpoint();
                         if let Some(l)=self.doc.layers.iter_mut().find(|l|l.id==id){
                             l.visible=visible;l.locked=locked;
@@ -339,6 +341,28 @@ impl Editor{
                     self.status="Цвет должен быть в формате #RRGGBB".into();
                 }
             }
+            ui.separator();
+            if ui.button("Дублировать").clicked(){
+                let mut shape=obj.shape.clone();
+                shape.translate(10.0,10.0);
+                self.add_shape(shape,obj.style.clone());
+            }
+            ui.horizontal(|ui|{
+                if ui.button("На передний план").clicked(){
+                    self.checkpoint();
+                    if index<self.doc.objects.len(){
+                        let object=self.doc.objects.remove(index);
+                        self.doc.objects.push(object);
+                    }
+                }
+                if ui.button("На задний план").clicked(){
+                    self.checkpoint();
+                    if index<self.doc.objects.len(){
+                        let object=self.doc.objects.remove(index);
+                        self.doc.objects.insert(0,object);
+                    }
+                }
+            });
             if ui.button("Удалить объект").clicked(){
                 self.checkpoint();self.doc.remove(id);self.selected=None;
             }
@@ -464,6 +488,16 @@ impl eframe::App for Editor{
             (i.key_pressed(egui::Key::Z)&&i.modifiers.shift)));
         if undo{self.undo();}
         if redo{self.redo();}
+        if ctx.input(|i|i.modifiers.command&&i.key_pressed(egui::Key::S)){self.save();}
+        if ctx.input(|i|i.modifiers.command&&i.key_pressed(egui::Key::O)){self.open();}
+        if !ctx.wants_keyboard_input() && ctx.input(|i|i.key_pressed(egui::Key::Delete)){
+            if let Some(id)=self.selected{
+                if self.doc.layer(self.doc.objects.iter().find(|o|o.id==id).map(|o|o.layer_id).unwrap_or(0))
+                    .map(|l|!l.locked).unwrap_or(false){
+                    self.checkpoint();self.doc.remove(id);self.selected=None;
+                }
+            }
+        }
         if ctx.input(|i|i.key_pressed(egui::Key::Escape)){
             self.curve_start=None;self.curve_draft=None;self.tool=Tool::Select;
         }
