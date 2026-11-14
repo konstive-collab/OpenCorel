@@ -195,6 +195,12 @@ pub fn parse_svg(xml:&str)->Result<Document,String>{
                 .map_err(|_|"Invalid SVG viewBox")?;
             if nums.len()!=4||nums[2]<=0.0||nums[3]<=0.0||
                 !nums.iter().all(|v|v.is_finite()){return Err("Invalid SVG viewBox".into());}
+            let ratio_x=width/nums[2];
+            let ratio_y=height/nums[3];
+            if (ratio_x-ratio_y).abs()>ratio_x.max(ratio_y)*0.005 &&
+                root.attribute("preserveAspectRatio")!=Some("none"){
+                return Err("SVG aspect-ratio alignment is not supported; supply a matching viewBox or preserveAspectRatio=none".into());
+            }
             ViewBox{x:nums[0],y:nums[1],sx:width/nums[2],sy:height/nums[3]}
         },
         None=>ViewBox{x:0.0,y:0.0,sx:25.4/96.0,sy:25.4/96.0},
@@ -209,7 +215,11 @@ pub fn parse_svg(xml:&str)->Result<Document,String>{
             || style_field(node,"opacity").is_some()
             || style_field(node,"fill-opacity").is_some()
             || style_field(node,"stroke-opacity").is_some()
-            || style_field(node,"filter").is_some(){
+            || style_field(node,"filter").is_some()
+            || style_field(node,"display").is_some()
+            || style_field(node,"visibility").is_some()
+            || style_field(node,"stroke-dasharray").is_some()
+            || style_field(node,"fill-rule").is_some(){
             return Err(format!("Unsupported SVG effect on <{}>",node.tag_name().name()));
         }
         let name=node.tag_name().name();
@@ -287,6 +297,10 @@ mod tests{
         let doc=parse_svg(svg).unwrap();
         assert_eq!(doc.objects.len(),1);
         assert!(doc.to_svg().contains("C 20 20"));
+    }
+    #[test] fn reject_unhandled_viewbox_alignment(){
+        let svg=r#"<svg width="200mm" height="100mm" viewBox="0 0 100 100"><rect width="100" height="100"/></svg>"#;
+        assert!(parse_svg(svg).unwrap_err().contains("aspect-ratio"));
     }
     #[test] fn reject_dtd_and_unsupported_arc(){
         assert!(parse_svg(r#"<!DOCTYPE svg [<!ENTITY x "hi">]><svg width="100mm" height="100mm">&x;</svg>"#).is_err());
