@@ -3,6 +3,8 @@
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, fs, io, path::Path};
 
+pub mod svg_import;
+
 pub const SCHEMA_VERSION: u32 = 1;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -184,7 +186,7 @@ impl Document {
         for o in &self.objects {
             if o.id==0 || o.id>=self.next_id || !ids.insert(o.id) {return Err("Invalid object ID".into());}
             if !layer_ids.contains(&o.layer_id){return Err("Object references unknown layer".into());}
-            if !valid_color(&o.style.fill) || !valid_color(&o.style.stroke)
+            if !valid_paint(&o.style.fill) || !valid_paint(&o.style.stroke)
                 || !o.style.stroke_width_mm.is_finite()
                 || !(0.0..=1000.0).contains(&o.style.stroke_width_mm) {
                 return Err("Invalid style".into());
@@ -258,6 +260,7 @@ impl Document {
         out.push_str("</svg>\n");out
     }
 }
+pub fn valid_paint(paint:&str)->bool{paint=="none" || valid_color(paint)}
 pub fn valid_color(color:&str)->bool{
     color.len()==7 && color.starts_with('#')
       && color.as_bytes()[1..].iter().all(u8::is_ascii_hexdigit)
