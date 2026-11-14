@@ -1,6 +1,8 @@
 use eframe::egui::{self,Align2,Color32,FontId,Pos2,Rect,Sense,Stroke,Vec2};
 use opencorel_core::{Bounds,CubicSegment,Document,Object,Point,Shape,Style,valid_color,valid_paint};
 use std::f32::consts::TAU;
+mod workspace;
+use workspace::InspectorTab;
 
 #[derive(Clone,Copy,PartialEq)]
 enum Tool { Select, Rect, Ellipse, Text, Curve }
@@ -21,6 +23,12 @@ struct Editor{
     pan:Vec2,
     undo:Vec<Document>,
     redo:Vec<Document>,
+    inspector_tab:InspectorTab,
+    show_grid:bool,
+    snap_grid:bool,
+    show_rulers:bool,
+    light_theme:bool,
+    cursor_mm:Option<Point>,
 }
 impl Default for Editor{
     fn default()->Self{
@@ -34,7 +42,9 @@ impl Default for Editor{
             text:"Новый текст".into(),status:"Экспериментальный прототип".into(),
             zoom:1.0,drag_start:None,creation_start:None,
             curve_start:None,curve_draft:None,active_layer:1,pan:Vec2::ZERO,
-            undo:Vec::new(),redo:Vec::new()}
+            undo:Vec::new(),redo:Vec::new(),
+            inspector_tab:InspectorTab::Objects,show_grid:false,snap_grid:false,
+            show_rulers:true,light_theme:true,cursor_mm:None}
     }
 }
 #[derive(Clone,Copy)]
@@ -227,165 +237,63 @@ impl Editor{
             Err(e)=>format!("Неверный документ: {e}"),
         }
     }
-    fn toolbar(&mut self,ctx:&egui::Context){
-        egui::TopBottomPanel::top("top").show(ctx,|ui|{
-            ui.horizontal_wrapped(|ui|{
-                ui.heading("OpenCorel");
-                ui.separator();
-                if ui.button("Новый").clicked(){self.checkpoint();self.doc=Document::default();self.selected=None;
-                    self.active_layer=1;self.curve_start=None;self.curve_draft=None;}
-                if ui.button("Открыть").clicked(){self.open();}
-                if ui.button("Сохранить").clicked(){self.save();}
-                if ui.button("Экспорт SVG").clicked(){self.svg();}
-                if ui.button("Импорт SVG").clicked(){self.import_svg();}
-                ui.separator();
-                if ui.add_enabled(!self.undo.is_empty(),egui::Button::new("↶ Отменить")).clicked(){self.undo();}
-                if ui.add_enabled(!self.redo.is_empty(),egui::Button::new("↷ Повторить")).clicked(){self.redo();}
-                ui.separator();
-                ui.label("Файл:");
-                ui.add(egui::TextEdit::singleline(&mut self.file).desired_width(200.0));
-                ui.label(format!("{:.0} × {:.0} мм",self.doc.page.width_mm,self.doc.page.height_mm));
-                if ui.button("−").clicked(){self.zoom=(self.zoom/1.25).max(0.2);}
-                ui.label(format!("{}%",(self.zoom*100.0) as i32));
-                if ui.button("+").clicked(){self.zoom=(self.zoom*1.25).min(8.0);}
-            });
-        });
-        egui::TopBottomPanel::bottom("status").show(ctx,|ui|{
-            ui.label(format!("{} | Объектов: {}",self.status,self.doc.objects.len()));
-        });
+    fn snapped(&self,p:Point)->Point {
+        if self.snap_grid {
+            Point{x:(p.x/10.0).round()*10.0,y:(p.y/10.0).round()*10.0}
+        }else{p}
     }
-    fn sidebars(&mut self,ctx:&egui::Context){
-        egui::SidePanel::left("tools").default_width(160.0).show(ctx,|ui|{
-            ui.heading("Инструменты");ui.separator();
-            ui.selectable_value(&mut self.tool,Tool::Select,"Выделение");
-            ui.selectable_value(&mut self.tool,Tool::Rect,"Прямоугольник");
-            ui.selectable_value(&mut self.tool,Tool::Ellipse,"Эллипс");
-            ui.selectable_value(&mut self.tool,Tool::Text,"Текст");
-            if ui.selectable_value(&mut self.tool,Tool::Curve,"Кривая Безье").clicked(){
-                self.curve_start=None;self.curve_draft=None;
-            }
-            if self.tool==Tool::Curve{ui.small("Точки: щелчок. Завершить: двойной щелчок / Esc");}
-            if self.tool==Tool::Text{ui.text_edit_multiline(&mut self.text);}
-            ui.separator();ui.heading("Страница");
-            let mut w=self.doc.page.width_mm;
-            let mut h=self.doc.page.height_mm;
-            if ui.add(egui::DragValue::new(&mut w).range(1.0..=100_000.0).suffix(" мм")).changed(){
-                self.checkpoint();self.doc.page.width_mm=w;
-            }
-            if ui.add(egui::DragValue::new(&mut h).range(1.0..=100_000.0).suffix(" мм")).changed(){
-                self.checkpoint();self.doc.page.height_mm=h;
-            }
-            if ui.button("Баннер 3×2 м").clicked(){
-                self.checkpoint();
-                self.doc.page.width_mm=3000.0;self.doc.page.height_mm=2000.0;
-            }
-            ui.separator();
-            ui.heading("Слои");
-            let current=self.doc.layer(self.active_layer).map(|l|l.name.clone()).unwrap_or_default();
-            egui::ComboBox::from_id_salt("active_layer").selected_text(current).show_ui(ui,|ui|{
-                for layer in &self.doc.layers{
-                    ui.selectable_value(&mut self.active_layer,layer.id,&layer.name);
-                }
-            });
-            if ui.button("+ Добавить слой").clicked(){
-                self.checkpoint();
-                let name=format!("Слой {}",self.doc.layers.len()+1);
-                self.active_layer=self.doc.add_layer(name);
-            }
-            let ids:Vec<u64>=self.doc.layers.iter().map(|l|l.id).collect();
-            for id in ids{
-                let Some(layer)=self.doc.layer(id).cloned() else {continue;};
-                let mut visible=layer.visible;
-                let mut locked=layer.locked;
-                ui.horizontal(|ui|{
-                    ui.label(&layer.name);
-                    let visibility_changed=ui.checkbox(&mut visible,"Вид.").changed();
-                    let lock_changed=ui.checkbox(&mut locked,"Зам.").changed();
-                    if visibility_changed || lock_changed {
-                        self.checkpoint();
-                        if let Some(l)=self.doc.layers.iter_mut().find(|l|l.id==id){
-                            l.visible=visible;l.locked=locked;
-                        }
-                    }
-                });
-            }
-        });
-        egui::SidePanel::right("properties").default_width(245.0).show(ctx,|ui|{
-            ui.heading("Свойства");
-            let Some(id)=self.selected else {ui.label("Выберите объект");return;};
-            let Some(index)=self.doc.objects.iter().position(|o|o.id==id) else {
-                self.selected=None;return;
-            };
-            let mut obj=self.doc.objects[index].clone();
-            let mut changed=false;
-            match &mut obj.shape{
-                Shape::Rectangle{x,y,w,h}|Shape::Ellipse{x,y,w,h}=>{
-                    for (label,value) in [("X",x),("Y",y),("Ширина",w),("Высота",h)] {
-                        ui.horizontal(|ui|{ui.label(label);changed|=ui.add(egui::DragValue::new(value).speed(1.0)).changed();});
-                    }
-                }
-                Shape::Text{x,y,value,size_mm}=>{
-                    changed|=ui.text_edit_multiline(value).changed();
-                    for (label,val) in [("X",x),("Y",y),("Размер",size_mm)] {
-                        ui.horizontal(|ui|{ui.label(label);changed|=ui.add(egui::DragValue::new(val).speed(1.0)).changed();});
-                    }
-                }
-                Shape::Polyline{points,..}=>{ui.label(format!("Узлов: {}",points.len()));}
-                Shape::Bezier{start,segments,closed}=>{
-                    ui.label(format!("Узлов кривой: {}",segments.len()+1));
-                    changed|=ui.checkbox(closed,"Замкнуть кривую").changed();
-                    changed|=ui.add(egui::DragValue::new(&mut start.x).prefix("X: ")).changed();
-                    changed|=ui.add(egui::DragValue::new(&mut start.y).prefix("Y: ")).changed();
-                    for (i,seg) in segments.iter_mut().enumerate(){
-                        ui.collapsing(format!("Сегмент {}",i+1),|ui|{
-                            for (label,point) in [("Ручка 1",&mut seg.control1),
-                                                  ("Ручка 2",&mut seg.control2),("Конец",&mut seg.end)] {
-                                ui.label(label);
-                                changed|=ui.add(egui::DragValue::new(&mut point.x).prefix("X: ")).changed();
-                                changed|=ui.add(egui::DragValue::new(&mut point.y).prefix("Y: ")).changed();
-                            }
-                        });
-                    }
+    fn draw_grid_rulers(&self,painter:&egui::Painter, page:&egui::Painter,
+        v:View, area:Rect){
+        if self.show_grid {
+            let mut step=10.0f32;
+            while step*v.scale<14.0 {step*=2.0;}
+            let nx=(self.doc.page.width_mm/step).ceil().min(1200.0) as usize;
+            let ny=(self.doc.page.height_mm/step).ceil().min(1200.0) as usize;
+            let grid_color=Color32::from_gray(223);
+            for i in 0..=nx {
+                let x=v.screen(Point{x:i as f32*step,y:0.0}).x;
+                if x>=v.rect.left()&&x<=v.rect.right() {
+                    page.line_segment([Pos2::new(x,v.rect.top()),Pos2::new(x,v.rect.bottom())],
+                        Stroke::new(0.6,grid_color));
                 }
             }
-            ui.label("Заливка #RRGGBB или none");
-            changed|=ui.text_edit_singleline(&mut obj.style.fill).changed();
-            ui.label("Контур #RRGGBB или none");
-            changed|=ui.text_edit_singleline(&mut obj.style.stroke).changed();
-            changed|=ui.add(egui::DragValue::new(&mut obj.style.stroke_width_mm).speed(0.1).range(0.0..=1000.0)).changed();
-            if changed{
-                if valid_paint(&obj.style.fill)&&valid_paint(&obj.style.stroke){
-                    self.checkpoint();self.doc.objects[index]=obj.clone();
-                }else{
-                    self.status="Цвет: #RRGGBB или none".into();
+            for i in 0..=ny {
+                let y=v.screen(Point{x:0.0,y:i as f32*step}).y;
+                if y>=v.rect.top()&&y<=v.rect.bottom() {
+                    page.line_segment([Pos2::new(v.rect.left(),y),Pos2::new(v.rect.right(),y)],
+                        Stroke::new(0.6,grid_color));
                 }
             }
-            ui.separator();
-            if ui.button("Дублировать").clicked(){
-                let mut shape=obj.shape.clone();
-                shape.translate(10.0,10.0);
-                self.add_shape(shape,obj.style.clone());
-            }
-            ui.horizontal(|ui|{
-                if ui.button("На передний план").clicked(){
-                    self.checkpoint();
-                    if index<self.doc.objects.len(){
-                        let object=self.doc.objects.remove(index);
-                        self.doc.objects.push(object);
-                    }
+        }
+        if self.show_rulers {
+            let top=Rect::from_min_max(area.min,Pos2::new(area.max.x,area.min.y+24.0));
+            let left=Rect::from_min_max(Pos2::new(area.min.x,area.min.y+24.0),
+                Pos2::new(area.min.x+25.0,area.max.y));
+            painter.rect_filled(top,0.0,Color32::from_gray(210));
+            painter.rect_filled(left,0.0,Color32::from_gray(210));
+            let mut step=10.0f32;
+            while step*v.scale<35.0 {step*=2.0;}
+            let xcount=(self.doc.page.width_mm/step).ceil().min(1200.0) as usize;
+            let ycount=(self.doc.page.height_mm/step).ceil().min(1200.0) as usize;
+            for i in 0..=xcount{
+                let x=v.screen(Point{x:i as f32*step,y:0.0}).x;
+                if x>=left.right()&&x<=top.right() {
+                    painter.line_segment([Pos2::new(x,top.bottom()),Pos2::new(x,top.bottom()-7.0)],
+                        Stroke::new(1.0,Color32::DARK_GRAY));
+                    painter.text(Pos2::new(x+2.0,top.top()+3.0),Align2::LEFT_TOP,
+                        format!("{:.0}",i as f32*step),FontId::monospace(9.0),Color32::DARK_GRAY);
                 }
-                if ui.button("На задний план").clicked(){
-                    self.checkpoint();
-                    if index<self.doc.objects.len(){
-                        let object=self.doc.objects.remove(index);
-                        self.doc.objects.insert(0,object);
-                    }
-                }
-            });
-            if ui.button("Удалить объект").clicked(){
-                self.checkpoint();self.doc.remove(id);self.selected=None;
             }
-        });
+            for i in 0..=ycount{
+                let y=v.screen(Point{x:0.0,y:i as f32*step}).y;
+                if y>=left.top()&&y<=left.bottom() {
+                    painter.line_segment([Pos2::new(left.right()-7.0,y),Pos2::new(left.right(),y)],
+                        Stroke::new(1.0,Color32::DARK_GRAY));
+                    painter.text(Pos2::new(left.left()+1.0,y+2.0),Align2::LEFT_TOP,
+                        format!("{:.0}",i as f32*step),FontId::monospace(9.0),Color32::DARK_GRAY);
+                }
+            }
+        }
     }
     fn canvas(&mut self,ctx:&egui::Context){
         egui::CentralPanel::default().show(ctx,|ui|{
@@ -401,10 +309,15 @@ impl Editor{
             if response.dragged_by(egui::PointerButton::Middle){
                 self.pan+=ctx.input(|i|i.pointer.delta());
             }
-            let v=View::new(response.rect,&self.doc,self.zoom,self.pan);
+            let working=if self.show_rulers{
+                Rect::from_min_max(response.rect.min+Vec2::new(25.0,24.0),response.rect.max)
+            }else{response.rect};
+            let v=View::new(working,&self.doc,self.zoom,self.pan);
+            self.cursor_mm=response.hover_pos().map(|p|v.mm(p));
             painter.rect_filled(v.rect,0.0,Color32::WHITE);
             outline(&painter,v.rect,Color32::GRAY,1.0);
-            let page_painter=painter.with_clip_rect(v.rect.intersect(response.rect));
+            let page_painter=painter.with_clip_rect(v.rect.intersect(working));
+            self.draw_grid_rulers(&painter,&page_painter,v,response.rect);
             for obj in self.doc.visible_objects(){
                 if v.bounds(obj.shape.bounds()).intersects(v.rect.intersect(response.rect)){
                     paint(&page_painter,obj,v);
@@ -420,7 +333,7 @@ impl Editor{
             if response.drag_started_by(egui::PointerButton::Primary){
                 if let Some(pos)=response.interact_pointer_pos(){
                     if v.rect.contains(pos){
-                        let p=v.mm(pos);
+                        let p=self.snapped(v.mm(pos));
                         match self.tool{
                             Tool::Select=>{
                                 self.selected=self.doc.hit_test(p,2.0);
@@ -449,7 +362,7 @@ impl Editor{
             }
             if response.dragged_by(egui::PointerButton::Primary){
                 if let Some(pos)=response.interact_pointer_pos(){
-                    let now=v.mm(pos);
+                    let now=self.snapped(v.mm(pos));
                     if let Some((p,id))=self.creation_start{
                         let x=p.x.min(now.x);let y=p.y.min(now.y);
                         let w=(p.x-now.x).abs().max(0.1);
@@ -481,7 +394,7 @@ impl Editor{
             if response.clicked() && !response.double_clicked(){
                 if let Some(pos)=response.interact_pointer_pos(){
                     if v.rect.contains(pos){
-                        let p=v.mm(pos);
+                        let p=self.snapped(v.mm(pos));
                         let shape=match self.tool{
                             Tool::Select=>{self.selected=self.doc.hit_test(p,2.0);return;},
                             Tool::Curve=>{self.curve_click(p);return;},
@@ -520,7 +433,23 @@ impl eframe::App for Editor{
         if ctx.input(|i|i.key_pressed(egui::Key::Escape)){
             self.curve_start=None;self.curve_draft=None;self.tool=Tool::Select;
         }
-        self.toolbar(ctx);self.sidebars(ctx);self.canvas(ctx);
+        if ctx.style().visuals.dark_mode==self.light_theme {
+            ctx.set_visuals(if self.light_theme{egui::Visuals::light()}else{egui::Visuals::dark()});
+        }
+        if !ctx.wants_keyboard_input(){
+            if ctx.input(|i|i.modifiers.command&&i.key_pressed(egui::Key::N)){self.new_document();}
+            if ctx.input(|i|i.modifiers.command&&i.key_pressed(egui::Key::D)){self.duplicate_selection();}
+            if ctx.input(|i|i.key_pressed(egui::Key::F4)){self.fit_page();}
+            if ctx.input(|i|i.key_pressed(egui::Key::F6)){self.change_tool(Tool::Rect);}
+            if ctx.input(|i|i.key_pressed(egui::Key::F7)){self.change_tool(Tool::Ellipse);}
+            if ctx.input(|i|i.key_pressed(egui::Key::F8)){self.change_tool(Tool::Text);}
+        }
+        self.top_workspace(ctx);
+        self.tool_sidebar(ctx);
+        self.color_palette(ctx);
+        self.inspector(ctx);
+        self.workspace_footer(ctx);
+        self.canvas(ctx);
     }
 }
 fn main()->eframe::Result<()>{
