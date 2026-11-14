@@ -13,3 +13,6 @@ opencorel-export = { path = "../export" }
 earcutr = "0.5"
 
 rfd = { version = "0.15.4", default-features = false, features = ["gtk3"] }
+
+opencorel-formats = { path = "../formats" }
+resvg = "0.48"

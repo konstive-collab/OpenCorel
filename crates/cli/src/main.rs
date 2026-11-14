@@ -1,6 +1,7 @@
 use opencorel_core::{Document,Shape,Style};
 use std::{env,process::ExitCode,time::Instant};
 use opencorel_core::Point;
+use opencorel_formats::{open_any,save_document};
 
 fn main()->ExitCode{
     let args:Vec<_>=env::args().collect();
@@ -10,20 +11,24 @@ fn main()->ExitCode{
             let mut d=Document::default();
             d.add(Shape::Text{x:40.0,y:40.0,value:"OpenCorel".into(),size_mm:30.0},
                 Style::default());
-            d.write(path)
+            save_document(&d,path)
         }
-        [_,op,path] if op=="inspect" => Document::read(path).map(|d|{
-            println!("{}: {} x {} mm; {} objects",d.name,d.page.width_mm,d.page.height_mm,d.objects.len());
+        [_,op,path] if op=="inspect" => open_any(path).map(|r|{
+            println!("{}: {} x {} mm; {} objects",
+                r.document.name,r.document.page.width_mm,r.document.page.height_mm,r.document.objects.len());
+            println!("Import quality: {:?}. {}",r.quality,r.warning);
         }),
-        [_,op,src,dst] if op=="import-svg" => std::fs::read_to_string(src)
-            .map_err(|e|e.to_string())
-            .and_then(|svg|opencorel_core::svg_import::parse_svg(&svg))
-            .and_then(|doc|doc.write(dst)),
-        [_,op,src,dst] if op=="export-pdf" => Document::read(src)
-            .and_then(|d|opencorel_export::export_pdf(&d,dst)),
-        [_,op,src,dst] if op=="export-svg" => Document::read(src)
-            .and_then(|d|d.export_svg(dst).map_err(|e|e.to_string())),
-        _=>{eprintln!("Usage:\n  opencorel-cli benchmark COUNT\n  opencorel-cli new FILE.ocd\n  opencorel-cli inspect FILE.ocd\n  opencorel-cli export-svg FILE.ocd FILE.svg\n  opencorel-cli export-pdf FILE.ocd FILE.pdf\n  opencorel-cli import-svg FILE.svg FILE.ocd");
+        [_,op,src,dst] if op=="convert" => open_any(src).and_then(|r|{
+            if !r.warning.is_empty(){eprintln!("NOTE: {}",r.warning);}
+            save_document(&r.document,dst)
+        }),
+        [_,op,src,dst] if op=="import-svg" => open_any(src)
+            .and_then(|r|save_document(&r.document,dst)),
+        [_,op,src,dst] if op=="export-pdf" => open_any(src)
+            .and_then(|r|save_document(&r.document,dst)),
+        [_,op,src,dst] if op=="export-svg" => open_any(src)
+            .and_then(|r|save_document(&r.document,dst)),
+        _=>{eprintln!("Usage:\n  opencorel-cli benchmark COUNT\n  opencorel-cli new FILE.kdr\n  opencorel-cli inspect FILE.kdr\n  opencorel-cli convert INPUT OUTPUT\n  opencorel-cli export-svg FILE.kdr FILE.svg\n  opencorel-cli export-pdf FILE.kdr FILE.pdf\n  opencorel-cli import-svg FILE.svg FILE.kdr");
             return ExitCode::FAILURE;}
     };
     match outcome{
