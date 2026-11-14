@@ -8,3 +8,5 @@ license.workspace = true
 opencorel-core = { path = "../core" }
 
 opencorel-export = { path = "../export" }
+
+opencorel-formats = { path = "../formats" }
