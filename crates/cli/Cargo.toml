@@ -6,3 +6,5 @@ license.workspace = true
 
 [dependencies]
 opencorel-core = { path = "../core" }
+
+opencorel-export = { path = "../export" }

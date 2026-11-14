@@ -1,10 +1,42 @@
 use eframe::egui::{self,Align2,Color32,FontId,Pos2,Rect,Sense,Stroke,Vec2};
 use opencorel_core::{Bounds,CubicSegment,Document,Object,Point,Shape,Style,valid_color,valid_paint};
-use std::f32::consts::TAU;
+use std::{f32::consts::TAU,collections::HashMap,hash::{Hash,Hasher},collections::hash_map::DefaultHasher};
+mod workspace;
+use workspace::InspectorTab;
 
 #[derive(Clone,Copy,PartialEq)]
 enum Tool { Select, Rect, Ellipse, Text, Curve }
 
+#[derive(Default)]
+struct FillCache { entries:HashMap<u64,(u64,Vec<usize>)> }
+impl FillCache {
+    fn fill(&mut self,p:&egui::Painter,id:u64,pts:&[Point],v:View,color:Color32) {
+        if color.a()==0 || pts.len()<3{return;}
+        let mut hash=DefaultHasher::new();
+        pts.len().hash(&mut hash);
+        for pt in pts{
+            pt.x.to_bits().hash(&mut hash);
+            pt.y.to_bits().hash(&mut hash);
+        }
+        let key=hash.finish();
+        if self.entries.get(&id).map(|(old,_)|*old!=key).unwrap_or(true) {
+            let xy:Vec<f64>=pts.iter().flat_map(|p|[p.x as f64,p.y as f64]).collect();
+            let tri=earcutr::earcut(&xy,&[],2).unwrap_or_default();
+            self.entries.insert(id,(key,tri));
+        }
+        if let Some((_,indices))=self.entries.get(&id) {
+            if indices.is_empty(){return;}
+            let mut mesh=egui::Mesh::default();
+            mesh.reserve_vertices(pts.len());
+            mesh.reserve_triangles(indices.len()/3);
+            for &pt in pts{mesh.colored_vertex(v.screen(pt),color);}
+            for tri in indices.chunks_exact(3){
+                mesh.add_triangle(tri[0] as u32,tri[1] as u32,tri[2] as u32);
+            }
+            p.add(egui::Shape::mesh(mesh));
+        }
+    }
+}
 struct Editor{
     doc:Document,
     selected:Option<u64>,
@@ -21,6 +53,13 @@ struct Editor{
     pan:Vec2,
     undo:Vec<Document>,
     redo:Vec<Document>,
+    inspector_tab:InspectorTab,
+    show_grid:bool,
+    snap_grid:bool,
+    show_rulers:bool,
+    light_theme:bool,
+    cursor_mm:Option<Point>,
+    fill_cache:FillCache,
 }
 impl Default for Editor{
     fn default()->Self{
@@ -34,7 +73,9 @@ impl Default for Editor{
             text:"Новый текст".into(),status:"Экспериментальный прототип".into(),
             zoom:1.0,drag_start:None,creation_start:None,
             curve_start:None,curve_draft:None,active_layer:1,pan:Vec2::ZERO,
-            undo:Vec::new(),redo:Vec::new()}
+            undo:Vec::new(),redo:Vec::new(),
+            inspector_tab:InspectorTab::Objects,show_grid:false,snap_grid:false,
+            show_rulers:true,light_theme:true,cursor_mm:None,fill_cache:FillCache::default()}
     }
 }
 #[derive(Clone,Copy)]
@@ -78,9 +119,13 @@ fn cubic(p0:Point,p1:Point,p2:Point,p3:Point,t:f32)->Point {
     let d=t*t*t;
     Point{x:a*p0.x+b*p1.x+c*p2.x+d*p3.x,y:a*p0.y+b*p1.y+c*p2.y+d*p3.y}
 }
-fn paint(p:&egui::Painter,obj:&Object,v:View){
+fn paint(p:&egui::Painter,obj:&Object,v:View,cache:&mut FillCache){
     let fill=color(&obj.style.fill);
-    let stroke=Stroke::new(obj.style.stroke_width_mm*v.scale,color(&obj.style.stroke));
+    let stroke=if obj.style.stroke=="none" {
+        Stroke::new(0.0,Color32::TRANSPARENT)
+    } else {
+        Stroke::new(obj.style.stroke_width_mm*v.scale,color(&obj.style.stroke))
+    };
     match &obj.shape{
         Shape::Rectangle{x,y,w,h}=>{
             let r=v.bounds(Bounds{x:*x,y:*y,w:*w,h:*h});
@@ -101,24 +146,34 @@ fn paint(p:&egui::Painter,obj:&Object,v:View){
                 FontId::proportional((size_mm*v.scale).clamp(1.0,400.0)),fill);
         }
         Shape::Bezier{start,segments,closed}=>{
-            let mut vertices=vec![v.screen(*start)];
+            let mut contour=vec![*start];
             let mut previous=*start;
-            for segment in segments {
-                for i in 1..=32 {
-                    let t=(i as f32)/32.0;
-                    vertices.push(v.screen(cubic(previous,segment.control1,segment.control2,segment.end,t)));
+            let cap=(20_000usize/segments.len().max(1)).clamp(4,48);
+            for seg in segments {
+                let approx=((seg.end.x-previous.x).hypot(seg.end.y-previous.y)
+                    +(seg.control1.x-previous.x).hypot(seg.control1.y-previous.y)
+                    +(seg.control2.x-seg.end.x).hypot(seg.control2.y-seg.end.y))*v.scale;
+                let steps=((approx/10.0).ceil() as usize).clamp(4,cap);
+                for i in 1..=steps{
+                    contour.push(cubic(previous,seg.control1,seg.control2,seg.end,
+                        i as f32/steps as f32));
                 }
-                previous=segment.end;
+                previous=seg.end;
             }
-            if *closed{vertices.push(v.screen(*start));}
-            if vertices.len()>1 {
-                p.add(egui::Shape::line(vertices,Stroke::new(stroke.width.max(1.0),stroke.color)));
+            if *closed {cache.fill(p,obj.id,&contour,v,fill);}
+            if stroke.width>0.0 {
+                let mut vertices:Vec<Pos2>=contour.iter().map(|&pt|v.screen(pt)).collect();
+                if *closed{vertices.push(v.screen(*start));}
+                if vertices.len()>1{p.add(egui::Shape::line(vertices,stroke));}
             }
         }
         Shape::Polyline{points,closed}=>{
-            let mut ps:Vec<Pos2>=points.iter().map(|pt|v.screen(*pt)).collect();
-            if *closed && !ps.is_empty(){ps.push(ps[0]);}
-            if ps.len()>1{p.add(egui::Shape::line(ps,stroke));}
+            if *closed{cache.fill(p,obj.id,points,v,fill);}
+            if stroke.width>0.0{
+                let mut vertices:Vec<Pos2>=points.iter().map(|&pt|v.screen(pt)).collect();
+                if *closed && !vertices.is_empty(){vertices.push(vertices[0]);}
+                if vertices.len()>1{p.add(egui::Shape::line(vertices,stroke));}
+            }
         }
     }
 }
@@ -131,6 +186,7 @@ impl Editor{
     fn undo(&mut self){
         if let Some(prev)=self.undo.pop(){
             self.redo.push(std::mem::replace(&mut self.doc,prev));
+            self.fill_cache.entries.clear();
             self.selected=None;self.curve_draft=None;self.curve_start=None;
             self.status="Отменено".into();
         }
@@ -138,6 +194,7 @@ impl Editor{
     fn redo(&mut self){
         if let Some(next)=self.redo.pop(){
             self.undo.push(std::mem::replace(&mut self.doc,next));
+            self.fill_cache.entries.clear();
             self.selected=None;self.curve_draft=None;self.curve_start=None;
             self.status="Повторено".into();
         }
@@ -195,6 +252,7 @@ impl Editor{
             Ok(d)=>{
                 self.checkpoint();
                 self.doc=d;
+                self.fill_cache.entries.clear();
                 self.file=std::path::Path::new(&path).with_extension("ocd").to_string_lossy().into_owned();
                 self.selected=None;self.active_layer=1;
                 self.curve_start=None;self.curve_draft=None;
@@ -209,13 +267,50 @@ impl Editor{
             Err(e)=>format!("Ошибка сохранения: {e}"),
         };
     }
+    fn open_picker(&mut self){
+        if let Some(path)=rfd::FileDialog::new()
+            .add_filter("OpenCorel", &["ocd"])
+            .add_filter("SVG", &["svg"])
+            .pick_file(){
+            let previous=self.file.clone();
+            self.file=path.to_string_lossy().into_owned();
+            if path.extension().and_then(|e|e.to_str())
+                .map(|e|e.eq_ignore_ascii_case("svg")).unwrap_or(false){
+                self.import_svg();
+            }else{self.open();}
+            if self.status.starts_with("Ошибка"){self.file=previous;}
+        }
+    }
+    fn save_as_picker(&mut self){
+        if let Some(path)=rfd::FileDialog::new()
+            .add_filter("OpenCorel (.ocd)", &["ocd"])
+            .set_file_name("project.ocd")
+            .save_file(){
+            self.file=path.with_extension("ocd").to_string_lossy().into_owned();
+            self.save();
+        }
+    }
+    fn import_svg_picker(&mut self){
+        if let Some(path)=rfd::FileDialog::new().add_filter("SVG", &["svg"]).pick_file(){
+            self.file=path.to_string_lossy().into_owned();
+            self.import_svg();
+        }
+    }
     fn open(&mut self){
         match Document::read(&self.file){
             Ok(d)=>{self.doc=d;self.selected=None;self.active_layer=1;
+                self.fill_cache.entries.clear();
                 self.undo.clear();self.redo.clear();self.curve_start=None;self.curve_draft=None;
                 self.status="Открыто".into();},
             Err(e)=>self.status=format!("Ошибка открытия: {e}"),
         }
+    }
+    fn pdf(&mut self){
+        let path=std::path::Path::new(&self.file).with_extension("pdf");
+        self.status=match opencorel_export::export_pdf(&self.doc,&path){
+            Ok(())=>format!("PDF (RGB, не PDF/X) экспортирован: {}",path.display()),
+            Err(e)=>format!("Ошибка PDF: {e}"),
+        };
     }
     fn svg(&mut self){
         let path=std::path::Path::new(&self.file).with_extension("svg");
@@ -227,165 +322,63 @@ impl Editor{
             Err(e)=>format!("Неверный документ: {e}"),
         }
     }
-    fn toolbar(&mut self,ctx:&egui::Context){
-        egui::TopBottomPanel::top("top").show(ctx,|ui|{
-            ui.horizontal_wrapped(|ui|{
-                ui.heading("OpenCorel");
-                ui.separator();
-                if ui.button("Новый").clicked(){self.checkpoint();self.doc=Document::default();self.selected=None;
-                    self.active_layer=1;self.curve_start=None;self.curve_draft=None;}
-                if ui.button("Открыть").clicked(){self.open();}
-                if ui.button("Сохранить").clicked(){self.save();}
-                if ui.button("Экспорт SVG").clicked(){self.svg();}
-                if ui.button("Импорт SVG").clicked(){self.import_svg();}
-                ui.separator();
-                if ui.add_enabled(!self.undo.is_empty(),egui::Button::new("↶ Отменить")).clicked(){self.undo();}
-                if ui.add_enabled(!self.redo.is_empty(),egui::Button::new("↷ Повторить")).clicked(){self.redo();}
-                ui.separator();
-                ui.label("Файл:");
-                ui.add(egui::TextEdit::singleline(&mut self.file).desired_width(200.0));
-                ui.label(format!("{:.0} × {:.0} мм",self.doc.page.width_mm,self.doc.page.height_mm));
-                if ui.button("−").clicked(){self.zoom=(self.zoom/1.25).max(0.2);}
-                ui.label(format!("{}%",(self.zoom*100.0) as i32));
-                if ui.button("+").clicked(){self.zoom=(self.zoom*1.25).min(8.0);}
-            });
-        });
-        egui::TopBottomPanel::bottom("status").show(ctx,|ui|{
-            ui.label(format!("{} | Объектов: {}",self.status,self.doc.objects.len()));
-        });
+    fn snapped(&self,p:Point)->Point {
+        if self.snap_grid {
+            Point{x:(p.x/10.0).round()*10.0,y:(p.y/10.0).round()*10.0}
+        }else{p}
     }
-    fn sidebars(&mut self,ctx:&egui::Context){
-        egui::SidePanel::left("tools").default_width(160.0).show(ctx,|ui|{
-            ui.heading("Инструменты");ui.separator();
-            ui.selectable_value(&mut self.tool,Tool::Select,"Выделение");
-            ui.selectable_value(&mut self.tool,Tool::Rect,"Прямоугольник");
-            ui.selectable_value(&mut self.tool,Tool::Ellipse,"Эллипс");
-            ui.selectable_value(&mut self.tool,Tool::Text,"Текст");
-            if ui.selectable_value(&mut self.tool,Tool::Curve,"Кривая Безье").clicked(){
-                self.curve_start=None;self.curve_draft=None;
-            }
-            if self.tool==Tool::Curve{ui.small("Точки: щелчок. Завершить: двойной щелчок / Esc");}
-            if self.tool==Tool::Text{ui.text_edit_multiline(&mut self.text);}
-            ui.separator();ui.heading("Страница");
-            let mut w=self.doc.page.width_mm;
-            let mut h=self.doc.page.height_mm;
-            if ui.add(egui::DragValue::new(&mut w).range(1.0..=100_000.0).suffix(" мм")).changed(){
-                self.checkpoint();self.doc.page.width_mm=w;
-            }
-            if ui.add(egui::DragValue::new(&mut h).range(1.0..=100_000.0).suffix(" мм")).changed(){
-                self.checkpoint();self.doc.page.height_mm=h;
-            }
-            if ui.button("Баннер 3×2 м").clicked(){
-                self.checkpoint();
-                self.doc.page.width_mm=3000.0;self.doc.page.height_mm=2000.0;
-            }
-            ui.separator();
-            ui.heading("Слои");
-            let current=self.doc.layer(self.active_layer).map(|l|l.name.clone()).unwrap_or_default();
-            egui::ComboBox::from_id_salt("active_layer").selected_text(current).show_ui(ui,|ui|{
-                for layer in &self.doc.layers{
-                    ui.selectable_value(&mut self.active_layer,layer.id,&layer.name);
-                }
-            });
-            if ui.button("+ Добавить слой").clicked(){
-                self.checkpoint();
-                let name=format!("Слой {}",self.doc.layers.len()+1);
-                self.active_layer=self.doc.add_layer(name);
-            }
-            let ids:Vec<u64>=self.doc.layers.iter().map(|l|l.id).collect();
-            for id in ids{
-                let Some(layer)=self.doc.layer(id).cloned() else {continue;};
-                let mut visible=layer.visible;
-                let mut locked=layer.locked;
-                ui.horizontal(|ui|{
-                    ui.label(&layer.name);
-                    let visibility_changed=ui.checkbox(&mut visible,"Вид.").changed();
-                    let lock_changed=ui.checkbox(&mut locked,"Зам.").changed();
-                    if visibility_changed || lock_changed {
-                        self.checkpoint();
-                        if let Some(l)=self.doc.layers.iter_mut().find(|l|l.id==id){
-                            l.visible=visible;l.locked=locked;
-                        }
-                    }
-                });
-            }
-        });
-        egui::SidePanel::right("properties").default_width(245.0).show(ctx,|ui|{
-            ui.heading("Свойства");
-            let Some(id)=self.selected else {ui.label("Выберите объект");return;};
-            let Some(index)=self.doc.objects.iter().position(|o|o.id==id) else {
-                self.selected=None;return;
-            };
-            let mut obj=self.doc.objects[index].clone();
-            let mut changed=false;
-            match &mut obj.shape{
-                Shape::Rectangle{x,y,w,h}|Shape::Ellipse{x,y,w,h}=>{
-                    for (label,value) in [("X",x),("Y",y),("Ширина",w),("Высота",h)] {
-                        ui.horizontal(|ui|{ui.label(label);changed|=ui.add(egui::DragValue::new(value).speed(1.0)).changed();});
-                    }
-                }
-                Shape::Text{x,y,value,size_mm}=>{
-                    changed|=ui.text_edit_multiline(value).changed();
-                    for (label,val) in [("X",x),("Y",y),("Размер",size_mm)] {
-                        ui.horizontal(|ui|{ui.label(label);changed|=ui.add(egui::DragValue::new(val).speed(1.0)).changed();});
-                    }
-                }
-                Shape::Polyline{points,..}=>{ui.label(format!("Узлов: {}",points.len()));}
-                Shape::Bezier{start,segments,closed}=>{
-                    ui.label(format!("Узлов кривой: {}",segments.len()+1));
-                    changed|=ui.checkbox(closed,"Замкнуть кривую").changed();
-                    changed|=ui.add(egui::DragValue::new(&mut start.x).prefix("X: ")).changed();
-                    changed|=ui.add(egui::DragValue::new(&mut start.y).prefix("Y: ")).changed();
-                    for (i,seg) in segments.iter_mut().enumerate(){
-                        ui.collapsing(format!("Сегмент {}",i+1),|ui|{
-                            for (label,point) in [("Ручка 1",&mut seg.control1),
-                                                  ("Ручка 2",&mut seg.control2),("Конец",&mut seg.end)] {
-                                ui.label(label);
-                                changed|=ui.add(egui::DragValue::new(&mut point.x).prefix("X: ")).changed();
-                                changed|=ui.add(egui::DragValue::new(&mut point.y).prefix("Y: ")).changed();
-                            }
-                        });
-                    }
+    fn draw_grid_rulers(&self,painter:&egui::Painter, page:&egui::Painter,
+        v:View, area:Rect){
+        if self.show_grid {
+            let mut step=10.0f32;
+            while step*v.scale<14.0 {step*=2.0;}
+            let nx=(self.doc.page.width_mm/step).ceil().min(1200.0) as usize;
+            let ny=(self.doc.page.height_mm/step).ceil().min(1200.0) as usize;
+            let grid_color=Color32::from_gray(223);
+            for i in 0..=nx {
+                let x=v.screen(Point{x:i as f32*step,y:0.0}).x;
+                if x>=v.rect.left()&&x<=v.rect.right() {
+                    page.line_segment([Pos2::new(x,v.rect.top()),Pos2::new(x,v.rect.bottom())],
+                        Stroke::new(0.6,grid_color));
                 }
             }
-            ui.label("Заливка #RRGGBB или none");
-            changed|=ui.text_edit_singleline(&mut obj.style.fill).changed();
-            ui.label("Контур #RRGGBB или none");
-            changed|=ui.text_edit_singleline(&mut obj.style.stroke).changed();
-            changed|=ui.add(egui::DragValue::new(&mut obj.style.stroke_width_mm).speed(0.1).range(0.0..=1000.0)).changed();
-            if changed{
-                if valid_paint(&obj.style.fill)&&valid_paint(&obj.style.stroke){
-                    self.checkpoint();self.doc.objects[index]=obj.clone();
-                }else{
-                    self.status="Цвет: #RRGGBB или none".into();
+            for i in 0..=ny {
+                let y=v.screen(Point{x:0.0,y:i as f32*step}).y;
+                if y>=v.rect.top()&&y<=v.rect.bottom() {
+                    page.line_segment([Pos2::new(v.rect.left(),y),Pos2::new(v.rect.right(),y)],
+                        Stroke::new(0.6,grid_color));
                 }
             }
-            ui.separator();
-            if ui.button("Дублировать").clicked(){
-                let mut shape=obj.shape.clone();
-                shape.translate(10.0,10.0);
-                self.add_shape(shape,obj.style.clone());
-            }
-            ui.horizontal(|ui|{
-                if ui.button("На передний план").clicked(){
-                    self.checkpoint();
-                    if index<self.doc.objects.len(){
-                        let object=self.doc.objects.remove(index);
-                        self.doc.objects.push(object);
-                    }
+        }
+        if self.show_rulers {
+            let top=Rect::from_min_max(area.min,Pos2::new(area.max.x,area.min.y+24.0));
+            let left=Rect::from_min_max(Pos2::new(area.min.x,area.min.y+24.0),
+                Pos2::new(area.min.x+25.0,area.max.y));
+            painter.rect_filled(top,0.0,Color32::from_gray(210));
+            painter.rect_filled(left,0.0,Color32::from_gray(210));
+            let mut step=10.0f32;
+            while step*v.scale<35.0 {step*=2.0;}
+            let xcount=(self.doc.page.width_mm/step).ceil().min(1200.0) as usize;
+            let ycount=(self.doc.page.height_mm/step).ceil().min(1200.0) as usize;
+            for i in 0..=xcount{
+                let x=v.screen(Point{x:i as f32*step,y:0.0}).x;
+                if x>=left.right()&&x<=top.right() {
+                    painter.line_segment([Pos2::new(x,top.bottom()),Pos2::new(x,top.bottom()-7.0)],
+                        Stroke::new(1.0,Color32::DARK_GRAY));
+                    painter.text(Pos2::new(x+2.0,top.top()+3.0),Align2::LEFT_TOP,
+                        format!("{:.0}",i as f32*step),FontId::monospace(9.0),Color32::DARK_GRAY);
                 }
-                if ui.button("На задний план").clicked(){
-                    self.checkpoint();
-                    if index<self.doc.objects.len(){
-                        let object=self.doc.objects.remove(index);
-                        self.doc.objects.insert(0,object);
-                    }
-                }
-            });
-            if ui.button("Удалить объект").clicked(){
-                self.checkpoint();self.doc.remove(id);self.selected=None;
             }
-        });
+            for i in 0..=ycount{
+                let y=v.screen(Point{x:0.0,y:i as f32*step}).y;
+                if y>=left.top()&&y<=left.bottom() {
+                    painter.line_segment([Pos2::new(left.right()-7.0,y),Pos2::new(left.right(),y)],
+                        Stroke::new(1.0,Color32::DARK_GRAY));
+                    painter.text(Pos2::new(left.left()+1.0,y+2.0),Align2::LEFT_TOP,
+                        format!("{:.0}",i as f32*step),FontId::monospace(9.0),Color32::DARK_GRAY);
+                }
+            }
+        }
     }
     fn canvas(&mut self,ctx:&egui::Context){
         egui::CentralPanel::default().show(ctx,|ui|{
@@ -401,13 +394,18 @@ impl Editor{
             if response.dragged_by(egui::PointerButton::Middle){
                 self.pan+=ctx.input(|i|i.pointer.delta());
             }
-            let v=View::new(response.rect,&self.doc,self.zoom,self.pan);
+            let working=if self.show_rulers{
+                Rect::from_min_max(response.rect.min+Vec2::new(25.0,24.0),response.rect.max)
+            }else{response.rect};
+            let v=View::new(working,&self.doc,self.zoom,self.pan);
+            self.cursor_mm=response.hover_pos().map(|p|v.mm(p));
             painter.rect_filled(v.rect,0.0,Color32::WHITE);
             outline(&painter,v.rect,Color32::GRAY,1.0);
-            let page_painter=painter.with_clip_rect(v.rect.intersect(response.rect));
+            let page_painter=painter.with_clip_rect(v.rect.intersect(working));
+            self.draw_grid_rulers(&painter,&page_painter,v,response.rect);
             for obj in self.doc.visible_objects(){
                 if v.bounds(obj.shape.bounds()).intersects(v.rect.intersect(response.rect)){
-                    paint(&page_painter,obj,v);
+                    paint(&page_painter,obj,v,&mut self.fill_cache);
                 }
             }
             if let Some(id)=self.selected{
@@ -420,7 +418,7 @@ impl Editor{
             if response.drag_started_by(egui::PointerButton::Primary){
                 if let Some(pos)=response.interact_pointer_pos(){
                     if v.rect.contains(pos){
-                        let p=v.mm(pos);
+                        let p=self.snapped(v.mm(pos));
                         match self.tool{
                             Tool::Select=>{
                                 self.selected=self.doc.hit_test(p,2.0);
@@ -449,7 +447,7 @@ impl Editor{
             }
             if response.dragged_by(egui::PointerButton::Primary){
                 if let Some(pos)=response.interact_pointer_pos(){
-                    let now=v.mm(pos);
+                    let now=self.snapped(v.mm(pos));
                     if let Some((p,id))=self.creation_start{
                         let x=p.x.min(now.x);let y=p.y.min(now.y);
                         let w=(p.x-now.x).abs().max(0.1);
@@ -481,7 +479,7 @@ impl Editor{
             if response.clicked() && !response.double_clicked(){
                 if let Some(pos)=response.interact_pointer_pos(){
                     if v.rect.contains(pos){
-                        let p=v.mm(pos);
+                        let p=self.snapped(v.mm(pos));
                         let shape=match self.tool{
                             Tool::Select=>{self.selected=self.doc.hit_test(p,2.0);return;},
                             Tool::Curve=>{self.curve_click(p);return;},
@@ -507,9 +505,12 @@ impl eframe::App for Editor{
             (i.key_pressed(egui::Key::Z)&&i.modifiers.shift)));
         if undo{self.undo();}
         if redo{self.redo();}
-        if ctx.input(|i|i.modifiers.command&&i.key_pressed(egui::Key::S)){self.save();}
-        if ctx.input(|i|i.modifiers.command&&i.key_pressed(egui::Key::O)){self.open();}
-        if !ctx.wants_keyboard_input() && ctx.input(|i|i.key_pressed(egui::Key::Delete)){
+        let save_as=ctx.input(|i|i.modifiers.command&&i.modifiers.shift
+            && i.key_pressed(egui::Key::S));
+        if save_as{self.save_as_picker();}
+        else if ctx.input(|i|i.modifiers.command&&i.key_pressed(egui::Key::S)){self.save();}
+        if ctx.input(|i|i.modifiers.command&&i.key_pressed(egui::Key::O)){self.open_picker();}
+         if !ctx.wants_keyboard_input() && ctx.input(|i|i.key_pressed(egui::Key::Delete)){
             if let Some(id)=self.selected{
                 if self.doc.layer(self.doc.objects.iter().find(|o|o.id==id).map(|o|o.layer_id).unwrap_or(0))
                     .map(|l|!l.locked).unwrap_or(false){
@@ -520,7 +521,62 @@ impl eframe::App for Editor{
         if ctx.input(|i|i.key_pressed(egui::Key::Escape)){
             self.curve_start=None;self.curve_draft=None;self.tool=Tool::Select;
         }
-        self.toolbar(ctx);self.sidebars(ctx);self.canvas(ctx);
+        if ctx.style().visuals.dark_mode==self.light_theme {
+            ctx.set_visuals(if self.light_theme{egui::Visuals::light()}else{egui::Visuals::dark()});
+        }
+        if !ctx.wants_keyboard_input(){
+            if ctx.input(|i|i.modifiers.command&&i.key_pressed(egui::Key::N)){self.new_document();}
+            if ctx.input(|i|i.modifiers.command&&i.key_pressed(egui::Key::D)){self.duplicate_selection();}
+            if ctx.input(|i|i.key_pressed(egui::Key::F4)){self.fit_page();}
+            if ctx.input(|i|i.key_pressed(egui::Key::F6)){self.change_tool(Tool::Rect);}
+            if ctx.input(|i|i.key_pressed(egui::Key::F7)){self.change_tool(Tool::Ellipse);}
+            if ctx.input(|i|i.key_pressed(egui::Key::F8)){self.change_tool(Tool::Text);}
+        }
+        self.top_workspace(ctx);
+        self.tool_sidebar(ctx);
+        self.color_palette(ctx);
+        self.inspector(ctx);
+        self.workspace_footer(ctx);
+        self.canvas(ctx);
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn grid_snapping_uses_millimetres(){
+        let mut editor=Editor::default();
+        editor.snap_grid=true;
+        assert_eq!(editor.snapped(Point{x:14.0,y:26.0}),
+            Point{x:10.0,y:30.0});
+        editor.snap_grid=false;
+        assert_eq!(editor.snapped(Point{x:14.0,y:26.0}),
+            Point{x:14.0,y:26.0});
+    }
+    #[test]
+    fn undo_redo_recovers_geometry(){
+        let mut editor=Editor::default();
+        let original=editor.doc.objects.len();
+        editor.add_shape(Shape::Rectangle{x:1.0,y:1.0,w:10.0,h:10.0},Style::default());
+        assert_eq!(editor.doc.objects.len(),original+1);
+        editor.undo();
+        assert_eq!(editor.doc.objects.len(),original);
+        editor.redo();
+        assert_eq!(editor.doc.objects.len(),original+1);
+    }
+    #[test]
+    fn concave_polygon_fill_is_triangulated(){
+        let xy:Vec<f64>=vec![0.0,0.0, 20.0,0.0, 20.0,20.0, 10.0,5.0, 0.0,20.0];
+        let indices=earcutr::earcut(&xy,&[],2).unwrap();
+        assert_eq!(indices.len(),9);
+        let mut area=0.0;
+        for t in indices.chunks_exact(3){
+            let a=(xy[2*t[0]],xy[2*t[0]+1]);
+            let b=(xy[2*t[1]],xy[2*t[1]+1]);
+            let c=(xy[2*t[2]],xy[2*t[2]+1]);
+            area+=((b.0-a.0)*(c.1-a.1)-(b.1-a.1)*(c.0-a.0)).abs()*0.5;
+        }
+        assert!((area-250.0).abs()<0.001);
     }
 }
 fn main()->eframe::Result<()>{

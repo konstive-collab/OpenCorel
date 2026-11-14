@@ -1,11 +1,15 @@
-# File format support (development branch)
+# File compatibility status (development)
 
-| Format | Import | Export | Notes |
+| Format | Open | Export | Notes |
 |---|---|---|---|
-| OCD | Yes | Yes | Native JSON schema v1 with backward-compatible layers |
-| SVG | **Limited** | Basic | Import rect, ellipse, circle, line, polyline, polygon, text and M/L/H/V/C/S/Q/T/Z paths; rejects arcs, transforms, masks, filters, images and advanced CSS |
-| CDR | No | No | Independent interoperability research required |
-| CMX, AI, EPS, PDF | No | No | Planned; no compatibility claim |
-| PNG, JPG, TIFF, PSD | No | No | Planned |
+| OCD | Yes | Yes | Native JSON schema v1; old files supported |
+| SVG | Limited | Basic | Strict subset import (see limitations below) |
+| PDF | No | **RGB proof export** | Vector graphics, up to 5 m per dimension; NOT PDF/X, no CMYK or output profile |
+| CDR | No | No | Version-specific compatibility research needed |
+| AI, EPS, CMX | No | No | Planned |
+| Raster/PSD/TIFF | No | No | Planned |
 
-SVG import is deliberately strict: unsupported graphics are reported as errors instead of silently discarded. Complex art with gradients, transparency, text shaping or transforms is NOT preserved. Validate all jobs before production.
+SVG importer currently supports basic shapes, text, and M/L/H/V/C/S/Q/T/Z path curves.
+It explicitly rejects many unsupported features (arcs, gradients, transforms, nested images, clipping/masks, nonstandard paints, effects) to avoid silent damage.
+
+**Printing warning:** PDF output is presently a visual proof only. Letter spacing, font substitution, colors, clipping, bleeds, overprints and output intent have not been verified. Do not deliver it to print without an external prepress check.

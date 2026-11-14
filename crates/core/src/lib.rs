@@ -1,7 +1,7 @@
 //! OpenCorel document engine. Page coordinates are millimetres, not pixels.
 //! Experimental schema v1; not a CorelDRAW CDR implementation.
 use serde::{Deserialize, Serialize};
-use std::{collections::HashSet, fs, io, path::Path};
+use std::{collections::HashSet, fs, io::{self, Write}, path::Path};
 
 pub mod svg_import;
 
@@ -152,8 +152,9 @@ impl Document {
         self.layers.iter().find(|layer|layer.id==id)
     }
     pub fn visible_objects(&self)->impl Iterator<Item=&Object>{
-        self.objects.iter().filter(|obj|
-            self.layer(obj.layer_id).map(|l|l.visible).unwrap_or(false))
+        let visible:HashSet<u64>=self.layers.iter().filter(|layer|layer.visible)
+            .map(|layer|layer.id).collect();
+        self.objects.iter().filter(move |obj|visible.contains(&obj.layer_id))
     }
     pub fn get_mut(&mut self,id:u64) -> Option<&mut Object> {
         self.objects.iter_mut().find(|o|o.id==id)
@@ -162,9 +163,10 @@ impl Document {
         let n=self.objects.len(); self.objects.retain(|o|o.id!=id); self.objects.len()!=n
     }
     pub fn hit_test(&self,p:Point,tolerance:f32) -> Option<u64> {
+        let editable:HashSet<u64>=self.layers.iter()
+            .filter(|layer|layer.visible&&!layer.locked).map(|layer|layer.id).collect();
         self.objects.iter().rev().find(|o|
-            self.layer(o.layer_id).map(|l|l.visible&&!l.locked).unwrap_or(false)
-            && o.shape.bounds().contains(p,tolerance)
+            editable.contains(&o.layer_id) && o.shape.bounds().contains(p,tolerance)
         ).map(|o|o.id)
     }
     pub fn validate(&self)->Result<(),String>{
@@ -173,6 +175,13 @@ impl Document {
             return Err("Invalid page dimensions".into());
         }
         if self.objects.len()>100_000{return Err("Object limit exceeded".into());}
+        if self.next_id==0 || self.next_id==u64::MAX ||
+            self.next_layer_id==0 || self.next_layer_id==u64::MAX {
+            return Err("Invalid identifier allocation state".into());
+        }
+        if !valid_xml_text(&self.name) || self.name.len()>4096{
+            return Err("Invalid document name".into());
+        }
         if self.layers.is_empty()||self.layers.len()>1024{return Err("Invalid layer count".into());}
         let mut layer_ids=HashSet::new();
         for layer in &self.layers{
@@ -195,10 +204,29 @@ impl Document {
             if ![b.x,b.y,b.w,b.h].iter().all(|v|v.is_finite()) || b.w<0.0 || b.h<0.0 {
                 return Err("Invalid shape geometry".into());
             }
-            if let Shape::Bezier{segments,..}=&o.shape{
-                if segments.is_empty() || segments.len()>10000 {
-                    return Err("Invalid Bezier segment count".into());
+            match &o.shape{
+                Shape::Bezier{start,segments,..}=>{
+                    if segments.is_empty() || segments.len()>10000 {
+                        return Err("Invalid Bezier segment count".into());
+                    }
+                    if !finite_point(*start) || segments.iter().any(|seg|
+                        !finite_point(seg.control1) || !finite_point(seg.control2) ||
+                        !finite_point(seg.end)){
+                        return Err("Non-finite Bezier coordinates".into());
+                    }
                 }
+                Shape::Polyline{points,..}=>{
+                    if points.len()<2 || points.len()>100_000 ||
+                        points.iter().any(|p|!finite_point(*p)){
+                        return Err("Invalid polyline geometry".into());
+                    }
+                }
+                Shape::Text{value,..}=>{
+                    if value.len()>1_000_000 || !valid_xml_text(value){
+                        return Err("Invalid text content".into());
+                    }
+                }
+                _=>{}
             }
             if let Shape::Text{size_mm,..}=&o.shape {
                 if !size_mm.is_finite() || !(0.1..=10_000.0).contains(size_mm) {
@@ -218,11 +246,12 @@ impl Document {
     }
     pub fn write(&self,path:impl AsRef<Path>)->Result<(),String>{
         self.validate()?;
-        fs::write(path,serde_json::to_vec_pretty(self).map_err(|e|e.to_string())?)
-            .map_err(|e|e.to_string())
+        let data=serde_json::to_vec_pretty(self).map_err(|e|e.to_string())?;
+        atomic_write(path.as_ref(),&data).map_err(|e|e.to_string())
     }
     pub fn export_svg(&self,path:impl AsRef<Path>)->io::Result<()>{
-        fs::write(path,self.to_svg())
+        self.validate().map_err(io::Error::other)?;
+        atomic_write(path.as_ref(),self.to_svg().as_bytes())
     }
     pub fn to_svg(&self)->String{
         let mut out=format!(
@@ -259,6 +288,20 @@ impl Document {
         }
         out.push_str("</svg>\n");out
     }
+}
+fn finite_point(p:Point)->bool{p.x.is_finite()&&p.y.is_finite()}
+fn valid_xml_text(text:&str)->bool{
+    text.chars().all(|c|!c.is_control()||matches!(c,'\t'|'\r'|'\n'))
+}
+fn atomic_write(path:&Path,content:&[u8])->io::Result<()> {
+    let parent=path.parent().filter(|p|!p.as_os_str().is_empty())
+        .unwrap_or_else(||Path::new("."));
+    // Same-directory temporary file preserves original if writing or validation fails.
+    let mut temp=tempfile::Builder::new().prefix(".opencorel-").tempfile_in(parent)?;
+    temp.write_all(content)?;
+    temp.as_file().sync_all()?;
+    temp.persist(path).map_err(|e|e.error)?;
+    Ok(())
 }
 pub fn valid_paint(paint:&str)->bool{paint=="none" || valid_color(paint)}
 pub fn valid_color(color:&str)->bool{
@@ -299,6 +342,32 @@ mod tests{
         d.add(shape,Style::default());
         d.validate().unwrap();
         assert!(d.to_svg().contains("C 30 50, 60 60, 70 30"));
+    }
+    #[test] fn failed_write_does_not_destroy_saved_document(){
+        let dir=tempfile::tempdir().unwrap();
+        let path=dir.path().join("project.ocd");
+        let good=Document::default();
+        good.write(&path).unwrap();
+        let mut broken=good.clone();
+        broken.page.width_mm=f32::NAN;
+        assert!(broken.write(&path).is_err());
+        assert_eq!(Document::read(&path).unwrap(),good);
+    }
+    #[test] fn reject_nonfinite_path_points(){
+        let mut doc=Document::default();
+        doc.add(Shape::Bezier{
+            start:Point{x:0.0,y:0.0},
+            segments:vec![CubicSegment{control1:Point{x:f32::NAN,y:2.0},
+                control2:Point{x:5.0,y:5.0},end:Point{x:10.0,y:10.0}}],
+            closed:false
+        },Style::default());
+        assert!(doc.validate().unwrap_err().contains("Non-finite"));
+    }
+    #[test] fn reject_control_characters_in_text(){
+        let mut doc=Document::default();
+        doc.add(Shape::Text{x:1.0,y:1.0,value:String::from("hello\0"),size_mm:10.0},
+            Style::default());
+        assert!(doc.validate().is_err());
     }
     #[test] fn document_roundtrip(){
         let mut a=Document::default();
