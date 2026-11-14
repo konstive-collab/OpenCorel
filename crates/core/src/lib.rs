@@ -1,6 +1,7 @@
 //! OpenCorel document engine. Page coordinates are millimetres, not pixels.
 //! Experimental schema v1; not a CorelDRAW CDR implementation.
 use serde::{Deserialize, Serialize};
+use base64::Engine;
 use std::{collections::HashSet, fs, io::{self, Write}, path::Path};
 
 pub mod svg_import;
@@ -59,12 +60,16 @@ pub enum Shape {
     Text { x: f32, y: f32, value: String, size_mm: f32 },
     Polyline { points: Vec<Point>, closed: bool },
     Bezier { start: Point, segments: Vec<CubicSegment>, closed: bool },
+    // Imported vector artwork preserved as one repositionable/scalable object.
+    // Its inner text/paths are NOT independently editable yet.
+    EmbeddedSvg { x:f32,y:f32,w:f32,h:f32, svg:String, source_format:String },
 }
 
 impl Shape {
     pub fn bounds(&self) -> Bounds {
         match self {
-            Self::Rectangle {x,y,w,h} | Self::Ellipse {x,y,w,h} => Bounds {x:*x,y:*y,w:*w,h:*h},
+            Self::Rectangle {x,y,w,h} | Self::Ellipse {x,y,w,h} |
+            Self::EmbeddedSvg {x,y,w,h,..} => Bounds {x:*x,y:*y,w:*w,h:*h},
             Self::Text {x,y,value,size_mm} => Bounds {
                 x:*x, y:*y, w:size_mm * (value.chars().count().max(1) as f32) * 0.6,
                 h:size_mm * 1.25,
@@ -89,7 +94,8 @@ impl Shape {
     }
     pub fn translate(&mut self, dx:f32, dy:f32) {
         match self {
-            Self::Rectangle {x,y,..} | Self::Ellipse {x,y,..} | Self::Text {x,y,..} => {*x+=dx;*y+=dy;},
+            Self::Rectangle {x,y,..} | Self::Ellipse {x,y,..} |
+            Self::Text {x,y,..} | Self::EmbeddedSvg {x,y,..} => {*x+=dx;*y+=dy;},
             Self::Polyline {points,..} => for p in points {p.x+=dx;p.y+=dy;},
             Self::Bezier {start,segments,..} => {
                 start.x+=dx;start.y+=dy;
@@ -227,6 +233,13 @@ impl Document {
                         return Err("Invalid text content".into());
                     }
                 }
+                Shape::EmbeddedSvg{w,h,svg,source_format,..}=>{
+                    if *w<=0.0||*h<=0.0 || svg.len()>20*1024*1024 ||
+                        svg.trim().is_empty() || source_format.len()>32 ||
+                        !source_format.chars().all(|c|c.is_ascii_alphanumeric()) {
+                        return Err("Invalid embedded vector artwork".into());
+                    }
+                }
                 _=>{}
             }
             if let Shape::Text{size_mm,..}=&o.shape {
@@ -278,6 +291,10 @@ impl Document {
                     }
                     if *closed {d.push_str(" Z");}
                     format!("<path d=\"{d}\" {common}/>")
+                }
+                Shape::EmbeddedSvg{x,y,w,h,svg,..}=>{
+                    let encoded=base64::engine::general_purpose::STANDARD.encode(svg.as_bytes());
+                    format!("<image x=\"{x}\" y=\"{y}\" width=\"{w}\" height=\"{h}\" href=\"data:image/svg+xml;base64,{encoded}\"/>")
                 }
                 Shape::Polyline{points,closed} => {
                     let coords=points.iter().map(|p|format!("{},{}",p.x,p.y)).collect::<Vec<_>>().join(" ");
@@ -369,6 +386,15 @@ mod tests{
         doc.add(Shape::Text{x:1.0,y:1.0,value:String::from("hello\0"),size_mm:10.0},
             Style::default());
         assert!(doc.validate().is_err());
+    }
+    #[test] fn embedded_svg_can_move_and_export(){
+        let mut doc=Document::default();
+        let shape=Shape::EmbeddedSvg{x:2.0,y:3.0,w:100.0,h:200.0,
+            svg:"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10\" height=\"10\"/>".into(),
+            source_format:"CDR".into()};
+        doc.add(shape,Style::default());
+        doc.validate().unwrap();
+        assert!(doc.to_svg().contains("data:image/svg+xml;base64,"));
     }
     #[test] fn document_roundtrip(){
         let mut a=Document::default();
