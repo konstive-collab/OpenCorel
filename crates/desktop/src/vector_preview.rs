@@ -14,15 +14,20 @@ impl VectorCache {
     }
     pub fn paint(&mut self,ctx:&egui::Context,p:&egui::Painter,id:u64,svg:&str,rect:Rect){
         if rect.width()<=0.0 || rect.height()<=0.0{return;}
-        let width=(rect.width().ceil() as u32).clamp(1,2048);
+        let width=(rect.width().ceil() as u32).clamp(1,1600);
         let height=(rect.height().ceil() as u32).clamp(1,2048);
         let mut hasher=DefaultHasher::new();
-        svg.hash(&mut hasher);width.hash(&mut hasher);height.hash(&mut hasher);
+        // Do not hash megabytes of source artwork on every UI frame.
+        // Cache is cleared on document open/undo and the allocation pointer changes
+        // whenever the embedded source is replaced.
+        (svg.as_ptr() as usize).hash(&mut hasher);
+        svg.len().hash(&mut hasher);
+        width.hash(&mut hasher);height.hash(&mut hasher);
         let hash=hasher.finish();
         if self.textures.get(&id).map(|(h,_)|*h!=hash).unwrap_or(true){
             match rasterize(svg,width,height){
                 Ok(image)=>{
-                    if self.textures.len()>64{
+                    if self.textures.len()>=8{
                         if let Some(k)=self.textures.keys().copied().next(){self.textures.remove(&k);}
                     }
                     let texture=ctx.load_texture(format!("vector-{id}-{hash}"),image,egui::TextureOptions::LINEAR);
