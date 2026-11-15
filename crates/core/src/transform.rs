@@ -177,6 +177,45 @@ pub fn skew_shape(shape:&mut Shape,pivot:Point,x_degrees:f32,y_degrees:f32)
         Point{x:point.x+sx*dy,y:point.y+sy*dx}
     })
 }
+/// Scale selected geometry about a common pivot. Positive factors preserve
+/// winding and allow raster/vector placements to retain their original data.
+pub fn scale_shape(shape:&mut Shape,pivot:Point,sx:f32,sy:f32)->Result<(),String>{
+    if ![pivot.x,pivot.y,sx,sy].iter().all(|v|v.is_finite())
+        || pivot.x.abs()>100_000.0||pivot.y.abs()>100_000.0
+        || !(0.01..=100.0).contains(&sx)||!(0.01..=100.0).contains(&sy){
+        return Err("Invalid pivot or scale factors".into());
+    }
+    if sx==1.0&&sy==1.0{return Ok(());}
+    let mut candidate=shape.clone();
+    match &mut candidate{
+        Shape::Rectangle{x,y,w,h}|Shape::Ellipse{x,y,w,h}|
+        Shape::EmbeddedSvg{x,y,w,h,..}|Shape::Raster{x,y,w,h,..}=>{
+            *x=pivot.x+(*x-pivot.x)*sx;
+            *y=pivot.y+(*y-pivot.y)*sy;
+            *w*=sx;*h*=sy;
+        }
+        Shape::Text{x,y,size_mm,..}=>{
+            if (sx-sy).abs()>0.00001{
+                return Err("Text requires proportional scaling until text shaping support".into());
+            }
+            *x=pivot.x+(*x-pivot.x)*sx;
+            *y=pivot.y+(*y-pivot.y)*sy;
+            *size_mm*=sx;
+            if !(0.1..=10_000.0).contains(size_mm){
+                return Err("Scaled text size is outside supported limits".into());
+            }
+        }
+        _=>{
+            for_all_points(&mut candidate,|point|{
+                point.x=pivot.x+(point.x-pivot.x)*sx;
+                point.y=pivot.y+(point.y-pivot.y)*sy;
+            });
+        }
+    }
+    validate_transformed_bounds(&candidate)?;
+    *shape=candidate;
+    Ok(())
+}
 fn check_transform_params(pivot:Point,angles:&[f32])->Result<(),String>{
     if ![pivot.x,pivot.y].iter().all(|v|v.is_finite()&&v.abs()<=100_000.0)
         || angles.iter().any(|v|!v.is_finite()||v.abs()>36_000.0) {
