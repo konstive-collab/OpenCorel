@@ -1131,6 +1131,21 @@ mod tests {
         assert!(e.status.contains("часть группы"));
     }
     #[test]
+    fn group_scale_is_atomic_and_undoable(){
+        let mut e=Editor::default();
+        let a=e.doc.objects[0].id;
+        let b=e.doc.add(Shape::Rectangle{x:800.0,y:100.0,w:10.0,h:10.0},Style::default());
+        e.doc.group_objects(&[a,b]).unwrap();
+        let before=e.doc.clone();
+        e.select_object(Some(a),false);
+        e.scale_x_percent=110.0;e.scale_y_percent=110.0;
+        e.scale_selected();
+        assert_ne!(e.doc,before);
+        e.doc.validate().unwrap();
+        e.undo();
+        assert_eq!(e.doc,before);
+    }
+    #[test]
     fn group_rotation_transforms_both_members(){
         let mut e=Editor::default();
         let a=e.doc.objects[0].id;
