@@ -26,6 +26,7 @@ impl Editor {
         if next!=Tool::Nodes{self.active_node=None;}
         if matches!(next,Tool::Text|Tool::Nodes){
             self.inspector_tab=InspectorTab::Properties;
+            self.show_inspector=true;
         }
     }
 
@@ -241,9 +242,17 @@ impl Editor {
                     }
                 });
                 ui.menu_button("Окно",|ui|{
-                    ui.selectable_value(&mut self.inspector_tab,InspectorTab::Objects,"Объекты и слои");
-                    ui.selectable_value(&mut self.inspector_tab,InspectorTab::Properties,"Свойства");
-                    ui.selectable_value(&mut self.inspector_tab,InspectorTab::Page,"Страница");
+                    ui.checkbox(&mut self.show_inspector,"Показывать панель справа   F9");
+                    ui.separator();
+                    if ui.selectable_label(self.inspector_tab==InspectorTab::Objects,"Объекты и слои").clicked(){
+                        self.inspector_tab=InspectorTab::Objects;self.show_inspector=true;ui.close_menu();
+                    }
+                    if ui.selectable_label(self.inspector_tab==InspectorTab::Properties,"Свойства").clicked(){
+                        self.inspector_tab=InspectorTab::Properties;self.show_inspector=true;ui.close_menu();
+                    }
+                    if ui.selectable_label(self.inspector_tab==InspectorTab::Page,"Страница").clicked(){
+                        self.inspector_tab=InspectorTab::Page;self.show_inspector=true;ui.close_menu();
+                    }
                 });
                 ui.menu_button("Справка",|ui|{
                     if ui.button("Начало работы и горячие клавиши — F1").clicked(){
