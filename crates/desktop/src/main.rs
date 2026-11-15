@@ -670,13 +670,8 @@ impl eframe::App for Editor{
                 }
             }
         }
-         if !ctx.wants_keyboard_input() && ctx.input(|i|i.key_pressed(egui::Key::Delete)){
-            if let Some(id)=self.selected{
-                if self.doc.layer(self.doc.objects.iter().find(|o|o.id==id).map(|o|o.layer_id).unwrap_or(0))
-                    .map(|l|!l.locked).unwrap_or(false){
-                    self.checkpoint();self.doc.remove(id);self.selected=None;
-                }
-            }
+        if !ctx.wants_keyboard_input() && ctx.input(|i|i.key_pressed(egui::Key::Delete)){
+            self.delete_selection();
         }
         if ctx.input(|i|i.key_pressed(egui::Key::Escape)){
             self.curve_start=None;self.curve_draft=None;self.tool=Tool::Select;
@@ -716,6 +711,27 @@ mod tests {
         assert_eq!(editor.selection_ids(),vec![first]);
         editor.select_all();
         assert_eq!(editor.selection_ids().len(),2);
+    }
+    #[test]
+    fn ctrl_a_like_selection_supports_batch_delete(){
+        let mut editor=Editor::default();
+        editor.select_all();
+        assert_eq!(editor.selection_ids().len(),2);
+        editor.delete_selection();
+        assert_eq!(editor.doc.objects.len(),0);
+        editor.undo();
+        assert_eq!(editor.doc.objects.len(),2);
+    }
+    #[test]
+    fn history_limit_prevents_unbounded_text_snapshots(){
+        let mut history=Vec::new();
+        for i in 0..80 {
+            let mut doc=Document::default();
+            doc.name=format!("{i}").repeat(100_000);
+            history.push(doc);
+        }
+        trim_history(&mut history);
+        assert!(history.len()<=50);
     }
     #[test]
     fn grid_snapping_uses_millimetres(){
