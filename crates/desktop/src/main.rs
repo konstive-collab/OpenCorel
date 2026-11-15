@@ -406,7 +406,7 @@ impl Editor{
             current
         };
         self.selected=next.first().copied();
-        self.multi_selected=next.drain(1.min(next.len())..).collect();
+        self.multi_selected=next.into_iter().skip(1).collect();
     }
     fn select_all(&mut self){
         let editable:HashSet<u64>=self.doc.layers.iter().filter(|l|l.visible&&!l.locked)
@@ -737,7 +737,9 @@ impl Editor{
         egui::CentralPanel::default().show(ctx,|ui|{
             let response=ui.allocate_response(ui.available_size(),Sense::click_and_drag());
             let painter=ui.painter_at(response.rect);
-            painter.rect_filled(response.rect,0.0,Color32::from_rgb(37,41,49));
+            painter.rect_filled(response.rect,0.0,
+                if self.light_theme{Color32::from_rgb(222,227,234)}
+                else{Color32::from_rgb(15,19,26)});
             if response.hovered(){
                 let scroll=ctx.input(|i|i.smooth_scroll_delta.y);
                 if scroll.abs()>0.01 {
@@ -776,7 +778,8 @@ impl Editor{
             let selected:HashSet<u64>=self.selection_ids().into_iter().collect();
             for o in self.doc.objects.iter().filter(|o|selected.contains(&o.id)){
                 if self.doc.layer(o.layer_id).map(|l|l.visible).unwrap_or(false){
-                    outline(&page_painter,v.bounds(o.bounds()).expand(3.0),Color32::BLUE,2.0);
+                    outline(&page_painter,v.bounds(o.bounds()).expand(3.0),
+                        Color32::from_rgb(22,175,148),1.5);
                     if self.multi_selected.is_empty() &&
                         transform::resizable(&o.shape) &&
                         o.bounds().w>0.1 && o.bounds().h>0.1 {
@@ -789,6 +792,16 @@ impl Editor{
                                 Color32::from_rgb(35,106,200),1.5);
                         }
                     }
+                }
+            }
+            if selected.len()>1{
+                if let Some(bounds)=self.selection_bounds(){
+                    let rect=v.bounds(bounds).expand(5.0);
+                    outline(&page_painter,rect,Color32::from_rgb(31,179,158),1.5);
+                    page_painter.text(rect.left_top()+Vec2::new(0.0,-18.0),
+                        Align2::LEFT_TOP,
+                        format!("{} объектов",selected.len()),
+                        FontId::proportional(11.0),Color32::from_rgb(39,209,177));
                 }
             }
             if response.drag_started_by(egui::PointerButton::Primary){
@@ -1019,6 +1032,18 @@ mod tests {
         assert!(points.iter().all(|p|p.x>=0.0&&p.x<=60.0&&p.y>=0.0&&p.y<=40.0));
     }
     #[test]
+    fn named_objects_are_kept_during_group_selection(){
+        let mut e=Editor::default();
+        e.doc.objects[0].name="Заголовок".into();
+        let a=e.doc.objects[0].id;
+        let b=e.doc.objects[1].id;
+        e.doc.group_objects(&[a,b]).unwrap();
+        e.select_object(Some(b),false);
+        assert_eq!(e.selection_ids().len(),2);
+        assert_eq!(e.doc.objects[0].name,"Заголовок");
+        e.doc.validate().unwrap();
+    }
+    #[test]
     fn clicking_one_group_member_selects_entire_group(){
         let mut e=Editor::default();
         let a=e.doc.objects[0].id;
@@ -1125,7 +1150,7 @@ fn main()->eframe::Result<()>{
         ..Default::default()
     };
     eframe::run_native("OpenCorel v0.7 Alpha — Редактор макетов",options,Box::new(|cc|{
-        cc.egui_ctx.set_visuals(egui::Visuals::dark());
+        ui_theme::apply(&cc.egui_ctx,false);
         Ok(Box::new(Editor::default()))
     }))
 }
