@@ -711,6 +711,18 @@ impl Editor{
             for o in self.doc.objects.iter().filter(|o|selected.contains(&o.id)){
                 if self.doc.layer(o.layer_id).map(|l|l.visible).unwrap_or(false){
                     outline(&page_painter,v.bounds(o.bounds()).expand(3.0),Color32::BLUE,2.0);
+                    if self.multi_selected.is_empty() &&
+                        transform::resizable(&o.shape) &&
+                        o.bounds().w>0.1 && o.bounds().h>0.1 {
+                        for corner in [ResizeCorner::TopLeft,ResizeCorner::TopRight,
+                            ResizeCorner::BottomLeft,ResizeCorner::BottomRight]{
+                            let p=v.screen(corner.point(o.bounds()));
+                            let handle=Rect::from_center_size(p,Vec2::splat(9.0));
+                            page_painter.rect_filled(handle,1.0,Color32::WHITE);
+                            outline(&page_painter,handle,
+                                Color32::from_rgb(35,106,200),1.5);
+                        }
+                    }
                 }
             }
             if response.drag_started_by(egui::PointerButton::Primary){
@@ -719,8 +731,10 @@ impl Editor{
                         let p=self.snapped(v.mm(pos));
                         match self.tool{
                             Tool::Select=>{
-                                // Shift-click toggles selection, without starting a drag.
-                                if !ctx.input(|i|i.modifiers.shift){
+                                if let Some((id,corner))=self.corner_at(v,pos){
+                                    self.checkpoint();
+                                    self.resize_drag=Some((id,corner));
+                                }else if !ctx.input(|i|i.modifiers.shift){
                                     let hit=self.doc.hit_test(p,2.0);
                                     if let Some(id)=hit{
                                         if !self.is_selected(id){self.select_object(Some(id),false);}
@@ -747,7 +761,10 @@ impl Editor{
             if response.dragged_by(egui::PointerButton::Primary){
                 if let Some(pos)=response.interact_pointer_pos(){
                     let now=self.snapped(v.mm(pos));
-                    if let Some((p,id))=self.creation_start{
+                    if let Some((id,corner))=self.resize_drag{
+                        self.resize_from_corner(id,corner,now,
+                            ctx.input(|i|i.modifiers.shift));
+                    }else if let Some((p,id))=self.creation_start{
                         let x=p.x.min(now.x);let y=p.y.min(now.y);
                         let w=(p.x-now.x).abs().max(0.1);
                         let h=(p.y-now.y).abs().max(0.1);
@@ -775,6 +792,7 @@ impl Editor{
             }
             if response.drag_stopped_by(egui::PointerButton::Primary){
                 self.drag_start=None;self.creation_start=None;
+                self.resize_drag=None;
             }
             if response.double_clicked(){
                 if self.tool==Tool::Curve{
@@ -859,6 +877,7 @@ impl eframe::App for Editor{
         }
         if ctx.input(|i|i.key_pressed(egui::Key::Escape)){
             self.curve_start=None;self.curve_draft=None;self.tool=Tool::Select;
+            self.resize_drag=None;
         }
         if ctx.style().visuals.dark_mode==self.light_theme {
             ctx.set_visuals(if self.light_theme{egui::Visuals::light()}else{egui::Visuals::dark()});
