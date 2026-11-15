@@ -317,6 +317,33 @@ mod tests{
         let mut text=Shape::Text{x:1.0,y:2.0,value:"test".into(),size_mm:5.0};
         assert!(rotate_shape(&mut text,Point::default(),33.0).is_err());
     }
+    #[test] fn shared_pivot_scale_preserves_relative_layout(){
+        let pivot=Point{x:0.0,y:0.0};
+        let mut a=Shape::Rectangle{x:10.0,y:10.0,w:10.0,h:10.0};
+        let mut b=Shape::Rectangle{x:40.0,y:10.0,w:20.0,h:10.0};
+        scale_shape(&mut a,pivot,2.0,3.0).unwrap();
+        scale_shape(&mut b,pivot,2.0,3.0).unwrap();
+        assert_eq!(a.bounds(),Bounds{x:20.0,y:30.0,w:20.0,h:30.0});
+        assert_eq!(b.bounds(),Bounds{x:80.0,y:30.0,w:40.0,h:30.0});
+    }
+    #[test] fn raster_scales_without_touching_image_bytes(){
+        let mut photo=Shape::Raster{x:10.0,y:10.0,w:50.0,h:30.0,
+            pixel_width:1,pixel_height:1,mime:"image/png".into(),data_base64:"unchanged".into()};
+        scale_shape(&mut photo,Point::default(),1.2,1.5).unwrap();
+        if let Shape::Raster{w,h,data_base64,..}=photo{
+            assert!((w-60.0).abs()<0.01);
+            assert!((h-45.0).abs()<0.01);
+            assert_eq!(data_base64,"unchanged");
+        }else{panic!("Raster must remain a raster");}
+    }
+    #[test] fn nonuniform_text_rejection_is_atomic(){
+        let mut text=Shape::Text{x:10.0,y:10.0,value:"Sample".into(),size_mm:8.0};
+        let before=text.clone();
+        assert!(scale_shape(&mut text,Point::default(),1.2,1.1).is_err());
+        assert_eq!(text,before);
+        scale_shape(&mut text,Point::default(),2.0,2.0).unwrap();
+        assert_eq!(text.bounds().x,20.0);
+    }
     #[test] fn resize_rect_is_exact(){
         let mut r=Shape::Rectangle{x:10.,y:20.,w:30.,h:40.};
         resize_shape(&mut r,Bounds{x:5.,y:6.,w:60.,h:80.}).unwrap();
