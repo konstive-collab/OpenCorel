@@ -2,6 +2,8 @@ use eframe::egui::{self,Align2,Color32,FontId,Pos2,Rect,Sense,Stroke,Vec2};
 use opencorel_core::{Bounds,CubicSegment,Document,Object,Point,Shape,Style,valid_color,valid_paint,Alignment,Distribution};
 use std::{f32::consts::TAU,collections::{HashMap,HashSet},hash::{Hash,Hasher},collections::hash_map::DefaultHasher};
 mod workspace;
+mod productivity;
+use opencorel_core::transform;
 mod vector_preview;
 mod raster_preview;
 mod compound_render;
@@ -12,7 +14,19 @@ use raster_preview::RasterCache;
 use workspace::InspectorTab;
 
 #[derive(Clone,Copy,PartialEq)]
-enum Tool { Select, Rect, Ellipse, Text, Curve }
+enum Tool { Select, Rect, Ellipse, Text, Curve, Line, Polygon }
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+enum ResizeCorner{TopLeft,TopRight,BottomLeft,BottomRight}
+impl ResizeCorner{
+    fn point(self,b:Bounds)->Point{
+        match self{
+            Self::TopLeft=>Point{x:b.x,y:b.y},
+            Self::TopRight=>Point{x:b.x+b.w,y:b.y},
+            Self::BottomLeft=>Point{x:b.x,y:b.y+b.h},
+            Self::BottomRight=>Point{x:b.x+b.w,y:b.y+b.h}
+        }
+    }
+}
 
 #[derive(Default)]
 struct FillCache { entries:HashMap<u64,(u64,Vec<usize>)> }
@@ -81,6 +95,10 @@ struct Editor{
     minimum_image_dpi:f32,
     show_safe_area:bool,
     safe_margin_mm:f32,
+    internal_clipboard:Vec<Object>,
+    paste_number:usize,
+    show_welcome:bool,
+    resize_drag:Option<(u64,ResizeCorner)>,
 }
 impl Default for Editor{
     fn default()->Self{
@@ -104,7 +122,9 @@ impl Default for Editor{
             keep_bitmap_ratio:true,
             show_preflight:false,preflight_lines:Vec::new(),
             minimum_image_dpi:150.0,
-            show_safe_area:false,safe_margin_mm:5.0}
+            show_safe_area:false,safe_margin_mm:5.0,
+            internal_clipboard:Vec::new(),paste_number:0,
+            show_welcome:true,resize_drag:None}
     }
 }
 #[derive(Clone,Copy)]
@@ -127,6 +147,14 @@ impl View{
         Rect::from_min_size(self.screen(Point{x:b.x,y:b.y}),
             Vec2::new(b.w*self.scale,b.h*self.scale))
     }
+}
+fn hexagon(bounds:Bounds)->Vec<Point>{
+    let (cx,cy)=(bounds.x+bounds.w*0.5,bounds.y+bounds.h*0.5);
+    (0..6).map(|i|{
+        let angle=i as f32/6.0*TAU-TAU*0.25;
+        Point{x:cx+bounds.w*0.5*angle.cos(),
+            y:cy+bounds.h*0.5*angle.sin()}
+    }).collect()
 }
 fn color(s:&str)->Color32{
     if s=="none"{return Color32::TRANSPARENT;}
@@ -303,6 +331,46 @@ impl Editor{
         self.compound_cache.clear();
         self.status=format!("{} текстовых объектов преобразовано в кривые. Ctrl+Z вернёт текст.",count);
     }
+    fn corner_at(&self,v:View,pos:Pos2)->Option<(u64,ResizeCorner)>{
+        if self.tool!=Tool::Select || !self.multi_selected.is_empty(){return None;}
+        let id=self.selected?;
+        let o=self.doc.objects.iter().find(|o|o.id==id)?;
+        let editable=self.doc.layer(o.layer_id)
+            .map(|l|l.visible&&!l.locked).unwrap_or(false);
+        if !editable||!transform::resizable(&o.shape){return None;}
+        let b=o.bounds();
+        if b.w<0.1||b.h<0.1{return None;}
+        for corner in [ResizeCorner::TopLeft,ResizeCorner::TopRight,
+            ResizeCorner::BottomLeft,ResizeCorner::BottomRight]{
+            let screen=v.screen(corner.point(b));
+            if (screen-pos).length_sq()<=100.0{return Some((id,corner));}
+        }
+        None
+    }
+    fn resize_from_corner(&mut self,id:u64,corner:ResizeCorner,
+        pointer:Point,keep_ratio:bool){
+        let Some(index)=self.doc.objects.iter().position(|o|o.id==id) else{return;};
+        let b=self.doc.objects[index].bounds();
+        let left=matches!(corner,ResizeCorner::TopLeft|ResizeCorner::BottomLeft);
+        let top=matches!(corner,ResizeCorner::TopLeft|ResizeCorner::TopRight);
+        let ax=if left{b.x+b.w}else{b.x};
+        let ay=if top{b.y+b.h}else{b.y};
+        let mut w=(if left{ax-pointer.x}else{pointer.x-ax}).clamp(0.1,100_000.0);
+        let mut h=(if top{ay-pointer.y}else{pointer.y-ay}).clamp(0.1,100_000.0);
+        if keep_ratio && b.w>0.1 && b.h>0.1{
+            let ratio=b.w/b.h;
+            if w/ratio>h{h=(w/ratio).clamp(0.1,100_000.0);}
+            else{w=(h*ratio).clamp(0.1,100_000.0);}
+        }
+        let target=Bounds{x:if left{ax-w}else{ax},
+            y:if top{ay-h}else{ay},w,h};
+        if let Err(e)=transform::resize_shape(&mut self.doc.objects[index].shape,target){
+            self.status=e;
+        }else{
+            self.fill_cache.entries.clear();
+            self.compound_cache.clear();
+        }
+    }
     fn selection_ids(&self)->Vec<u64>{
         let mut ids=Vec::with_capacity(self.multi_selected.len()+1);
         if let Some(id)=self.selected{ids.push(id);}
@@ -366,6 +434,7 @@ impl Editor{
             self.raster_cache.clear();
             self.selected=None;self.multi_selected.clear();
             self.curve_draft=None;self.curve_start=None;
+            self.resize_drag=None;
             self.status="Отменено".into();
         }
     }
@@ -378,6 +447,7 @@ impl Editor{
             self.raster_cache.clear();
             self.selected=None;self.multi_selected.clear();
             self.curve_draft=None;self.curve_start=None;
+            self.resize_drag=None;
             self.status="Повторено".into();
         }
     }
@@ -428,6 +498,11 @@ impl Editor{
     }
     fn import_svg(&mut self){self.open();}
     fn save(&mut self){
+        // New documents have only a suggested filename. Ask where to save
+        // instead of silently writing into an unpredictable working directory.
+        if !std::path::Path::new(&self.file).is_absolute(){
+            self.save_as_picker();return;
+        }
         self.status=match opencorel_formats::save_document(&self.doc,&self.file){
             Ok(())=>format!("Сохранено: {}",self.file),
             Err(e)=>format!("Ошибка сохранения: {e}"),
@@ -475,14 +550,50 @@ impl Editor{
         }
     }
     fn save_as_picker(&mut self){
+        let suggested=std::path::Path::new(&self.file)
+            .file_name().and_then(|s|s.to_str()).unwrap_or("project.kdr")
+            .to_string();
         if let Some(path)=rfd::FileDialog::new()
             .add_filter("Kodi Draw (.kdr)",&["kdr"])
             .add_filter("Старый OpenCorel (.ocd)",&["ocd"])
-            .set_file_name("project.kdr")
+            .set_file_name(&suggested)
             .save_file(){
             let chosen=if path.extension().is_none(){path.with_extension("kdr")}else{path};
-            self.file=chosen.to_string_lossy().into_owned();
-            self.save();
+            let result=opencorel_formats::save_document(&self.doc,&chosen);
+            self.status=match result {
+                Ok(())=>{
+                    self.file=chosen.to_string_lossy().into_owned();
+                    format!("Сохранено: {}",chosen.display())
+                },
+                Err(e)=>format!("Ошибка сохранения: {e}"),
+            };
+        }
+    }
+    fn export_dialog(&mut self,ext:&str){
+        let stem=std::path::Path::new(&self.file).file_stem()
+            .and_then(|s|s.to_str()).unwrap_or("Макет");
+        let suggested=format!("{stem}.{ext}");
+        let caption=match ext{
+            "svg"|"svgz"=>"SVG векторная графика",
+            "pdf"=>"PDF для просмотра (RGB)",
+            "png"|"jpg"=>"Изображение для согласования",
+            _=>return,
+        };
+        if let Some(chosen)=rfd::FileDialog::new()
+            .add_filter(caption,&[ext])
+            .set_file_name(&suggested)
+            .save_file(){
+            let path=chosen.with_extension(ext);
+            let result=match ext{
+                "png"|"jpg"=>opencorel_export::raster_export::export_raster(
+                    &self.doc,&path,self.proof_dpi),
+                _=>opencorel_formats::save_document(&self.doc,&path),
+            };
+            self.status=match result{
+                Ok(())=>format!("Экспортировано: {} ({}).",path.display(),
+                    if ext=="pdf"{"PDF RGB, не PDF/X"}else{"контрольный файл"}),
+                Err(e)=>format!("Ошибка экспорта: {e}"),
+            };
         }
     }
     fn import_svg_picker(&mut self){
@@ -497,15 +608,20 @@ impl Editor{
                 self.checkpoint();
                 self.doc=result.document;
                 self.selected=None;self.multi_selected.clear();self.active_layer=1;
+                self.resize_drag=None;
                 self.fill_cache.entries.clear();self.vector_cache.clear();
                 self.compound_cache.clear();
                 self.raster_cache.clear();
                 self.curve_start=None;self.curve_draft=None;
                 let source=opencorel_formats::extension(std::path::Path::new(&self.file));
                 if source!="kdr"&&source!="ocd"{
-                    self.file=std::path::Path::new(&self.file)
-                        .with_extension("kdr").to_string_lossy().into_owned();
+                    // Imported artwork must not automatically overwrite an existing
+                    // neighbouring KDR file on the first Ctrl+S.
+                    let source_name=std::path::Path::new(&self.file)
+                        .file_stem().and_then(|s|s.to_str()).unwrap_or("Импорт");
+                    self.file=format!("{source_name} - импорт.kdr");
                 }
+                self.show_welcome=false;
                 self.status=if result.warning.is_empty(){
                     "Проект открыт".into()
                 }else{format!("Импорт: {}",result.warning)};
@@ -648,6 +764,18 @@ impl Editor{
             for o in self.doc.objects.iter().filter(|o|selected.contains(&o.id)){
                 if self.doc.layer(o.layer_id).map(|l|l.visible).unwrap_or(false){
                     outline(&page_painter,v.bounds(o.bounds()).expand(3.0),Color32::BLUE,2.0);
+                    if self.multi_selected.is_empty() &&
+                        transform::resizable(&o.shape) &&
+                        o.bounds().w>0.1 && o.bounds().h>0.1 {
+                        for corner in [ResizeCorner::TopLeft,ResizeCorner::TopRight,
+                            ResizeCorner::BottomLeft,ResizeCorner::BottomRight]{
+                            let p=v.screen(corner.point(o.bounds()));
+                            let handle=Rect::from_center_size(p,Vec2::splat(9.0));
+                            page_painter.rect_filled(handle,1.0,Color32::WHITE);
+                            outline(&page_painter,handle,
+                                Color32::from_rgb(35,106,200),1.5);
+                        }
+                    }
                 }
             }
             if response.drag_started_by(egui::PointerButton::Primary){
@@ -656,8 +784,10 @@ impl Editor{
                         let p=self.snapped(v.mm(pos));
                         match self.tool{
                             Tool::Select=>{
-                                // Shift-click toggles selection, without starting a drag.
-                                if !ctx.input(|i|i.modifiers.shift){
+                                if let Some((id,corner))=self.corner_at(v,pos){
+                                    self.checkpoint();
+                                    self.resize_drag=Some((id,corner));
+                                }else if !ctx.input(|i|i.modifiers.shift){
                                     let hit=self.doc.hit_test(p,2.0);
                                     if let Some(id)=hit{
                                         if !self.is_selected(id){self.select_object(Some(id),false);}
@@ -666,13 +796,20 @@ impl Editor{
                                     }else{self.select_object(None,false);}
                                 }
                             }
-                            Tool::Rect|Tool::Ellipse=>{
-                                let shape=if self.tool==Tool::Rect{
-                                    Shape::Rectangle{x:p.x,y:p.y,w:1.0,h:1.0}
-                                }else{
-                                    Shape::Ellipse{x:p.x,y:p.y,w:1.0,h:1.0}
+                            Tool::Rect|Tool::Ellipse|Tool::Line|Tool::Polygon=>{
+                                let shape=match self.tool {
+                                    Tool::Rect=>Shape::Rectangle{x:p.x,y:p.y,w:1.0,h:1.0},
+                                    Tool::Ellipse=>Shape::Ellipse{x:p.x,y:p.y,w:1.0,h:1.0},
+                                    Tool::Line=>Shape::Polyline{points:vec![p,p],closed:false},
+                                    Tool::Polygon=>Shape::Polyline{
+                                        points:hexagon(Bounds{x:p.x,y:p.y,w:1.0,h:1.0}),closed:true},
+                                    _=>unreachable!()
                                 };
-                                if let Some(id)=self.add_shape(shape,Style::default()){
+                                let style=if self.tool==Tool::Line{
+                                    Style{fill:"none".into(),stroke:"#262D3B".into(),
+                                        stroke_width_mm:1.0}
+                                }else{Style::default()};
+                                if let Some(id)=self.add_shape(shape,style){
                                     self.creation_start=Some((p,id));
                                 }
                             }
@@ -684,7 +821,10 @@ impl Editor{
             if response.dragged_by(egui::PointerButton::Primary){
                 if let Some(pos)=response.interact_pointer_pos(){
                     let now=self.snapped(v.mm(pos));
-                    if let Some((p,id))=self.creation_start{
+                    if let Some((id,corner))=self.resize_drag{
+                        self.resize_from_corner(id,corner,now,
+                            ctx.input(|i|i.modifiers.shift));
+                    }else if let Some((p,id))=self.creation_start{
                         let x=p.x.min(now.x);let y=p.y.min(now.y);
                         let w=(p.x-now.x).abs().max(0.1);
                         let h=(p.y-now.y).abs().max(0.1);
@@ -693,6 +833,14 @@ impl Editor{
                                 Shape::Rectangle{x:rx,y:ry,w:rw,h:rh}|
                                 Shape::Ellipse{x:rx,y:ry,w:rw,h:rh}=>{
                                     *rx=x;*ry=y;*rw=w;*rh=h;
+                                }
+                                Shape::Polyline{points,closed} if self.tool==Tool::Line=>{
+                                    *closed=false;
+                                    *points=vec![p,now];
+                                }
+                                Shape::Polyline{points,closed} if self.tool==Tool::Polygon=>{
+                                    *closed=true;
+                                    *points=hexagon(Bounds{x,y,w,h});
                                 }
                                 _=>{}
                             }
@@ -712,6 +860,7 @@ impl Editor{
             }
             if response.drag_stopped_by(egui::PointerButton::Primary){
                 self.drag_start=None;self.creation_start=None;
+                self.resize_drag=None;
             }
             if response.double_clicked(){
                 if self.tool==Tool::Curve{
@@ -736,10 +885,16 @@ impl Editor{
                             Tool::Curve=>{self.curve_click(p);return;},
                             Tool::Rect=>Shape::Rectangle{x:p.x,y:p.y,w:60.0,h:40.0},
                             Tool::Ellipse=>Shape::Ellipse{x:p.x,y:p.y,w:60.0,h:40.0},
+                            Tool::Line=>Shape::Polyline{
+                                points:vec![p,Point{x:p.x+80.0,y:p.y}],closed:false},
+                            Tool::Polygon=>Shape::Polyline{
+                                points:hexagon(Bounds{x:p.x,y:p.y,w:60.0,h:60.0}),closed:true},
                             Tool::Text=>Shape::Text{x:p.x,y:p.y,value:self.text.clone(),size_mm:18.0},
                         };
                         let style=if self.tool==Tool::Text{
                             Style{fill:"#202020".into(),stroke:"#202020".into(),stroke_width_mm:0.0}
+                        }else if self.tool==Tool::Line{
+                            Style{fill:"none".into(),stroke:"#262D3B".into(),stroke_width_mm:1.0}
                         }else{Style::default()};
                         self.add_shape(shape,style);
                         if self.tool==Tool::Text{self.tool=Tool::Select;}
@@ -777,11 +932,26 @@ impl eframe::App for Editor{
                 }
             }
         }
+        if !ctx.wants_keyboard_input(){
+            let ctrl=ctx.input(|i|i.modifiers.command);
+            if ctrl&&ctx.input(|i|i.key_pressed(egui::Key::C)){self.copy_selection();}
+            if ctrl&&ctx.input(|i|i.key_pressed(egui::Key::X)){self.cut_selection();}
+            if ctrl&&ctx.input(|i|i.key_pressed(egui::Key::V)){self.paste_selection();}
+            if !ctrl {
+                let step=if ctx.input(|i|i.modifiers.shift){10.0}else{1.0};
+                if ctx.input(|i|i.key_pressed(egui::Key::ArrowLeft)){self.nudge_selection(-step,0.0);}
+                if ctx.input(|i|i.key_pressed(egui::Key::ArrowRight)){self.nudge_selection(step,0.0);}
+                if ctx.input(|i|i.key_pressed(egui::Key::ArrowUp)){self.nudge_selection(0.0,-step);}
+                if ctx.input(|i|i.key_pressed(egui::Key::ArrowDown)){self.nudge_selection(0.0,step);}
+            }
+        }
+        if ctx.input(|i|i.key_pressed(egui::Key::F1)){self.show_welcome=true;}
         if !ctx.wants_keyboard_input() && ctx.input(|i|i.key_pressed(egui::Key::Delete)){
             self.delete_selection();
         }
         if ctx.input(|i|i.key_pressed(egui::Key::Escape)){
             self.curve_start=None;self.curve_draft=None;self.tool=Tool::Select;
+            self.resize_drag=None;
         }
         if ctx.style().visuals.dark_mode==self.light_theme {
             ctx.set_visuals(if self.light_theme{egui::Visuals::light()}else{egui::Visuals::dark()});
@@ -794,6 +964,10 @@ impl eframe::App for Editor{
             if ctx.input(|i|i.key_pressed(egui::Key::F6)){self.change_tool(Tool::Rect);}
             if ctx.input(|i|i.key_pressed(egui::Key::F7)){self.change_tool(Tool::Ellipse);}
             if ctx.input(|i|i.key_pressed(egui::Key::F8)){self.change_tool(Tool::Text);}
+            if ctx.input(|i|i.key_pressed(egui::Key::V)){self.change_tool(Tool::Select);}
+            if ctx.input(|i|i.key_pressed(egui::Key::B)){self.change_tool(Tool::Curve);}
+            if ctx.input(|i|i.key_pressed(egui::Key::L)){self.change_tool(Tool::Line);}
+            if ctx.input(|i|i.key_pressed(egui::Key::P)){self.change_tool(Tool::Polygon);}
         }
         self.top_workspace(ctx);
         self.tool_sidebar(ctx);
@@ -801,6 +975,7 @@ impl eframe::App for Editor{
         self.inspector(ctx);
         self.workspace_footer(ctx);
         self.canvas(ctx);
+        self.welcome_window(ctx);
         if self.show_preflight{
             egui::Window::new("Проверка макета")
                 .open(&mut self.show_preflight)
@@ -820,6 +995,22 @@ impl eframe::App for Editor{
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn polygon_has_six_vertices(){
+        let points=hexagon(Bounds{x:0.0,y:0.0,w:60.0,h:40.0});
+        assert_eq!(points.len(),6);
+        assert!(points.iter().all(|p|p.x>=0.0&&p.x<=60.0&&p.y>=0.0&&p.y<=40.0));
+    }
+    #[test]
+    fn resize_corner_keeps_opposite_edge(){
+        let mut e=Editor::default();
+        let id=e.doc.objects[0].id;
+        e.resize_from_corner(id,ResizeCorner::BottomRight,
+            Point{x:900.0,y:500.0},false);
+        let b=e.doc.objects[0].bounds();
+        assert_eq!(b.x,70.0);assert_eq!(b.y,110.0);
+        assert_eq!(b.w,830.0);assert_eq!(b.h,390.0);
+    }
     #[test]
     fn additive_selection_toggles_objects(){
         let mut editor=Editor::default();
@@ -903,7 +1094,7 @@ fn main()->eframe::Result<()>{
             .with_min_inner_size([780.0,520.0]),
         ..Default::default()
     };
-    eframe::run_native("OpenCorel — Vector Editor",options,Box::new(|cc|{
+    eframe::run_native("OpenCorel v0.7 Alpha — Редактор макетов",options,Box::new(|cc|{
         cc.egui_ctx.set_visuals(egui::Visuals::dark());
         Ok(Box::new(Editor::default()))
     }))

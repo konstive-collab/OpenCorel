@@ -1,10 +1,13 @@
 # OpenCorel — independent Rust vector editor
 
-[Русская версия](README.ru.md) · [Format matrix](docs/FORMAT_SUPPORT.md) · [KDR specification](docs/KDR_SPEC.md) · [Contributing](CONTRIBUTING.md) · [QA criteria](docs/QA_MATRIX.md)
+[Русская версия](README.ru.md) · [Руководство по работе](docs/USER_GUIDE_RU.md) · [Format matrix](docs/FORMAT_SUPPORT.md) · [KDR specification](docs/KDR_SPEC.md) · [Contributing](CONTRIBUTING.md) · [QA criteria](docs/QA_MATRIX.md)
 
-**Alpha v0.6 preview — NOT a fully compatible replacement for CorelDRAW.** Designed for posters, maps and large advertising sheets, currently targeting Windows 10/11 x64 and Linux x64.
+**Alpha v0.7 preview — NOT a fully compatible replacement for CorelDRAW.** Designed for posters, maps and large advertising sheets, currently targeting Windows 10/11 x64 and Linux x64. Windows 7 is not tested.
 
-- Familiar professional graphics workspace, page rulers, toolbox, layers, color palette, undo/redo, Bézier paths and grid snapping.
+- Task-focused professional workspace with **labelled tools**, contextual how-to instructions, first-run onboarding, real interactive tutorial layout and honest format/print limitations.
+- New **line and hexagon tools**, four-corner mouse resizing with Shift ratio lock, 1/10 mm arrow-key nudging, 90-degree rotation/mirroring of supported geometry.
+- **Internal** Ctrl+C/Ctrl+X/Ctrl+V clipboard, Ctrl+D clones and object format preservation. Clipboard does not exchange data with third-party applications.
+- Familiar page rulers, toolbox, layers, color palette, undo/redo, Bézier paths and grid snapping.
 - v0.6: explicit conversion of editable text to true compound cubic Bézier outlines using installed fonts and Unicode shaping; holes in glyphs preserved.
 - v0.6: SVG even-odd compound paths re-import as editable contours; batch CLI text outlining.
 - v0.5: independently editable per-text font family, boldness (100–900), italic, paragraph alignment, letter spacing and multiple lines; exported as SVG editable text where supported.

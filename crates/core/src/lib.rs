@@ -7,6 +7,7 @@ use std::{collections::HashSet, fs, io::{self, Write}, path::Path};
 pub mod svg_import;
 pub mod kdr;
 pub mod preflight;
+pub mod transform;
 
 pub const SCHEMA_VERSION: u32 = 1;
 
