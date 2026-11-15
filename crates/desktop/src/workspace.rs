@@ -129,6 +129,23 @@ impl Editor {
                     ui.label("Результат: редактируемые контуры.");
                     ui.label("Ctrl+Z возвращает обе фигуры.");
                 });
+                ui.menu_button("Маски",|ui|{
+                    ui.label("Обтравка без изменения исходной геометрии");
+                    ui.label("Выберите сначала фигуру-маску, затем объект с Shift.");
+                    let selection=self.selection_ids();
+                    if ui.add_enabled(selection.len()==2,
+                        egui::Button::new("Создать обтравку")).clicked(){
+                        self.apply_clipping_selection();
+                        ui.close_menu();
+                    }
+                    if ui.add_enabled(selection.iter().any(|id|
+                        self.doc.clip_links.iter().any(|link|link.target_id==*id)),
+                        egui::Button::new("Снять обтравку")).clicked(){
+                        self.remove_clipping_selection();
+                        ui.close_menu();
+                    }
+                    ui.small("Экспорт: SVG/PDF. Просмотр на холсте пока предварительный.");
+                });
                 ui.menu_button("Объект",|ui|{
                     ui.label(RichText::new("ГРУППЫ").strong());
                     if ui.button("Центрировать по листу").clicked(){
@@ -232,6 +249,9 @@ impl Editor {
                         bounds.x,bounds.y,bounds.w,bounds.h));
                     ui.separator();
                     if self.selection_ids().len()==2{
+                        if ui.small_button("Создать маску").on_hover_text("Первый выбранный объект — контур; второй — содержимое").clicked(){
+                            self.apply_clipping_selection();
+                        }
                         ui.menu_button("Логические операции",|ui|{
                             if ui.button("Объединить").clicked(){
                                 self.apply_boolean(opencorel_core::boolean_ops::BooleanOperation::Union);
@@ -1090,6 +1110,8 @@ impl Editor {
         if !self.doc.objects.iter().any(|o|ids.contains(&o.id)){return;}
         self.checkpoint();
         self.doc.objects.retain(|o|!ids.contains(&o.id));
+        self.doc.clip_links.retain(|clip|
+            !ids.contains(&clip.source_id)&&!ids.contains(&clip.target_id));
         self.selected=None;self.multi_selected.clear();
         self.status="Выделенные объекты удалены".into();
     }
