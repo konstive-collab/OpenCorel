@@ -214,14 +214,22 @@ fn ring_to_contour(ring:&LineString<f64>)->Result<Contour,String>{
 /// The original Shape inputs are never modified, including on error.
 pub fn combine(a:&Shape,b:&Shape,operation:BooleanOperation)
     ->Result<Option<Shape>,String>{
+    // Topology exceptions may occur *while constructing* an even-odd input,
+    // before the final Boolean operation. Keep malformed customer artwork from
+    // unwinding through the desktop event loop or invalidating the current file.
+    std::panic::catch_unwind(||combine_inner(a,b,operation))
+        .unwrap_or_else(|_|Err("Geometry operation failed on malformed contours".into()))
+}
+fn combine_inner(a:&Shape,b:&Shape,operation:BooleanOperation)
+    ->Result<Option<Shape>,String>{
     let ga=shape_to_polygon(a)?;
     let gb=shape_to_polygon(b)?;
-    let result=std::panic::catch_unwind(||match operation{
+    let result=match operation{
         BooleanOperation::Union=>ga.union(&gb),
         BooleanOperation::Subtract=>ga.difference(&gb),
         BooleanOperation::Intersect=>ga.intersection(&gb),
         BooleanOperation::Xor=>ga.xor(&gb),
-    }).map_err(|_|"Geometry topology operation failed (invalid boundaries)")?;
+    };
     if result.0.is_empty()||result.unsigned_area()<1e-8{return Ok(None);}
     let count:usize=result.0.iter().map(|p|1+p.interiors().len()).sum();
     if count>MAX_CONTOURS{
@@ -322,6 +330,47 @@ mod tests{
         assert_eq!(line,before);
         let text=Shape::Text{x:0.,y:0.,value:"ABC".into(),size_mm:10.};
         assert!(combine(&text,&rect(0.,0.,10.,10.),BooleanOperation::Union).is_err());
+    }
+    #[test] fn adjacent_rectangles_do_not_create_phantom_holes(){
+        let left=rect(0.,0.,100.,100.);
+        let right=rect(100.,0.,100.,100.);
+        let merged=combine(&left,&right,BooleanOperation::Union).unwrap().unwrap();
+        assert!((result_area(&merged)-20_000.).abs()<0.01);
+        let overlap=combine(&left,&right,BooleanOperation::Intersect).unwrap();
+        if let Some(artifact)=overlap{
+            assert!(result_area(&artifact)<0.01,"shared edge is not an area");
+        }
+    }
+    #[test] fn corner_touch_and_multiple_islands_are_safe(){
+        let a=rect(0.,0.,30.,30.);
+        let b=rect(30.,30.,20.,20.);
+        for op in [BooleanOperation::Union,BooleanOperation::Subtract,
+            BooleanOperation::Intersect,BooleanOperation::Xor]{
+            // Degenerate corner contacts may be refused, but must never panic.
+            let attempt=std::panic::catch_unwind(||combine(&a,&b,op));
+            assert!(attempt.is_ok(),"corner touch caused unwinding: {op:?}");
+        }
+    }
+    #[test] fn malformed_self_crossing_path_never_unwinds_to_gui(){
+        let crossing=Shape::Polyline{points:vec![
+            Point{x:0.,y:0.},Point{x:80.,y:80.},
+            Point{x:0.,y:80.},Point{x:90.,y:0.},
+            Point{x:0.,y:25.}
+        ],closed:true};
+        for op in [BooleanOperation::Union,BooleanOperation::Subtract,
+            BooleanOperation::Intersect,BooleanOperation::Xor]{
+            let result=std::panic::catch_unwind(||combine(
+                &crossing,&rect(10.,10.,60.,60.),op));
+            assert!(result.is_ok(),"malformed polygon escaped catch_unwind");
+        }
+    }
+    #[test] fn nonfinite_and_huge_coordinates_never_escape_guard(){
+        for x in [f32::NAN,f32::INFINITY,200_100.0]{
+            let suspicious=rect(x,0.,100.,100.);
+            for op in [BooleanOperation::Union,BooleanOperation::Intersect]{
+                assert!(combine(&suspicious,&rect(0.,0.,100.,100.),op).is_err());
+            }
+        }
     }
     #[test] fn repeatable_randomized_rectangle_area_invariants(){
         for i in 1..=128{
