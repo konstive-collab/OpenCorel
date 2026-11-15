@@ -146,7 +146,7 @@ impl Editor{
                             ui.separator();
                             // Less-used primitives are deliberately hidden in
                             // one flyout; the current shape remains discoverable.
-                            let shape_label=if expanded{"Фигуры  ▾"}else{"▭"};
+                            let shape_label=if expanded{"         Фигуры ▾"}else{"           "};
                             let shapes=ui.menu_button(shape_label,|ui|{
                                 ui.label(egui::RichText::new("БАЗОВЫЕ ФИГУРЫ").strong().small());
                                 for tool in SHAPES{
@@ -163,6 +163,7 @@ impl Editor{
                             }).response.on_hover_text(
                                 "Фигуры: прямоугольник F6, эллипс F7, линия L, шестиугольник P"
                             );
+                            paint_icon(ui,shapes.rect,Glyph::Shapes,expanded,is_shape(self.tool));
                             if is_shape(self.tool){
                                 // A narrow turquoise marker makes the active
                                 // flyout visible without a permanent button row.
@@ -183,7 +184,7 @@ impl Editor{
                                 "Проверить макет перед печатью: размеры и разрешение",
                                 w,expanded){self.run_preflight();}
                             let actions=ui.menu_button(
-                                if expanded{"Дополнительно  ▾"}else{"···"},|ui|{
+                                if expanded{"        Действия ▾"}else{"           "},|ui|{
                                     if ui.button("Открыть учебный макет").clicked(){
                                         self.sample_design();ui.close_menu();
                                     }
@@ -200,6 +201,7 @@ impl Editor{
                                         ui.close_menu();
                                     }
                                 }).response;
+                            paint_icon(ui,actions.rect,Glyph::More,expanded,false);
                             actions.on_hover_text("Редкие действия: пример, копирование, вставка, маски");
                             if self.rail_action(ui,Glyph::Help,"Справка  F1",
                                 "Полная инструкция с горячими клавишами (F1)",
