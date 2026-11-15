@@ -300,8 +300,9 @@ impl Document {
         if !editable(source.layer_id)||!editable(target.layer_id) {
             return Err("Clipping operands must be on visible, unlocked layers".into());
         }
-        if self.clip_links.iter().any(|c|c.target_id==source_id) {
-            return Err("A clipped object cannot itself act as a mask".into());
+        if self.clip_links.iter().any(|c|c.target_id==source_id ||
+            c.source_id==target_id) {
+            return Err("Nested or cyclic clip links are unsupported".into());
         }
         if self.clip_links.iter().filter(|c|c.target_id!=target_id).count()>=10000 {
             return Err("Clipping link limit exceeded".into());
