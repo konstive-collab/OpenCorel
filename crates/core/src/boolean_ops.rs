@@ -55,7 +55,19 @@ fn flatten_cubic(a:XY,b:XY,c:XY,d:XY,depth:u32,
     out:&mut Vec<XY>)->Result<(),String>{
     let error=distance_point_to_chord(b,a,d)
         .max(distance_point_to_chord(c,a,d));
-    if error<=FLATTEN_TOL_MM{
+    let chord=(d.0-a.0,d.1-a.1);
+    let length2=chord.0*chord.0+chord.1*chord.1;
+    // Collinear cubic controls may extend far outside the endpoint chord,
+    // making a loop/overshoot. Distance-to-line alone would wrongly flatten
+    // that curve into one straight edge, silently changing artwork.
+    let projections_ok=if length2<1e-20 {error<=FLATTEN_TOL_MM}
+        else{
+            [b,c].iter().all(|p|{
+                let t=((p.0-a.0)*chord.0+(p.1-a.1)*chord.1)/length2;
+                (-0.0001..=1.0001).contains(&t)
+            })
+        };
+    if error<=FLATTEN_TOL_MM && projections_ok{
         return append(out,d);
     }
     if depth>=MAX_DEPTH{
@@ -240,6 +252,13 @@ mod tests{
     }
     fn result_area(shape:&Shape)->f64{
         shape_to_polygon(shape).unwrap().unsigned_area()
+    }
+    #[test] fn collinear_control_overshoot_is_not_silently_flattened(){
+        let mut points=vec![(0.0,0.0)];
+        let result=flatten_cubic((0.,0.),(60.,0.),(-50.,0.),(10.,0.),
+            0,&mut points);
+        assert!(result.is_err()||points.len()>2,
+            "Collinear control overshoot must not disappear");
     }
     #[test] fn overlap_area_math_all_four_operations(){
         let a=rect(0.,0.,100.,100.);
