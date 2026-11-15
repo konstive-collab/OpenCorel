@@ -16,7 +16,9 @@ use masked_canvas::MaskedCanvasCache;
 mod vector_preview;
 mod raster_preview;
 mod compound_render;
+mod text_preview;
 use compound_render::CompoundCache;
+use text_preview::TextPreview;
 use opencorel_typography::TextOutliner;
 use vector_preview::VectorCache;
 use raster_preview::RasterCache;
@@ -116,6 +118,7 @@ struct Editor{
     pivot_x:f32,
     pivot_y:f32,
     text_outliner:TextOutliner,
+    text_preview:TextPreview,
     font_search:String,
     proof_dpi:u32,
     keep_bitmap_ratio:bool,
@@ -162,7 +165,7 @@ impl Default for Editor{
             appearance_gradient_angle:0.0,appearance_dash_mm:0.0,
             appearance_cap:0,appearance_join:0,
             custom_pivot:false,pivot_x:0.0,pivot_y:0.0,
-            text_outliner:TextOutliner::new(),font_search:String::new(),proof_dpi:96,
+            text_outliner:TextOutliner::new(),text_preview:TextPreview::default(),font_search:String::new(),proof_dpi:96,
             keep_bitmap_ratio:true,
             show_preflight:false,preflight_lines:Vec::new(),
             minimum_image_dpi:150.0,
@@ -223,7 +226,8 @@ fn cubic(p0:Point,p1:Point,p2:Point,p3:Point,t:f32)->Point {
 }
 fn paint(p:&egui::Painter,obj:&Object,v:View,cache:&mut FillCache,
     vectors:&mut VectorCache,rasters:&mut RasterCache,
-    compounds:&mut CompoundCache,ctx:&egui::Context){
+    compounds:&mut CompoundCache,text_preview:&mut TextPreview,
+    text_outliner:&mut TextOutliner,ctx:&egui::Context){
     let fill=color(&obj.style.fill);
     let stroke=if obj.style.stroke=="none" {
         Stroke::new(0.0,Color32::TRANSPARENT)
@@ -246,6 +250,10 @@ fn paint(p:&egui::Painter,obj:&Object,v:View,cache:&mut FillCache,
             p.add(egui::Shape::convex_polygon(vertices,fill,stroke));
         }
         Shape::Text{x,y,value,size_mm}=>{
+            if let Some(contours)=text_preview.contours(obj,text_outliner){
+                compounds.paint(p,obj.id,contours,v,fill,stroke);
+                return;
+            }
             let fmt=&obj.text_format;
             let family=fmt.family.to_ascii_lowercase();
             let monospaced=["mono","consolas","courier","menlo","code"]
@@ -819,7 +827,8 @@ impl Editor{
                     if v.bounds(obj.bounds()).intersects(v.rect.intersect(response.rect)){
                         paint(&page_painter,obj,v,&mut self.fill_cache,
                             &mut self.vector_cache,&mut self.raster_cache,
-                            &mut self.compound_cache,ctx);
+                            &mut self.compound_cache,&mut self.text_preview,
+                            &mut self.text_outliner,ctx);
                     }
                 }
             }else{
