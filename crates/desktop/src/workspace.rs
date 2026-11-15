@@ -898,6 +898,30 @@ impl Editor {
                     });
                     ui.label(format!("Символов: {} · Строк: {}",
                         value.chars().count(),value.lines().count().max(1)));
+                    ui.collapsing("Найти и заменить в надписи",|ui|{
+                        ui.add(egui::TextEdit::singleline(&mut self.text_find)
+                            .hint_text("Искать точное совпадение"));
+                        ui.add(egui::TextEdit::singleline(&mut self.text_replacement)
+                            .hint_text("Заменить на..."));
+                        let count=if self.text_find.is_empty(){0}else{
+                            value.matches(&self.text_find).count()
+                        };
+                        ui.label(format!("Совпадений: {count} · Поиск с учётом регистра"));
+                        if ui.add_enabled(count>0,egui::Button::new("Заменить все")).clicked(){
+                            match text_edit_ops::replace_all_literal(
+                                value,&self.text_find,&self.text_replacement){
+                                Ok((updated,replaced))=>{
+                                    if updated!=*value{
+                                        *value=updated;
+                                        changed=true;
+                                        self.status=format!(
+                                            "Заменено совпадений в тексте: {replaced}");
+                                    }
+                                },
+                                Err(reason)=>{self.status=format!("Замена отклонена: {reason}");}
+                            }
+                        }
+                    });
                     for (label,num) in [("X мм",x),("Y мм",y),("Размер мм",size_mm)]{
                         ui.horizontal(|ui|{
                             ui.label(label);
