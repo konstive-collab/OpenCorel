@@ -1,6 +1,6 @@
 //! Corel-style, independently implemented workspace layout.
 //! Uses familiar panel positions and workflows but no proprietary assets.
-use super::{color, productivity, Editor, Tool};
+use super::{color, productivity, text_edit_ops, Editor, Tool};
 use eframe::egui::{self, Color32, RichText, Vec2};
 use opencorel_core::{Bounds, Shape, Alignment, Distribution, TextAlign, valid_paint};
 use std::collections::HashSet;
