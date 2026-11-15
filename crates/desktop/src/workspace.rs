@@ -2,7 +2,7 @@
 //! Uses familiar panel positions and workflows but no proprietary assets.
 use super::{color, Editor, Tool};
 use eframe::egui::{self, Color32, RichText, Vec2};
-use opencorel_core::{Bounds, Shape, Alignment, Distribution, valid_paint};
+use opencorel_core::{Bounds, Shape, Alignment, Distribution, TextAlign, valid_paint};
 use std::collections::HashSet;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -399,7 +399,7 @@ impl Editor {
                             changed|=ui.add(egui::DragValue::new(num).speed(0.5)).changed();
                         });
                     }
-                    *size_mm=size_mm.max(0.1);
+                    *size_mm=size_mm.clamp(0.1,10_000.0);
                 }
                 Shape::Raster{x,y,w,h,pixel_width,pixel_height,..}=>{
                     ui.label(format!("Растровое изображение: {} × {} пикселей",pixel_width,pixel_height));
@@ -468,6 +468,56 @@ impl Editor {
                     }
                 }
             }
+            if matches!(object.shape,Shape::Text{..}){
+                ui.separator();
+                ui.label(RichText::new("Типографика").strong());
+                ui.label("Название шрифта (системного):");
+                changed|=ui.text_edit_singleline(&mut object.text_format.family).changed();
+                if ui.button("Шрифт по умолчанию").clicked(){
+                    object.text_format.family="sans-serif".into();changed=true;
+                }
+                ui.horizontal(|ui|{
+                    ui.label("Начертание:");
+                    egui::ComboBox::from_id_salt("text_weight")
+                        .selected_text(format!("{}",object.text_format.weight))
+                        .show_ui(ui,|ui|{
+                            for (label,weight) in [
+                                ("Тонкий",100),("Светлый",300),
+                                ("Обычный",400),("Средний",500),
+                                ("Полужирный",600),("Жирный",700),
+                                ("Очень жирный",800),("Чёрный",900),
+                            ]{
+                                changed|=ui.selectable_value(&mut object.text_format.weight,
+                                    weight,label).changed();
+                            }
+                        });
+                    changed|=ui.checkbox(&mut object.text_format.italic,"Курсив").changed();
+                });
+                ui.label("Выравнивание строк:");
+                ui.horizontal(|ui|{
+                    for (label,align) in [
+                        ("Слева",TextAlign::Left),("Центр",TextAlign::Center),
+                        ("Справа",TextAlign::Right)
+                    ]{
+                        changed|=ui.selectable_value(&mut object.text_format.alignment,
+                            align,label).changed();
+                    }
+                });
+                ui.horizontal(|ui|{
+                    ui.label("Межбуквенный интервал, мм");
+                    changed|=ui.add(egui::DragValue::new(
+                        &mut object.text_format.letter_spacing_mm)
+                        .speed(0.05).range(-100.0..=100.0)).changed();
+                });
+                ui.horizontal(|ui|{
+                    ui.label("Межстрочный множитель");
+                    changed|=ui.add(egui::DragValue::new(
+                        &mut object.text_format.line_height)
+                        .speed(0.05).range(0.7..=4.0)).changed();
+                });
+                ui.label(RichText::new("На холсте — упрощённый предпросмотр. Шрифты и печать сверяйте по PDF.")
+                    .small().color(Color32::GRAY));
+            }
             ui.separator();
             ui.label("Заливка: #RRGGBB или none");
             changed|=ui.text_edit_singleline(&mut object.style.fill).changed();
@@ -477,7 +527,8 @@ impl Editor {
             changed|=ui.add(egui::DragValue::new(&mut object.style.stroke_width_mm)
                 .speed(0.1).range(0.0..=1000.0)).changed();
             if changed{
-                if valid_paint(&object.style.fill)&&valid_paint(&object.style.stroke){
+                if valid_paint(&object.style.fill)&&valid_paint(&object.style.stroke)
+                    && object.text_format.validate().is_ok(){
                     self.checkpoint();
                     self.doc.objects[index]=object.clone();
                 }else{
