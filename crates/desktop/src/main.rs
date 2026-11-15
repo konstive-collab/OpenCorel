@@ -2,6 +2,7 @@ use eframe::egui::{self,Align2,Color32,FontId,Pos2,Rect,Sense,Stroke,Vec2};
 use opencorel_core::{Bounds,CubicSegment,Document,Object,Point,Shape,Style,valid_color,valid_paint,Alignment,Distribution};
 use std::{f32::consts::TAU,collections::{HashMap,HashSet},hash::{Hash,Hasher},collections::hash_map::DefaultHasher};
 mod workspace;
+mod ui_theme;
 mod productivity;
 use opencorel_core::transform;
 mod vector_preview;
@@ -99,6 +100,7 @@ struct Editor{
     paste_number:usize,
     show_welcome:bool,
     resize_drag:Option<(u64,ResizeCorner)>,
+    object_filter:String,
 }
 impl Default for Editor{
     fn default()->Self{
@@ -114,7 +116,7 @@ impl Default for Editor{
             curve_start:None,curve_draft:None,active_layer:1,pan:Vec2::ZERO,
             undo:Vec::new(),redo:Vec::new(),
             inspector_tab:InspectorTab::Objects,show_grid:false,snap_grid:false,
-            show_rulers:true,light_theme:true,cursor_mm:None,
+            show_rulers:true,light_theme:false,cursor_mm:None,
             fill_cache:FillCache::default(),vector_cache:VectorCache::default(),
             raster_cache:RasterCache::default(),
             compound_cache:CompoundCache::default(),
@@ -124,7 +126,8 @@ impl Default for Editor{
             minimum_image_dpi:150.0,
             show_safe_area:false,safe_margin_mm:5.0,
             internal_clipboard:Vec::new(),paste_number:0,
-            show_welcome:true,resize_drag:None}
+            show_welcome:true,resize_drag:None,
+            object_filter:String::new()}
     }
 }
 #[derive(Clone,Copy)]
@@ -381,19 +384,29 @@ impl Editor{
         self.selected==Some(id)||self.multi_selected.contains(&id)
     }
     fn select_object(&mut self,id:Option<u64>,additive:bool){
+        let Some(id)=id else {
+            if !additive{self.selected=None;self.multi_selected.clear();}
+            return;
+        };
+        let members=self.doc.group_members(id);
         if !additive{
-            self.selected=id;self.multi_selected.clear();return;
-        }
-        let Some(id)=id else{return;};
-        if self.selected==Some(id){
-            self.selected=self.multi_selected.pop();
-        }else if let Some(i)=self.multi_selected.iter().position(|v|*v==id){
-            self.multi_selected.remove(i);
-        }else if self.selected.is_none(){
             self.selected=Some(id);
-        }else{
-            self.multi_selected.push(id);
+            self.multi_selected=members.into_iter().filter(|value|*value!=id).collect();
+            return;
         }
+        let existing:HashSet<u64>=self.selection_ids().into_iter().collect();
+        let remove=members.iter().all(|value|existing.contains(value));
+        let mut next:Vec<u64>=if remove{
+            self.selection_ids().into_iter().filter(|value|!members.contains(value)).collect()
+        }else{
+            let mut current=self.selection_ids();
+            for member in members{
+                if !existing.contains(&member){current.push(member);}
+            }
+            current
+        };
+        self.selected=next.first().copied();
+        self.multi_selected=next.drain(1.min(next.len())..).collect();
     }
     fn select_all(&mut self){
         let editable:HashSet<u64>=self.doc.layers.iter().filter(|l|l.visible&&!l.locked)
@@ -954,12 +967,16 @@ impl eframe::App for Editor{
             self.resize_drag=None;
         }
         if ctx.style().visuals.dark_mode==self.light_theme {
-            ctx.set_visuals(if self.light_theme{egui::Visuals::light()}else{egui::Visuals::dark()});
+            ui_theme::apply(ctx,self.light_theme);
         }
         if !ctx.wants_keyboard_input(){
             if ctx.input(|i|i.modifiers.command&&i.key_pressed(egui::Key::A)){self.select_all();}
             if ctx.input(|i|i.modifiers.command&&i.key_pressed(egui::Key::N)){self.new_document();}
             if ctx.input(|i|i.modifiers.command&&i.key_pressed(egui::Key::D)){self.duplicate_selection();}
+            if ctx.input(|i|i.modifiers.command&&i.key_pressed(egui::Key::G)){
+                if ctx.input(|i|i.modifiers.shift){self.ungroup_selection();}
+                else{self.group_selection();}
+            }
             if ctx.input(|i|i.key_pressed(egui::Key::F4)){self.fit_page();}
             if ctx.input(|i|i.key_pressed(egui::Key::F6)){self.change_tool(Tool::Rect);}
             if ctx.input(|i|i.key_pressed(egui::Key::F7)){self.change_tool(Tool::Ellipse);}
@@ -1000,6 +1017,19 @@ mod tests {
         let points=hexagon(Bounds{x:0.0,y:0.0,w:60.0,h:40.0});
         assert_eq!(points.len(),6);
         assert!(points.iter().all(|p|p.x>=0.0&&p.x<=60.0&&p.y>=0.0&&p.y<=40.0));
+    }
+    #[test]
+    fn clicking_one_group_member_selects_entire_group(){
+        let mut e=Editor::default();
+        let a=e.doc.objects[0].id;
+        let b=e.doc.objects[1].id;
+        e.doc.group_objects(&[a,b]).unwrap();
+        e.select_object(Some(a),false);
+        assert_eq!(e.selection_ids().len(),2);
+        e.select_object(Some(a),true);
+        assert!(e.selection_ids().is_empty());
+        e.select_object(Some(b),true);
+        assert_eq!(e.selection_ids().len(),2);
     }
     #[test]
     fn resize_corner_keeps_opposite_edge(){
