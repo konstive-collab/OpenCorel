@@ -199,15 +199,25 @@ fn paint(p:&egui::Painter,obj:&Object,v:View,cache:&mut FillCache,
         }
     }
 }
+fn trim_history(history:&mut Vec<Document>) {
+    const MAX_HISTORY_BYTES:usize=96*1024*1024;
+    while history.len()>1 {
+        let size=history.iter().fold(0usize,|acc,doc|
+            acc.saturating_add(doc.estimated_size_bytes()));
+        if history.len()<=50 && size<=MAX_HISTORY_BYTES{break;}
+        history.remove(0);
+    }
+}
 impl Editor{
     fn checkpoint(&mut self){
         self.undo.push(self.doc.clone());
-        if self.undo.len()>50{self.undo.remove(0);}
+        trim_history(&mut self.undo);
         self.redo.clear();
     }
     fn undo(&mut self){
         if let Some(prev)=self.undo.pop(){
             self.redo.push(std::mem::replace(&mut self.doc,prev));
+            trim_history(&mut self.redo);
             self.fill_cache.entries.clear();
             self.vector_cache.clear();
             self.raster_cache.clear();
@@ -218,6 +228,7 @@ impl Editor{
     fn redo(&mut self){
         if let Some(next)=self.redo.pop(){
             self.undo.push(std::mem::replace(&mut self.doc,next));
+            trim_history(&mut self.undo);
             self.fill_cache.entries.clear();
             self.vector_cache.clear();
             self.raster_cache.clear();
