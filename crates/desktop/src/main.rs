@@ -1211,7 +1211,7 @@ fn main()->eframe::Result<()>{
             .with_min_inner_size([780.0,520.0]),
         ..Default::default()
     };
-    eframe::run_native("OpenCorel v0.7 Alpha — Редактор макетов",options,Box::new(|cc|{
+    eframe::run_native("OpenCorel v0.10 Alpha — Редактор макетов",options,Box::new(|cc|{
         ui_theme::apply(&cc.egui_ctx,false);
         Ok(Box::new(Editor::default()))
     }))
