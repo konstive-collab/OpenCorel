@@ -196,6 +196,17 @@ impl Editor {
                         if ui.button("Применить наклон").clicked(){
                             self.skew_arbitrary();ui.close_menu();
                         }
+                        ui.separator();
+                        ui.label("Масштаб выделения, % X / Y:");
+                        ui.horizontal(|ui|{
+                            ui.add(egui::DragValue::new(&mut self.scale_x_percent)
+                                .speed(1.0).range(1.0..=1000.0).suffix("%"));
+                            ui.add(egui::DragValue::new(&mut self.scale_y_percent)
+                                .speed(1.0).range(1.0..=1000.0).suffix("%"));
+                        });
+                        if ui.button("Масштабировать всё выделение").clicked(){
+                            self.scale_selected();ui.close_menu();
+                        }
                         ui.small("Ctrl+Z — отмена. Растровые изображения и текст требуют преобразования.");
                     });
                     if ui.button("Редактировать узлы      F10").clicked(){
