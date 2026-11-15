@@ -144,7 +144,10 @@ fn compound_with_inner_hole_stays_editable_after_native_roundtrip(){
     doc.add(Shape::CompoundPath{contours:vec![ring(10.0,90.0),ring(30.0,70.0)]},Style::default());
     doc.validate().unwrap();
     assert!(doc.to_svg().contains("fill-rule=\"evenodd\""));
-    let file=tempfile::NamedTempFile::new().unwrap();
-    kdr::save_kdr(&doc,file.path()).unwrap();
-    assert_eq!(kdr::read_kdr(file.path()).unwrap(),doc);
+    // NamedTempFile keeps its handle open; overwriting that path is denied on
+    // Windows. Use a free destination path, matching the real Save As workflow.
+    let dir=tempfile::tempdir().unwrap();
+    let file=dir.path().join("compound.kdr");
+    kdr::save_kdr(&doc,&file).unwrap();
+    assert_eq!(kdr::read_kdr(&file).unwrap(),doc);
 }
