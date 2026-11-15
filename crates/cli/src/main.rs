@@ -18,6 +18,11 @@ fn main()->ExitCode{
                 r.document.name,r.document.page.width_mm,r.document.page.height_mm,r.document.objects.len());
             println!("Import quality: {:?}. {}",r.quality,r.warning);
         }),
+        [_,op,src,dst,dpi] if op=="export-bitmap" =>{
+            let dpi=dpi.parse::<u32>().map_err(|_|"DPI must be a number".to_string());
+            dpi.and_then(|dpi|open_any(src)
+                .and_then(|r|opencorel_export::raster_export::export_raster(&r.document,dst,dpi)))
+        },
         [_,op,src,dst] if op=="convert" => open_any(src).and_then(|r|{
             if !r.warning.is_empty(){eprintln!("NOTE: {}",r.warning);}
             save_document(&r.document,dst)
@@ -28,7 +33,7 @@ fn main()->ExitCode{
             .and_then(|r|save_document(&r.document,dst)),
         [_,op,src,dst] if op=="export-svg" => open_any(src)
             .and_then(|r|save_document(&r.document,dst)),
-        _=>{eprintln!("Usage:\n  opencorel-cli benchmark COUNT\n  opencorel-cli new FILE.kdr\n  opencorel-cli inspect FILE.kdr\n  opencorel-cli convert INPUT OUTPUT\n  opencorel-cli export-svg FILE.kdr FILE.svg\n  opencorel-cli export-pdf FILE.kdr FILE.pdf\n  opencorel-cli import-svg FILE.svg FILE.kdr");
+        _=>{eprintln!("Usage:\n  opencorel-cli benchmark COUNT\n  opencorel-cli new FILE.kdr\n  opencorel-cli inspect FILE.kdr\n  opencorel-cli convert INPUT OUTPUT\n  opencorel-cli export-bitmap FILE.kdr FILE.png DPI\n  opencorel-cli export-svg FILE.kdr FILE.svg\n  opencorel-cli export-pdf FILE.kdr FILE.pdf\n  opencorel-cli import-svg FILE.svg FILE.kdr");
             return ExitCode::FAILURE;}
     };
     match outcome{

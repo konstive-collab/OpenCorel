@@ -54,6 +54,13 @@ impl Editor {
                     if ui.button("Экспорт SVG").clicked(){self.svg();ui.close_menu();}
                     if ui.button("Экспорт SVGZ").clicked(){self.svgz();ui.close_menu();}
                     if ui.button("Экспорт PDF (RGB)").clicked(){self.pdf();ui.close_menu();}
+                    ui.separator();
+                    ui.horizontal(|ui|{
+                        ui.label("DPI");
+                        ui.add(egui::DragValue::new(&mut self.proof_dpi).range(36..=300));
+                    });
+                    if ui.button("Экспорт PNG...").clicked(){self.raster_proof("png");ui.close_menu();}
+                    if ui.button("Экспорт JPEG...").clicked(){self.raster_proof("jpg");ui.close_menu();}
                 });
                 ui.menu_button("Правка",|ui|{
                     if ui.add_enabled(!self.undo.is_empty(),egui::Button::new("Отменить      Ctrl+Z")).clicked(){self.undo();ui.close_menu();}
@@ -104,6 +111,7 @@ impl Editor {
                 if ui.button("Фото +").on_hover_text("Поместить фотографию или логотип").clicked(){self.place_bitmap_picker();}
                 if ui.button("SVG ↗").on_hover_text("Экспорт SVG").clicked(){self.svg();}
                 if ui.button("PDF ↗").on_hover_text("PDF для просмотра (RGB, не PDF/X)").clicked(){self.pdf();}
+                if ui.button("PNG ↗").on_hover_text("PNG для согласования (DPI из меню Файл)").clicked(){self.raster_proof("png");}
                 ui.separator();
                 ui.label("Масштаб");
                 if ui.small_button("−").clicked(){self.zoom=(self.zoom/1.25).max(0.2);}
@@ -293,13 +301,35 @@ impl Editor {
                     ui.label(format!("Растровое изображение: {} × {} пикселей",pixel_width,pixel_height));
                     let effective_dpi=if *w>0.0{*pixel_width as f32*25.4 / *w}else{0.0};
                     ui.label(format!("Разрешение по ширине: {:.0} DPI",effective_dpi));
-                    for (label,num) in [("X мм",x),("Y мм",y),("Ширина мм",w),("Высота мм",h)]{
+                    ui.checkbox(&mut self.keep_bitmap_ratio,"Сохранять пропорции");
+                    for (label,num) in [("X мм",x),("Y мм",y)]{
                         ui.horizontal(|ui|{
                             ui.label(label);
                             changed|=ui.add(egui::DragValue::new(num).speed(1.0)).changed();
                         });
                     }
-                    *w=w.max(0.1);*h=h.max(0.1);
+                    ui.horizontal(|ui|{
+                        ui.label("Ширина мм");
+                        let edit=ui.add(egui::DragValue::new(w).speed(1.0));
+                        if edit.changed(){
+                            *w=w.max(0.1);
+                            if self.keep_bitmap_ratio {
+                                *h=*w*(*pixel_height as f32)/(*pixel_width as f32);
+                            }
+                            changed=true;
+                        }
+                    });
+                    ui.horizontal(|ui|{
+                        ui.label("Высота мм");
+                        let edit=ui.add(egui::DragValue::new(h).speed(1.0));
+                        if edit.changed(){
+                            *h=h.max(0.1);
+                            if self.keep_bitmap_ratio {
+                                *w=*h*(*pixel_width as f32)/(*pixel_height as f32);
+                            }
+                            changed=true;
+                        }
+                    });
                 }
                 Shape::EmbeddedSvg{x,y,w,h,source_format,..}=>{
                     ui.colored_label(Color32::from_rgb(187,105,28),

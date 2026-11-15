@@ -68,6 +68,8 @@ struct Editor{
     fill_cache:FillCache,
     vector_cache:VectorCache,
     raster_cache:RasterCache,
+    proof_dpi:u32,
+    keep_bitmap_ratio:bool,
 }
 impl Default for Editor{
     fn default()->Self{
@@ -85,7 +87,8 @@ impl Default for Editor{
             inspector_tab:InspectorTab::Objects,show_grid:false,snap_grid:false,
             show_rulers:true,light_theme:true,cursor_mm:None,
             fill_cache:FillCache::default(),vector_cache:VectorCache::default(),
-            raster_cache:RasterCache::default()}
+            raster_cache:RasterCache::default(),proof_dpi:96,
+            keep_bitmap_ratio:true}
     }
 }
 #[derive(Clone,Copy)]
@@ -351,6 +354,15 @@ impl Editor{
             }
             Err(e)=>self.status=format!("Ошибка открытия: {e}")
         }
+    }
+    fn raster_proof(&mut self,ext:&str){
+        let path=std::path::Path::new(&self.file).with_extension(ext);
+        self.status=match opencorel_export::raster_export::export_raster(
+            &self.doc,&path,self.proof_dpi){
+            Ok(())=>format!("{} ({} DPI) экспортирован: {}",ext.to_uppercase(),
+                self.proof_dpi,path.display()),
+            Err(e)=>format!("Ошибка экспорта {ext}: {e}"),
+        };
     }
     fn pdf(&mut self){
         let path=std::path::Path::new(&self.file).with_extension("pdf");
