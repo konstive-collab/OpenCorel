@@ -8,6 +8,7 @@ use opencorel_core::transform;
 use opencorel_core::node_edit::{self,NodeAddress};
 mod node_interaction;
 mod boolean_commands;
+mod clip_commands;
 mod vector_preview;
 mod raster_preview;
 mod compound_render;
