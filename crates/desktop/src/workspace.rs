@@ -55,7 +55,7 @@ impl Editor {
             egui::menu::bar(ui, |ui| {
                 ui.label(RichText::new("◈ OpenCorel").strong().size(17.0)
                     .color(Color32::from_rgb(32,201,170)));
-                ui.label(RichText::new("v0.10  •  EDITOR").small()
+                ui.label(RichText::new(format!("v{}  •  EDITOR",env!("CARGO_PKG_VERSION").split('-').next().unwrap_or("dev")) ).small()
                     .color(Color32::from_rgb(129,144,162)));
 
                 ui.separator();
