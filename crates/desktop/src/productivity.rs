@@ -273,6 +273,12 @@ impl Editor{
         self.transform_selection_at(|shape,center|transform::skew_shape(shape,center,x,y),
             "Наклон",pivot);
     }
+    pub(super) fn scale_selected(&mut self){
+        let (x,y)=(self.scale_x_percent/100.0,self.scale_y_percent/100.0);
+        let pivot=self.transform_pivot();
+        self.transform_selection_at(|shape,center|transform::scale_shape(shape,center,x,y),
+            "Масштабирование",pivot);
+    }
     fn transform_pivot(&self)->Option<Point>{
         self.custom_pivot.then_some(Point{x:self.pivot_x,y:self.pivot_y})
     }
