@@ -63,13 +63,18 @@ pub enum Shape {
     // Imported vector artwork preserved as one repositionable/scalable object.
     // Its inner text/paths are NOT independently editable yet.
     EmbeddedSvg { x:f32,y:f32,w:f32,h:f32, svg:String, source_format:String },
+    /// Self-contained bitmap artwork, using original PNG/JPEG encoded bytes.
+    /// Dimensions in mm stay independent of source pixel dimensions.
+    Raster { x:f32,y:f32,w:f32,h:f32, pixel_width:u32,pixel_height:u32,
+        mime:String,data_base64:String },
 }
 
 impl Shape {
     pub fn bounds(&self) -> Bounds {
         match self {
             Self::Rectangle {x,y,w,h} | Self::Ellipse {x,y,w,h} |
-            Self::EmbeddedSvg {x,y,w,h,..} => Bounds {x:*x,y:*y,w:*w,h:*h},
+            Self::EmbeddedSvg {x,y,w,h,..} |
+            Self::Raster {x,y,w,h,..} => Bounds {x:*x,y:*y,w:*w,h:*h},
             Self::Text {x,y,value,size_mm} => Bounds {
                 x:*x, y:*y, w:size_mm * (value.chars().count().max(1) as f32) * 0.6,
                 h:size_mm * 1.25,
@@ -95,7 +100,8 @@ impl Shape {
     pub fn translate(&mut self, dx:f32, dy:f32) {
         match self {
             Self::Rectangle {x,y,..} | Self::Ellipse {x,y,..} |
-            Self::Text {x,y,..} | Self::EmbeddedSvg {x,y,..} => {*x+=dx;*y+=dy;},
+            Self::Text {x,y,..} | Self::EmbeddedSvg {x,y,..} |
+            Self::Raster {x,y,..} => {*x+=dx;*y+=dy;},
             Self::Polyline {points,..} => for p in points {p.x+=dx;p.y+=dy;},
             Self::Bezier {start,segments,..} => {
                 start.x+=dx;start.y+=dy;
@@ -240,6 +246,22 @@ impl Document {
                         return Err("Invalid embedded vector artwork".into());
                     }
                 }
+                Shape::Raster{w,h,pixel_width,pixel_height,mime,data_base64,..}=>{
+                    if *w<=0.0||*h<=0.0 ||
+                        *pixel_width==0 || *pixel_height==0 ||
+                        *pixel_width>16_000 || *pixel_height>16_000 ||
+                        u64::from(*pixel_width)*u64::from(*pixel_height)>40_000_000 ||
+                        data_base64.len()>56*1024*1024 ||
+                        !matches!(mime.as_str(),"image/png"|"image/jpeg") {
+                        return Err("Invalid raster metadata".into());
+                    }
+                    let raw=base64::engine::general_purpose::STANDARD
+                        .decode(data_base64.as_bytes())
+                        .map_err(|_|"Invalid raster base64 data")?;
+                    if raw.len()>40*1024*1024 || !raster_signature_matches(mime,&raw){
+                        return Err("Invalid raster image header or size".into());
+                    }
+                }
                 _=>{}
             }
             if let Shape::Text{size_mm,..}=&o.shape {
@@ -296,6 +318,9 @@ impl Document {
                     let encoded=base64::engine::general_purpose::STANDARD.encode(svg.as_bytes());
                     format!("<image x=\"{x}\" y=\"{y}\" width=\"{w}\" height=\"{h}\" href=\"data:image/svg+xml;base64,{encoded}\"/>")
                 }
+                Shape::Raster{x,y,w,h,mime,data_base64,..}=>{
+                    format!("<image x=\"{x}\" y=\"{y}\" width=\"{w}\" height=\"{h}\" preserveAspectRatio=\"none\" href=\"data:{mime};base64,{data_base64}\"/>")
+                }
                 Shape::Polyline{points,closed} => {
                     let coords=points.iter().map(|p|format!("{},{}",p.x,p.y)).collect::<Vec<_>>().join(" ");
                     if *closed {format!("<polygon points=\"{coords}\" {common}/>")
@@ -305,6 +330,13 @@ impl Document {
             out.push_str(&format!("<g id=\"object-{}\">{element}</g>\n",obj.id));
         }
         out.push_str("</svg>\n");out
+    }
+}
+fn raster_signature_matches(mime:&str,raw:&[u8])->bool{
+    match mime{
+        "image/png"=>raw.starts_with(b"\x89PNG\r\n\x1a\n"),
+        "image/jpeg"=>raw.starts_with(&[0xFF,0xD8,0xFF]),
+        _=>false,
     }
 }
 fn finite_point(p:Point)->bool{p.x.is_finite()&&p.y.is_finite()}
@@ -395,6 +427,29 @@ mod tests{
         doc.add(shape,Style::default());
         doc.validate().unwrap();
         assert!(doc.to_svg().contains("data:image/svg+xml;base64,"));
+    }
+    #[test] fn raster_roundtrip_and_svg_embedding(){
+        let png=base64::engine::general_purpose::STANDARD
+            .encode(b"\x89PNG\r\n\x1a\nplaceholder");
+        let mut doc=Document::default();
+        doc.add(Shape::Raster{x:5.0,y:6.0,w:15.0,h:20.0,
+            pixel_width:1,pixel_height:1,mime:"image/png".into(),
+            data_base64:png},Style::default());
+        doc.validate().unwrap();
+        assert!(doc.to_svg().contains("data:image/png;base64,"));
+        let copy:Document=serde_json::from_str(&serde_json::to_string(&doc).unwrap()).unwrap();
+        assert_eq!(doc,copy);
+    }
+    #[test] fn raster_rejects_wrong_mime_and_invalid_base64(){
+        let mut doc=Document::default();
+        let id=doc.add(Shape::Raster{x:0.0,y:0.0,w:10.0,h:10.0,
+            pixel_width:100,pixel_height:100,mime:"image/jpeg".into(),
+            data_base64:"invalid!".into()},Style::default());
+        assert!(doc.validate().is_err());
+        if let Shape::Raster{data_base64,..}=&mut doc.get_mut(id).unwrap().shape{
+            *data_base64=base64::engine::general_purpose::STANDARD.encode(b"\x89PNG\r\n\x1a\n");
+        }
+        assert!(doc.validate().is_err());
     }
     #[test] fn document_roundtrip(){
         let mut a=Document::default();
