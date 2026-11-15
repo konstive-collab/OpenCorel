@@ -2,8 +2,10 @@
 
 [Русская версия](README.ru.md) · [Руководство по работе](docs/USER_GUIDE_RU.md) · [Format matrix](docs/FORMAT_SUPPORT.md) · [KDR specification](docs/KDR_SPEC.md) · [Contributing](CONTRIBUTING.md) · [QA criteria](docs/QA_MATRIX.md)
 
-**Alpha v0.8 preview — NOT a fully compatible replacement for CorelDRAW.** Designed for posters, maps and large advertising sheets, currently targeting Windows 10/11 x64 and Linux x64. Windows 7 is not tested.
+**Alpha v0.9 preview — NOT a fully compatible replacement for CorelDRAW.** Designed for posters, maps and large advertising sheets, currently targeting Windows 10/11 x64 and Linux x64. Windows 7 is not tested.
 
+- v0.9: interactive **F10 node-editing tool** for polylines, Bézier curves and individual contours: mouse dragging of anchors and handles, double-click to insert nodes, Del to remove anchors, arrow-key nudging; undo and native KDR persistence.
+- [20-iteration engineering plan](docs/ROADMAP_20_ITERATIONS.md) defines ordered work, quality gates and transparent progress.
 - v0.8: modern slate/teal theme, persistent names, searchable object list, group/ungroup (Ctrl+G / Ctrl+Shift+G), linked group selection and movement.
 - v0.8: exact X/Y/width/height properties in millimetres, configurable snapping grid, multi-object page centering and correct z-order changes for grouped items.
 - Task-focused professional workspace with **labelled tools**, contextual how-to instructions, first-run onboarding, real interactive tutorial layout and honest format/print limitations.
