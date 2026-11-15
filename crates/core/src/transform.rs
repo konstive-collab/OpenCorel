@@ -140,6 +140,93 @@ pub fn flip_shape(shape:&mut Shape,center:Point,horizontal:bool)->Result<(),Stri
     }
     Ok(())
 }
+/// Apply an arbitrary-angle rotation about an exact page-space pivot.
+/// Rectangle/ellipse primitives are converted into editable vector paths
+/// (unless the angle is a multiple of 90 degrees). All mutations are atomic.
+pub fn rotate_shape(shape:&mut Shape,pivot:Point,degrees:f32)->Result<(),String>{
+    check_transform_params(pivot,&[degrees])?;
+    if degrees==0.0{return Ok(());}
+    if degrees.rem_euclid(90.0)==0.0{
+        let turns=(degrees/90.0).rem_euclid(4.0) as usize;
+        let mut candidate=shape.clone();
+        for _ in 0..turns{
+            rotate_90(&mut candidate,pivot,QuarterTurn::Clockwise)?;
+        }
+        validate_transformed_bounds(&candidate)?;
+        *shape=candidate;
+        return Ok(());
+    }
+    let (sin,cos)=degrees.to_radians().sin_cos();
+    affine_vector(shape,|point|{
+        let (dx,dy)=(point.x-pivot.x,point.y-pivot.y);
+        Point{x:pivot.x+cos*dx-sin*dy,y:pivot.y+sin*dx+cos*dy}
+    })
+}
+/// Skew around a point. Angles are limited to avoid near-singular transforms.
+pub fn skew_shape(shape:&mut Shape,pivot:Point,x_degrees:f32,y_degrees:f32)
+    ->Result<(),String>{
+    check_transform_params(pivot,&[x_degrees,y_degrees])?;
+    if x_degrees.abs()>=80.0||y_degrees.abs()>=80.0{
+        return Err("Skew angles must be strictly between -80 and 80 degrees".into());
+    }
+    if x_degrees==0.0&&y_degrees==0.0{return Ok(());}
+    let sx=x_degrees.to_radians().tan();
+    let sy=y_degrees.to_radians().tan();
+    affine_vector(shape,|point|{
+        let (dx,dy)=(point.x-pivot.x,point.y-pivot.y);
+        Point{x:point.x+sx*dy,y:point.y+sy*dx}
+    })
+}
+fn check_transform_params(pivot:Point,angles:&[f32])->Result<(),String>{
+    if ![pivot.x,pivot.y].iter().all(|v|v.is_finite()&&v.abs()<=100_000.0)
+        || angles.iter().any(|v|!v.is_finite()||v.abs()>36_000.0) {
+        return Err("Invalid transform pivot or angles".into());
+    }
+    Ok(())
+}
+fn validate_transformed_bounds(shape:&Shape)->Result<(),String>{
+    let bounds=shape.bounds();
+    if ![bounds.x,bounds.y,bounds.w,bounds.h,
+        bounds.x+bounds.w,bounds.y+bounds.h].iter()
+        .all(|v|v.is_finite()&&v.abs()<=200_000.0){
+        return Err("Transform would create coordinates outside the safe canvas range".into());
+    }
+    Ok(())
+}
+fn editable_outline(shape:Shape)->Result<Shape,String>{
+    use crate::CubicSegment;
+    match shape{
+        Shape::Rectangle{x,y,w,h}=>{
+            Ok(Shape::Polyline{
+                points:vec![Point{x,y},Point{x:x+w,y},Point{x:x+w,y:y+h},Point{x,y:y+h}],
+                closed:true
+            })
+        }
+        Shape::Ellipse{x,y,w,h}=>{
+            let (cx,cy,rx,ry)=(x+w*0.5,y+h*0.5,w*0.5,h*0.5);
+            let k=0.5522848_f32;
+            Ok(Shape::Bezier{
+                start:Point{x:cx+rx,y:cy},
+                segments:vec![
+                    CubicSegment{control1:Point{x:cx+rx,y:cy+ry*k},control2:Point{x:cx+rx*k,y:cy+ry},end:Point{x:cx,y:cy+ry}},
+                    CubicSegment{control1:Point{x:cx-rx*k,y:cy+ry},control2:Point{x:cx-rx,y:cy+ry*k},end:Point{x:cx-rx,y:cy}},
+                    CubicSegment{control1:Point{x:cx-rx,y:cy-ry*k},control2:Point{x:cx-rx*k,y:cy-ry},end:Point{x:cx,y:cy-ry}},
+                    CubicSegment{control1:Point{x:cx+rx*k,y:cy-ry},control2:Point{x:cx+rx,y:cy-ry*k},end:Point{x:cx+rx,y:cy}},
+                ],closed:true
+            })
+        }
+        Shape::Polyline{..}|Shape::Bezier{..}|Shape::CompoundPath{..}=>Ok(shape),
+        _=>Err("Arbitrary transforms require editable vector geometry; convert text or images first".into()),
+    }
+}
+fn affine_vector<F:FnMut(Point)->Point>(shape:&mut Shape,mut map:F)->Result<(),String>{
+    let mut candidate=editable_outline(shape.clone())?;
+    for_all_points(&mut candidate,|point|*point=map(*point));
+    validate_transformed_bounds(&candidate)?;
+    *shape=candidate;
+    Ok(())
+}
+
 impl Document{
     /// Copies an object into the destination layer, retaining its text format.
     /// Every pasted object receives a fresh ID; the source remains unchanged.
