@@ -246,6 +246,38 @@ impl Document{
 mod tests{
     use super::*;
     use crate::{CubicSegment,Style,TextFormat};
+    #[test] fn rotation_about_custom_pivot_preserves_bounds_for_quarters(){
+        let mut shape=Shape::Rectangle{x:10.0,y:10.0,w:30.0,h:20.0};
+        rotate_shape(&mut shape,Point{x:0.0,y:0.0},90.0).unwrap();
+        assert_eq!(shape.bounds(),Bounds{x:-30.0,y:10.0,w:20.0,h:30.0});
+        rotate_shape(&mut shape,Point{x:0.0,y:0.0},270.0).unwrap();
+        assert_eq!(shape.bounds(),Bounds{x:10.0,y:10.0,w:30.0,h:20.0});
+    }
+    #[test] fn arbitrary_rotation_converts_rectangle_into_editable_closed_path(){
+        let mut shape=Shape::Rectangle{x:0.0,y:0.0,w:10.0,h:10.0};
+        rotate_shape(&mut shape,Point{x:5.0,y:5.0},45.0).unwrap();
+        assert!(matches!(shape,Shape::Polyline{closed:true,..}));
+        let bounds=shape.bounds();
+        assert!((bounds.w-14.142136).abs()<0.001);
+        rotate_shape(&mut shape,Point{x:5.0,y:5.0},-45.0).unwrap();
+        let bounds=shape.bounds();
+        assert!((bounds.x).abs()<0.001 && (bounds.w-10.0).abs()<0.001);
+    }
+    #[test] fn skew_ellipse_preserves_editable_bezier_controls(){
+        let mut shape=Shape::Ellipse{x:0.0,y:0.0,w:20.0,h:10.0};
+        skew_shape(&mut shape,Point{x:0.0,y:0.0},15.0,0.0).unwrap();
+        assert!(matches!(shape,Shape::Bezier{closed:true,..}));
+        assert!(shape.bounds().w>20.0);
+    }
+    #[test] fn invalid_params_reject_without_mutation(){
+        let original=Shape::Rectangle{x:0.0,y:0.0,w:20.0,h:10.0};
+        let mut value=original.clone();
+        assert!(rotate_shape(&mut value,Point{x:f32::NAN,y:0.0},30.0).is_err());
+        assert!(skew_shape(&mut value,Point::default(),89.0,0.0).is_err());
+        assert_eq!(value,original);
+        let mut text=Shape::Text{x:1.0,y:2.0,value:"test".into(),size_mm:5.0};
+        assert!(rotate_shape(&mut text,Point::default(),33.0).is_err());
+    }
     #[test] fn resize_rect_is_exact(){
         let mut r=Shape::Rectangle{x:10.,y:20.,w:30.,h:40.};
         resize_shape(&mut r,Bounds{x:5.,y:6.,w:60.,h:80.}).unwrap();
