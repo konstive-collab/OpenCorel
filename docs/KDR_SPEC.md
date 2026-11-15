@@ -18,3 +18,18 @@ Format v1 uses a ZIP container containing:
 - Legacy `.ocd` (plain JSON) remains supported for import and explicit export.
 
 Tests include round-trip, corrupt checksum rejection and preserving previous saved work after a rejected save.
+
+## v0.5 backwards-compatible typography fields
+
+Each object can now carry an optional `text_format` property in the editable `document.json` object:
+
+- `family` (system font name, not bundled)
+- `weight` (100–900 by 100)
+- `italic` (boolean)
+- `alignment` (`left`, `center`, `right`)
+- `letter_spacing_mm` (real number, millimetres)
+- `line_height` (multiplier of text size)
+
+Existing KDR/OCD files without the `text_format` field load with defaults. No KDR container version bump is needed, because the document schema still accepts older objects.
+
+**Not a font embedding guarantee.** `font-family` is a lookup request to whichever fonts are installed on the receiving computer. Exact text shape and line breaks can differ from CorelDRAW and between operating systems. Retain customer source files and proof exports.

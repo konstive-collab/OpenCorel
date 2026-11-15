@@ -2,9 +2,11 @@
 
 [Русская версия](README.ru.md) · [Format matrix](docs/FORMAT_SUPPORT.md) · [KDR specification](docs/KDR_SPEC.md) · [Contributing](CONTRIBUTING.md) · [QA criteria](docs/QA_MATRIX.md)
 
-**Alpha v0.4 preview — NOT a fully compatible replacement for CorelDRAW.** Designed for posters, maps and large advertising sheets, currently targeting Windows 10/11 x64 and Linux x64.
+**Alpha v0.5 preview — NOT a fully compatible replacement for CorelDRAW.** Designed for posters, maps and large advertising sheets, currently targeting Windows 10/11 x64 and Linux x64.
 
 - Familiar professional graphics workspace, page rulers, toolbox, layers, color palette, undo/redo, Bézier paths and grid snapping.
+- v0.5: independently editable per-text font family, boldness (100–900), italic, paragraph alignment, letter spacing and multiple lines; exported as SVG editable text where supported.
+- v0.5: interactive layout preflight for off-page art, image DPI, font portability and RGB/print limitations; non-exported safe-area guide and A0/A2/large-format presets.
 - **New `.kdr` (Kodi Draw)** native compressed editable project: versioned manifest, checksum and SVG preview; backward-compatible import of old `.ocd`.
 - SVG and SVGZ import with a documented editable subset.
 - Unsupported complex vector details can be preserved as one placed SVG artwork object, not individual editable entities.
