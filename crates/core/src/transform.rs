@@ -147,7 +147,11 @@ impl Document{
         let mut shape=original.shape.clone();
         shape.translate(dx,dy);
         let id=self.add_to_layer(shape,original.style.clone(),layer_id);
-        self.get_mut(id).unwrap().text_format=original.text_format.clone();
+        let copy=self.get_mut(id).unwrap();
+        copy.text_format=original.text_format.clone();
+        copy.name=original.name.clone();
+        // A copied object starts ungrouped. The UI remaps whole copied groups.
+        copy.group_id=None;
         id
     }
 }
