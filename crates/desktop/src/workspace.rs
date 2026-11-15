@@ -1024,6 +1024,10 @@ impl Editor {
                 if ui.button("Шрифт по умолчанию").clicked(){
                     object.text_format.family="sans-serif".into();changed=true;
                 }
+                if !self.text_outliner.font_available(&object.text_format.family){
+                    ui.colored_label(Color32::from_rgb(231,156,69),
+                        "Шрифт не найден в системе: возможна подмена при экспорте. Выберите установленный шрифт.");
+                }
                 ui.horizontal(|ui|{
                     ui.label("Начертание:");
                     egui::ComboBox::from_id_salt("text_weight")
@@ -1081,7 +1085,13 @@ impl Editor {
                     self.doc.objects[index]=object.clone();
                     self.compound_cache.clear();
                 }else{
-                    self.status="Цвет задаётся в виде #RRGGBB или none".into();
+                    self.status=if !valid_paint(&object.style.fill) ||
+                        !valid_paint(&object.style.stroke) {
+                        "Цвет задаётся в виде #RRGGBB или none".into()
+                    }else{
+                        format!("Недопустимые параметры текста: {}",
+                            object.text_format.validate().unwrap_err())
+                    };
                 }
             }
             ui.separator();
