@@ -17,3 +17,6 @@ zip = { version = "2.4", default-features = false, features = ["deflate"] }
 sha2 = "0.10"
 
 base64 = "0.22"
+
+# Robust topological operations on validated 2-D planar polygons.
+geo = "0.33.1"

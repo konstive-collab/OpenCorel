@@ -9,6 +9,7 @@ pub mod kdr;
 pub mod preflight;
 pub mod transform;
 pub mod node_edit;
+pub mod boolean_ops;
 
 pub const SCHEMA_VERSION: u32 = 1;
 

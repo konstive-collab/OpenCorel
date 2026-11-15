@@ -49,4 +49,5 @@ No estimated dates are asserted. Capabilities marked "research", especially CDR 
 | Iteration | Status | PR | CI | Notes |
 |---|---|---|---|---|
 | I01 v0.9 | Implemented; manual GUI/production QA pending | [#15](https://github.com/konstive-collab/OpenCorel/pull/15) | [Windows + Linux passed](https://github.com/konstive-collab/OpenCorel/actions/runs/43726921360) | Node edit, tested geometry and published desktop/CLI artifacts; merged as `58466f5` |
-| I02–I20 | Planned | — | — | Not implemented |
+| I02 v0.10 | In development | Pending | Pending | Two-shape union/subtract/intersect/XOR, editable result, area and undo tests |
+| I03–I20 | Planned | — | — | Not implemented |

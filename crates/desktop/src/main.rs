@@ -7,6 +7,7 @@ mod productivity;
 use opencorel_core::transform;
 use opencorel_core::node_edit::{self,NodeAddress};
 mod node_interaction;
+mod boolean_commands;
 mod vector_preview;
 mod raster_preview;
 mod compound_render;
@@ -1210,7 +1211,7 @@ fn main()->eframe::Result<()>{
             .with_min_inner_size([780.0,520.0]),
         ..Default::default()
     };
-    eframe::run_native("OpenCorel v0.7 Alpha — Редактор макетов",options,Box::new(|cc|{
+    eframe::run_native("OpenCorel v0.10 Alpha — Редактор макетов",options,Box::new(|cc|{
         ui_theme::apply(&cc.egui_ctx,false);
         Ok(Box::new(Editor::default()))
     }))

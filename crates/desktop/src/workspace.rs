@@ -52,7 +52,7 @@ impl Editor {
             egui::menu::bar(ui, |ui| {
                 ui.label(RichText::new("◈ OpenCorel").strong().size(17.0)
                     .color(Color32::from_rgb(32,201,170)));
-                ui.label(RichText::new("v0.8  •  EDITOR").small()
+                ui.label(RichText::new("v0.10  •  EDITOR").small()
                     .color(Color32::from_rgb(129,144,162)));
 
                 ui.separator();
@@ -108,6 +108,26 @@ impl Editor {
                     if ui.button("A1 — 594×841 мм").clicked(){self.page_size(594.0,841.0);ui.close_menu();}
                     if ui.button("Баннер 3×2 м").clicked(){self.page_size(3000.0,2000.0);ui.close_menu();}
                     if ui.button("Баннер 6×3 м (SVG)").clicked(){self.page_size(6000.0,3000.0);ui.close_menu();}
+                });
+                ui.menu_button("Контуры",|ui|{
+                    ui.label(RichText::new("ЛОГИЧЕСКИЕ ОПЕРАЦИИ").strong());
+                    ui.label("Выделите две фигуры с Shift.");
+                    ui.label("Первая фигура — A, вторая — B.");
+                    ui.separator();
+                    let eligible=self.selection_ids().len()==2;
+                    ui.add_enabled_ui(eligible,|ui|{
+                        for (name,operation) in [
+                            ("Объединить A ∪ B",opencorel_core::boolean_ops::BooleanOperation::Union),
+                            ("Вычесть B из A",opencorel_core::boolean_ops::BooleanOperation::Subtract),
+                            ("Пересечение A ∩ B",opencorel_core::boolean_ops::BooleanOperation::Intersect),
+                            ("Исключить общую часть (XOR)",opencorel_core::boolean_ops::BooleanOperation::Xor),
+                        ]{
+                            if ui.button(name).clicked(){self.apply_boolean(operation);ui.close_menu();}
+                        }
+                    });
+                    ui.separator();
+                    ui.label("Результат: редактируемые контуры.");
+                    ui.label("Ctrl+Z возвращает обе фигуры.");
                 });
                 ui.menu_button("Объект",|ui|{
                     ui.label(RichText::new("ГРУППЫ").strong());
@@ -211,6 +231,26 @@ impl Editor {
                     ui.label(format!("X {:.1}  Y {:.1}  Ш {:.1}  В {:.1} мм",
                         bounds.x,bounds.y,bounds.w,bounds.h));
                     ui.separator();
+                    if self.selection_ids().len()==2{
+                        ui.menu_button("Логические операции",|ui|{
+                            if ui.button("Объединить").clicked(){
+                                self.apply_boolean(opencorel_core::boolean_ops::BooleanOperation::Union);
+                                ui.close_menu();
+                            }
+                            if ui.button("Вычесть второй").clicked(){
+                                self.apply_boolean(opencorel_core::boolean_ops::BooleanOperation::Subtract);
+                                ui.close_menu();
+                            }
+                            if ui.button("Пересечение").clicked(){
+                                self.apply_boolean(opencorel_core::boolean_ops::BooleanOperation::Intersect);
+                                ui.close_menu();
+                            }
+                            if ui.button("Исключить (XOR)").clicked(){
+                                self.apply_boolean(opencorel_core::boolean_ops::BooleanOperation::Xor);
+                                ui.close_menu();
+                            }
+                        });
+                    }
                     if ui.small_button("Центр листа").on_hover_text("Поместить выбранные объекты по центру страницы").clicked(){
                         self.center_selection_on_page();
                     }
