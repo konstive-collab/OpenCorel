@@ -5,6 +5,8 @@ mod workspace;
 mod ui_theme;
 mod productivity;
 use opencorel_core::transform;
+use opencorel_core::node_edit::{self,NodeAddress};
+mod node_interaction;
 mod vector_preview;
 mod raster_preview;
 mod compound_render;
@@ -15,7 +17,7 @@ use raster_preview::RasterCache;
 use workspace::InspectorTab;
 
 #[derive(Clone,Copy,PartialEq)]
-enum Tool { Select, Rect, Ellipse, Text, Curve, Line, Polygon }
+enum Tool { Select, Nodes, Rect, Ellipse, Text, Curve, Line, Polygon }
 #[derive(Clone,Copy,Debug,PartialEq,Eq)]
 enum ResizeCorner{TopLeft,TopRight,BottomLeft,BottomRight}
 impl ResizeCorner{
@@ -102,6 +104,8 @@ struct Editor{
     show_welcome:bool,
     resize_drag:Option<(u64,ResizeCorner)>,
     object_filter:String,
+    active_node:Option<(u64,NodeAddress)>,
+    node_drag:Option<(u64,NodeAddress)>,
 }
 impl Default for Editor{
     fn default()->Self{
@@ -129,7 +133,7 @@ impl Default for Editor{
             show_safe_area:false,safe_margin_mm:5.0,
             internal_clipboard:Vec::new(),paste_number:0,
             show_welcome:true,resize_drag:None,
-            object_filter:String::new()}
+            object_filter:String::new(),active_node:None,node_drag:None}
     }
 }
 #[derive(Clone,Copy)]
@@ -449,7 +453,7 @@ impl Editor{
             self.raster_cache.clear();
             self.selected=None;self.multi_selected.clear();
             self.curve_draft=None;self.curve_start=None;
-            self.resize_drag=None;
+            self.resize_drag=None;self.node_drag=None;self.active_node=None;
             self.status="Отменено".into();
         }
     }
@@ -462,7 +466,7 @@ impl Editor{
             self.raster_cache.clear();
             self.selected=None;self.multi_selected.clear();
             self.curve_draft=None;self.curve_start=None;
-            self.resize_drag=None;
+            self.resize_drag=None;self.node_drag=None;self.active_node=None;
             self.status="Повторено".into();
         }
     }
@@ -623,7 +627,7 @@ impl Editor{
                 self.checkpoint();
                 self.doc=result.document;
                 self.selected=None;self.multi_selected.clear();self.active_layer=1;
-                self.resize_drag=None;
+                self.resize_drag=None;self.node_drag=None;self.active_node=None;
                 self.fill_cache.entries.clear();self.vector_cache.clear();
                 self.compound_cache.clear();
                 self.raster_cache.clear();
@@ -783,7 +787,7 @@ impl Editor{
                 if self.doc.layer(o.layer_id).map(|l|l.visible).unwrap_or(false){
                     outline(&page_painter,v.bounds(o.bounds()).expand(3.0),
                         Color32::from_rgb(22,175,148),1.5);
-                    if self.multi_selected.is_empty() &&
+                    if self.tool==Tool::Select && self.multi_selected.is_empty() &&
                         transform::resizable(&o.shape) &&
                         o.bounds().w>0.1 && o.bounds().h>0.1 {
                         for corner in [ResizeCorner::TopLeft,ResizeCorner::TopRight,
@@ -807,11 +811,15 @@ impl Editor{
                         FontId::proportional(11.0),Color32::from_rgb(39,209,177));
                 }
             }
+            if self.tool==Tool::Nodes{
+                self.paint_node_handles(&page_painter,v);
+            }
             if response.drag_started_by(egui::PointerButton::Primary){
                 if let Some(pos)=response.interact_pointer_pos(){
                     if v.rect.contains(pos){
                         let p=self.snapped(v.mm(pos));
                         match self.tool{
+                            Tool::Nodes=>self.begin_node_drag(v,pos),
                             Tool::Select=>{
                                 if let Some((id,corner))=self.corner_at(v,pos){
                                     self.checkpoint();
@@ -850,7 +858,9 @@ impl Editor{
             if response.dragged_by(egui::PointerButton::Primary){
                 if let Some(pos)=response.interact_pointer_pos(){
                     let now=self.snapped(v.mm(pos));
-                    if let Some((id,corner))=self.resize_drag{
+                    if self.node_drag.is_some(){
+                        self.drag_node_to(now);
+                    }else if let Some((id,corner))=self.resize_drag{
                         self.resize_from_corner(id,corner,now,
                             ctx.input(|i|i.modifiers.shift));
                     }else if let Some((p,id))=self.creation_start{
@@ -889,9 +899,14 @@ impl Editor{
             }
             if response.drag_stopped_by(egui::PointerButton::Primary){
                 self.drag_start=None;self.creation_start=None;
-                self.resize_drag=None;
+                self.resize_drag=None;self.node_drag=None;
             }
             if response.double_clicked(){
+                if self.tool==Tool::Nodes{
+                    if let Some(pos)=response.interact_pointer_pos(){
+                        if v.rect.contains(pos){self.insert_node_at_pointer(v,pos);}
+                    }
+                }
                 if self.tool==Tool::Curve{
                     self.curve_start=None;self.curve_draft=None;
                     self.tool=Tool::Select;self.status="Кривая завершена".into();
@@ -902,6 +917,7 @@ impl Editor{
                     if v.rect.contains(pos){
                         let p=self.snapped(v.mm(pos));
                         let shape=match self.tool{
+                            Tool::Nodes=>{self.select_node_near(v,pos);return;},
                             Tool::Select=>{
                                 let id=self.doc.hit_test(p,2.0);
                                 let shift=ctx.input(|i|i.modifiers.shift);
@@ -968,19 +984,28 @@ impl eframe::App for Editor{
             if ctrl&&ctx.input(|i|i.key_pressed(egui::Key::V)){self.paste_selection();}
             if !ctrl {
                 let step=if ctx.input(|i|i.modifiers.shift){10.0}else{1.0};
-                if ctx.input(|i|i.key_pressed(egui::Key::ArrowLeft)){self.nudge_selection(-step,0.0);}
-                if ctx.input(|i|i.key_pressed(egui::Key::ArrowRight)){self.nudge_selection(step,0.0);}
-                if ctx.input(|i|i.key_pressed(egui::Key::ArrowUp)){self.nudge_selection(0.0,-step);}
-                if ctx.input(|i|i.key_pressed(egui::Key::ArrowDown)){self.nudge_selection(0.0,step);}
+                let left=ctx.input(|i|i.key_pressed(egui::Key::ArrowLeft));
+                let right=ctx.input(|i|i.key_pressed(egui::Key::ArrowRight));
+                let up=ctx.input(|i|i.key_pressed(egui::Key::ArrowUp));
+                let down=ctx.input(|i|i.key_pressed(egui::Key::ArrowDown));
+                for (pressed,dx,dy) in [
+                    (left,-step,0.0),(right,step,0.0),(up,0.0,-step),(down,0.0,step)
+                ]{
+                    if pressed{
+                        if self.tool==Tool::Nodes {self.nudge_active_node(dx,dy);}
+                        else{self.nudge_selection(dx,dy);}
+                    }
+                }
             }
         }
         if ctx.input(|i|i.key_pressed(egui::Key::F1)){self.show_welcome=true;}
         if !ctx.wants_keyboard_input() && ctx.input(|i|i.key_pressed(egui::Key::Delete)){
-            self.delete_selection();
+            if self.tool==Tool::Nodes {self.remove_active_node();}
+            else{self.delete_selection();}
         }
         if ctx.input(|i|i.key_pressed(egui::Key::Escape)){
             self.curve_start=None;self.curve_draft=None;self.tool=Tool::Select;
-            self.resize_drag=None;
+            self.resize_drag=None;self.node_drag=None;self.active_node=None;
         }
         if ctx.style().visuals.dark_mode==self.light_theme {
             ui_theme::apply(ctx,self.light_theme);
@@ -997,6 +1022,7 @@ impl eframe::App for Editor{
             if ctx.input(|i|i.key_pressed(egui::Key::F6)){self.change_tool(Tool::Rect);}
             if ctx.input(|i|i.key_pressed(egui::Key::F7)){self.change_tool(Tool::Ellipse);}
             if ctx.input(|i|i.key_pressed(egui::Key::F8)){self.change_tool(Tool::Text);}
+            if ctx.input(|i|i.key_pressed(egui::Key::F10)){self.change_tool(Tool::Nodes);}
             if ctx.input(|i|i.key_pressed(egui::Key::V)){self.change_tool(Tool::Select);}
             if ctx.input(|i|i.key_pressed(egui::Key::B)){self.change_tool(Tool::Curve);}
             if ctx.input(|i|i.key_pressed(egui::Key::L)){self.change_tool(Tool::Line);}

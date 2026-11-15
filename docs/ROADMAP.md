@@ -12,6 +12,12 @@ Goal: fast, legally independent vector graphics editor for advertising, posters 
 - **v0.7**: labelled and explained toolbox, onboarding, sample job, line/hexagon, corner resizing, internal clipboard, correct style duplication, nudging, safe quarter-rotation/mirroring
 - **v0.8**: unified dark/light theme, named objects and filtered list, persistent flat groups, atomic group actions, accurate property geometry, page centering and configurable grid
 
+- **v0.9**: editable curve nodes on the canvas (anchor and control handle move, segment split, guarded deletion, undo) — pending CI/production acceptance
+
+## Long-term milestone plan
+
+See **[the 20-iteration development plan](ROADMAP_20_ITERATIONS.md)** for the ordered backlog I01–I20, acceptance requirements and version targets.
+
 ## Next milestones — highest priority
 1. Real Windows 7/10 and Linux performance benchmarking (2/4/8GB RAM, 1k–100k objects)
 2. Stronger typography: font choices, shaping, line height, kerning, Cyrillic layouts, text-to-path

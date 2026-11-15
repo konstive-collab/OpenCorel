@@ -22,13 +22,15 @@ impl Editor {
         if next!=Tool::Curve { self.curve_start=None; self.curve_draft=None; }
         self.drag_start=None;
         self.creation_start=None;
-        self.resize_drag=None;
+        self.resize_drag=None;self.node_drag=None;
+        if next!=Tool::Nodes{self.active_node=None;}
         if next==Tool::Text{self.inspector_tab=InspectorTab::Properties;}
     }
 
     pub(super) fn new_document(&mut self) {
         self.checkpoint();
         self.doc=Default::default();
+        self.active_node=None;self.node_drag=None;
         self.fill_cache.entries.clear();
         self.vector_cache.clear();
         self.raster_cache.clear();
@@ -127,6 +129,12 @@ impl Editor {
                     if ui.button("Повернуть влево на 90°").clicked(){self.rotate_selection(opencorel_core::transform::QuarterTurn::CounterClockwise);ui.close_menu();}
                     if ui.button("Отразить по горизонтали").clicked(){self.mirror_selection(true);ui.close_menu();}
                     if ui.button("Отразить по вертикали").clicked(){self.mirror_selection(false);ui.close_menu();}
+                    if ui.button("Редактировать узлы      F10").clicked(){
+                        self.change_tool(Tool::Nodes);ui.close_menu();
+                    }
+                    if ui.button("Удалить выбранный узел   Del").clicked(){
+                        self.remove_active_node();ui.close_menu();
+                    }
                     if ui.button("Преобразовать текст в кривые").clicked(){
                         self.text_to_curves();ui.close_menu();
                     }
@@ -233,6 +241,7 @@ impl Editor {
                     ui.add_space(3.0);
                     for (tool,symbol,shortcut) in [
                         (Tool::Select,"↖","V"),
+                        (Tool::Nodes,"◆","F10"),
                         (Tool::Rect,"▭","F6"),
                         (Tool::Ellipse,"◯","F7"),
                         (Tool::Line,"╱","L"),
@@ -255,6 +264,38 @@ impl Editor {
                     ui.label(RichText::new("КАК ПОЛЬЗОВАТЬСЯ").strong().size(12.0));
                     ui.label(RichText::new(productivity::tool_label(self.tool)).strong());
                     ui.add(egui::Label::new(productivity::tool_hint(self.tool)).wrap());
+                    if self.tool==Tool::Nodes{
+                        ui.add_space(4.0);
+                        if let Some((id,address))=self.active_node{
+                            ui.label(format!("Выбран узел: {address:?}"));
+                            let point=self.doc.objects.iter().find(|o|o.id==id)
+                                .and_then(|o|opencorel_core::node_edit::point_at(&o.shape,address));
+                            if let Some(point)=point{
+                                let (mut x,mut y)=(point.x,point.y);
+                                let mut changed=false;
+                                ui.horizontal(|ui|{
+                                    ui.label("X, мм");
+                                    changed|=ui.add(egui::DragValue::new(&mut x)
+                                        .speed(0.25).range(-100_000.0..=100_000.0)).changed();
+                                });
+                                ui.horizontal(|ui|{
+                                    ui.label("Y, мм");
+                                    changed|=ui.add(egui::DragValue::new(&mut y)
+                                        .speed(0.25).range(-100_000.0..=100_000.0)).changed();
+                                });
+                                if changed{
+                                    self.nudge_active_node(x-point.x,y-point.y);
+                                }
+                            }
+                        }
+                        if ui.button("Удалить узел   Del")
+                            .on_hover_text("Удалить выбранную опорную точку; Ctrl+Z отменяет").clicked(){
+                            self.remove_active_node();
+                        }
+                        ui.label(RichText::new(
+                            "Двойной щелчок по сегменту добавляет точку. F10 — включить инструмент."
+                        ).small());
+                    }
                     if self.tool==Tool::Text{
                         ui.add_space(4.0);
                         ui.label(RichText::new("Текст новой надписи:").strong());
@@ -441,6 +482,7 @@ impl Editor {
             ui.heading("Свойства объекта");
             ui.label("Щёлкните по объекту инструментом «Выделение» или выберите его во вкладке «Объекты».");
             ui.label("Объект можно перетащить, а размер изменить ручками по углам.");
+            ui.label("F10 — редактирование узлов кривой прямо на холсте.");
             if self.tool==Tool::Text{
                 ui.label("Содержимое нового текстового объекта:");
                 ui.text_edit_multiline(&mut self.text);
