@@ -1049,7 +1049,7 @@ fn main()->eframe::Result<()>{
             .with_min_inner_size([780.0,520.0]),
         ..Default::default()
     };
-    eframe::run_native("OpenCorel — Vector Editor",options,Box::new(|cc|{
+    eframe::run_native("OpenCorel v0.7 Alpha — Редактор макетов",options,Box::new(|cc|{
         cc.egui_ctx.set_visuals(egui::Visuals::dark());
         Ok(Box::new(Editor::default()))
     }))
