@@ -2,6 +2,7 @@ use eframe::egui::{self,Align2,Color32,FontId,Pos2,Rect,Sense,Stroke,Vec2};
 use opencorel_core::{Bounds,CubicSegment,Document,Object,Point,Shape,Style,valid_color,valid_paint,Alignment,Distribution};
 use std::{f32::consts::TAU,collections::{HashMap,HashSet},hash::{Hash,Hasher},collections::hash_map::DefaultHasher};
 mod workspace;
+mod tool_dock;
 mod ui_theme;
 mod productivity;
 use opencorel_core::transform;
@@ -115,6 +116,7 @@ struct Editor{
     internal_clipboard:Vec<Object>,
     paste_number:usize,
     show_welcome:bool,
+    toolbox_expanded:bool,
     resize_drag:Option<(u64,ResizeCorner)>,
     object_filter:String,
     active_node:Option<(u64,NodeAddress)>,
@@ -149,7 +151,7 @@ impl Default for Editor{
             minimum_image_dpi:150.0,
             show_safe_area:false,safe_margin_mm:5.0,
             internal_clipboard:Vec::new(),paste_number:0,
-            show_welcome:true,resize_drag:None,
+            show_welcome:true,toolbox_expanded:false,resize_drag:None,
             object_filter:String::new(),active_node:None,node_drag:None}
     }
 }
