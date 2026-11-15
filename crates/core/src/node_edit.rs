@@ -87,6 +87,34 @@ pub fn move_node(shape:&mut Shape,address:NodeAddress,to:Point)->Result<(),Strin
     if !valid(to){return Err("Node coordinates must be finite and within ±100000 mm".into());}
     let Some(old)=point_at(shape,address) else{return Err("No such editable node".into());};
     let delta=Point{x:to.x-old.x,y:to.y-old.y};
+    // Moving an anchor also moves attached Bézier handles. Check their
+    // destination BEFORE touching geometry: otherwise a legal anchor target
+    // could overflow an existing handle and make the project unsaveable.
+    let attached:Vec<Point>=match (&*shape,address){
+        (Shape::Bezier{segments,..},NodeAddress::BezierStart)=>
+            segments.first().map(|s|vec![s.control1]).unwrap_or_default(),
+        (Shape::Bezier{segments,..},NodeAddress::BezierEnd(i))=>{
+            let mut v=Vec::with_capacity(2);
+            if let Some(s)=segments.get(i){v.push(s.control2);}
+            if let Some(s)=segments.get(i+1){v.push(s.control1);}
+            v
+        }
+        (Shape::CompoundPath{contours},NodeAddress::CompoundStart(j))=>
+            contours.get(j).and_then(|c|c.segments.first())
+                .map(|s|vec![s.control1]).unwrap_or_default(),
+        (Shape::CompoundPath{contours},NodeAddress::CompoundEnd(j,i))=>{
+            let mut v=Vec::with_capacity(2);
+            if let Some(c)=contours.get(j){
+                if let Some(s)=c.segments.get(i){v.push(s.control2);}
+                if let Some(s)=c.segments.get(i+1){v.push(s.control1);}
+            }
+            v
+        }
+        _=>Vec::new(),
+    };
+    if attached.iter().any(|p|!valid(Point{x:p.x+delta.x,y:p.y+delta.y})){
+        return Err("Moving this anchor would place a control handle outside safe bounds".into());
+    }
     match (shape,address){
         (Shape::Polyline{points,..},NodeAddress::Polyline(i))=>{points[i]=to;}
         (Shape::Bezier{start,segments,..},NodeAddress::BezierStart)=>{
@@ -330,6 +358,17 @@ mod tests{
         doc.validate().unwrap();
         let copied:Document=serde_json::from_str(&serde_json::to_string(&doc).unwrap()).unwrap();
         assert_eq!(doc,copied);
+    }
+    #[test] fn anchor_move_is_atomic_if_attached_handle_overflows(){
+        let mut shape=Shape::Bezier{start:Point{x:0.,y:0.},
+            segments:vec![CubicSegment{
+                control1:Point{x:99_999.,y:0.},
+                control2:Point{x:10.,y:0.},
+                end:Point{x:20.,y:0.}}],closed:false};
+        let before=shape.clone();
+        assert!(move_node(&mut shape,NodeAddress::BezierStart,
+            Point{x:100_000.,y:0.}).is_err());
+        assert_eq!(shape,before);
     }
     #[test] fn reject_bad_addresses_and_nonfinite_coordinates(){
         let mut shape=path();
