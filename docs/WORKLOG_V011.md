@@ -12,14 +12,16 @@ This is a partial engineering milestone, **not a completed release**.
 - Remove automatically cleans dangling clipping references; validation rejects corrupted references when importing KDR.
 - Regression tests cover KDR/JSON preservation, legacy documents, SVG markup, invalid edits and raster targets.
 - GUI menus and selection toolbar actions create/detach clipping with Ctrl+Z/Ctrl+Y undo/redo.
+- On-canvas preview uses resvg (the same renderer as raster proof output), with a 2048px/4MP cap and cache invalidation for shape geometry, styles, layers and mask links.
 - Selection deletion cleans mask references; nonmutating preflight avoids redundant complete document cloning.
 - Added PDF-export smoke test for clipped vector artwork.
 
 ## Outstanding for full I03 acceptance
 
-- True on-canvas mask rendering, including correct selection/hit-testing and mask-source presentation; GUI commands exist but are not yet visually faithful.
+- Bounded on-canvas SVG-based mask rendering with a geometry-sensitive cache is implemented; full manual visual comparison and interaction QA are still pending.
+- Mask-aware mouse selection now ignores fully hidden mask sources and rejects pointer locations outside the visible clip; further edge-case precision checks remain.
 - Automated SVG/PDF raster reference comparisons on Windows/Linux; visual GUI acceptance.
-- Real SVG import/export parity tests and support for alpha/luminance raster masks.
+- SVG import/export fidelity checks using third-party document fixtures; support for alpha/luminance raster masks.
 - Handle visibility/reordering and clipping composition with groups and nested scene elements.
 - End-to-end undo/redo of the new GUI commands and multi-document stress tests.
 
