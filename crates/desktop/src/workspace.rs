@@ -308,10 +308,22 @@ impl Editor {
                 ui.selectable_value(&mut self.inspector_tab,InspectorTab::Page,"Лист");
             });
             ui.separator();
-            match self.inspector_tab{
-                InspectorTab::Objects=>self.inspector_objects(ui),
-                InspectorTab::Properties=>self.inspector_properties(ui),
-                InspectorTab::Page=>self.inspector_page(ui),
+            if self.inspector_tab==InspectorTab::Objects{
+                // The virtualized object list owns its own scroll viewport.
+                self.inspector_objects(ui);
+            }else{
+                // Long typography/path properties must remain reachable on
+                // compact laptop displays rather than being clipped offscreen.
+                egui::ScrollArea::vertical()
+                    .id_salt("properties_docker")
+                    .auto_shrink([false,false])
+                    .show(ui,|ui|{
+                        match self.inspector_tab{
+                            InspectorTab::Properties=>self.inspector_properties(ui),
+                            InspectorTab::Page=>self.inspector_page(ui),
+                            InspectorTab::Objects=>{},
+                        }
+                    });
             }
         });
     }
