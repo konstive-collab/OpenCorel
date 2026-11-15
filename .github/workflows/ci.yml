@@ -33,6 +33,16 @@ jobs:
         run: cargo build --release -p opencorel-desktop
       - name: Build CLI
         run: cargo build --release -p opencorel-cli
+      - name: CLI smoke — native project to SVG and back
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo run --release -p opencorel-cli -- new ci-smoke.kdr
+          cargo run --release -p opencorel-cli -- inspect ci-smoke.kdr
+          cargo run --release -p opencorel-cli -- export-svg ci-smoke.kdr ci-smoke.svg
+          grep -q '<svg' ci-smoke.svg
+          cargo run --release -p opencorel-cli -- import-svg ci-smoke.svg ci-smoke-import.kdr
+          cargo run --release -p opencorel-cli -- inspect ci-smoke-import.kdr
       - name: Upload executable
         uses: actions/upload-artifact@v4
         with:
