@@ -1155,6 +1155,7 @@ impl Editor {
         self.doc.objects.retain(|o|!ids.contains(&o.id));
         self.doc.clip_links.retain(|clip|
             !ids.contains(&clip.source_id)&&!ids.contains(&clip.target_id));
+        self.doc.appearances.retain(|id,_|!ids.contains(id));
         self.selected=None;self.multi_selected.clear();
         self.status="Выделенные объекты удалены".into();
     }
