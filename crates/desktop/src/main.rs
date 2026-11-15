@@ -2,6 +2,7 @@ use eframe::egui::{self,Align2,Color32,FontId,Pos2,Rect,Sense,Stroke,Vec2};
 use opencorel_core::{Bounds,CubicSegment,Document,Object,Point,Shape,Style,valid_color,valid_paint,Alignment,Distribution};
 use std::{f32::consts::TAU,collections::{HashMap,HashSet},hash::{Hash,Hasher},collections::hash_map::DefaultHasher};
 mod workspace;
+mod tool_dock;
 mod ui_theme;
 mod productivity;
 use opencorel_core::transform;
@@ -86,6 +87,7 @@ struct Editor{
     undo:Vec<Document>,
     redo:Vec<Document>,
     inspector_tab:InspectorTab,
+    show_inspector:bool,
     show_grid:bool,
     snap_grid:bool,
     grid_mm:f32,
@@ -124,6 +126,7 @@ struct Editor{
     internal_clipboard:Vec<Object>,
     paste_number:usize,
     show_welcome:bool,
+    toolbox_expanded:bool,
     resize_drag:Option<(u64,ResizeCorner)>,
     object_filter:String,
     active_node:Option<(u64,NodeAddress)>,
@@ -142,7 +145,8 @@ impl Default for Editor{
             zoom:1.0,drag_start:None,creation_start:None,
             curve_start:None,curve_draft:None,active_layer:1,pan:Vec2::ZERO,
             undo:Vec::new(),redo:Vec::new(),
-            inspector_tab:InspectorTab::Objects,show_grid:false,snap_grid:false,
+            inspector_tab:InspectorTab::Objects,show_inspector:true,
+            show_grid:false,snap_grid:false,
             grid_mm:10.0,
             show_rulers:true,light_theme:false,cursor_mm:None,
             fill_cache:FillCache::default(),vector_cache:VectorCache::default(),
@@ -163,7 +167,7 @@ impl Default for Editor{
             minimum_image_dpi:150.0,
             show_safe_area:false,safe_margin_mm:5.0,
             internal_clipboard:Vec::new(),paste_number:0,
-            show_welcome:true,resize_drag:None,
+            show_welcome:true,toolbox_expanded:false,resize_drag:None,
             object_filter:String::new(),active_node:None,node_drag:None}
     }
 }
@@ -1048,6 +1052,10 @@ impl eframe::App for Editor{
             }
         }
         if ctx.input(|i|i.key_pressed(egui::Key::F1)){self.show_welcome=true;}
+        if !ctx.wants_keyboard_input() &&
+            ctx.input(|i|i.key_pressed(egui::Key::F9)){
+            self.show_inspector=!self.show_inspector;
+        }
         if !ctx.wants_keyboard_input() && ctx.input(|i|i.key_pressed(egui::Key::Delete)){
             if self.tool==Tool::Nodes {self.remove_active_node();}
             else{self.delete_selection();}
@@ -1080,7 +1088,7 @@ impl eframe::App for Editor{
         self.top_workspace(ctx);
         self.tool_sidebar(ctx);
         self.color_palette(ctx);
-        self.inspector(ctx);
+        if self.show_inspector{self.inspector(ctx);}
         self.workspace_footer(ctx);
         self.canvas(ctx);
         self.welcome_window(ctx);
@@ -1304,7 +1312,8 @@ fn main()->eframe::Result<()>{
             .with_min_inner_size([780.0,520.0]),
         ..Default::default()
     };
-    eframe::run_native("OpenCorel v0.10 Alpha — Редактор макетов",options,Box::new(|cc|{
+    eframe::run_native(concat!("OpenCorel v",env!("CARGO_PKG_VERSION"),
+        " — Редактор макетов"),options,Box::new(|cc|{
         ui_theme::apply(&cc.egui_ctx,false);
         Ok(Box::new(Editor::default()))
     }))
