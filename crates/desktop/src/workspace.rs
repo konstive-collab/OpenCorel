@@ -954,9 +954,12 @@ impl Editor {
         if ids.is_empty(){self.status="Сначала выберите объект".into();return;}
         let editable:HashSet<u64>=self.doc.layers.iter()
             .filter(|l|l.visible&&!l.locked).map(|l|l.id).collect();
-        if !self.doc.objects.iter().any(|o|ids.contains(&o.id)&&editable.contains(&o.layer_id)){
-            self.status="Слои недоступны для редактирования".into();return;
+        if self.doc.objects.iter().filter(|o|ids.contains(&o.id))
+            .any(|o|!editable.contains(&o.layer_id)){
+            self.status="Цвет не изменён: часть выделения находится в закрытом слое".into();
+            return;
         }
+        if !self.doc.objects.iter().any(|o|ids.contains(&o.id)){return;}
         self.checkpoint();
         for obj in self.doc.objects.iter_mut(){
             if ids.contains(&obj.id)&&editable.contains(&obj.layer_id){
@@ -974,11 +977,14 @@ impl Editor {
         if ids.is_empty(){return;}
         let editable:HashSet<u64>=self.doc.layers.iter()
             .filter(|l|l.visible&&!l.locked).map(|l|l.id).collect();
-        if !self.doc.objects.iter().any(|o|ids.contains(&o.id)&&editable.contains(&o.layer_id)){
-            self.status="Выделенные объекты заблокированы".into();return;
+        if self.doc.objects.iter().any(|o|ids.contains(&o.id)&&
+            !editable.contains(&o.layer_id)){
+            self.status="Удаление отменено: выделение включает заблокированные слои".into();
+            return;
         }
+        if !self.doc.objects.iter().any(|o|ids.contains(&o.id)){return;}
         self.checkpoint();
-        self.doc.objects.retain(|o|!(ids.contains(&o.id)&&editable.contains(&o.layer_id)));
+        self.doc.objects.retain(|o|!ids.contains(&o.id));
         self.selected=None;self.multi_selected.clear();
         self.status="Выделенные объекты удалены".into();
     }
@@ -987,15 +993,31 @@ impl Editor {
         self.duplicate_preserving_styles();
     }
     pub(super) fn reorder_selection(&mut self,front:bool){
-        if !self.multi_selected.is_empty(){
-            self.status="Порядок наложения меняется по одному объекту".into();return;
+        let ids:HashSet<u64>=self.selection_ids().into_iter().collect();
+        if ids.is_empty(){return;}
+        let editable:HashSet<u64>=self.doc.layers.iter()
+            .filter(|l|l.visible&&!l.locked).map(|l|l.id).collect();
+        if self.doc.objects.iter().any(|o|ids.contains(&o.id)&&
+            !editable.contains(&o.layer_id)){
+            self.status="Порядок не изменён: слой заблокирован".into();return;
         }
-        let Some(id)=self.selected else{return;};
-        let Some(index)=self.doc.objects.iter().position(|o|o.id==id) else{return;};
-        let layer=self.doc.objects[index].layer_id;
-        if !self.doc.layer(layer).map(|l|l.visible&&!l.locked).unwrap_or(false){return;}
+        if !self.doc.objects.iter().any(|o|ids.contains(&o.id)){return;}
         self.checkpoint();
-        let obj=self.doc.objects.remove(index);
-        if front{self.doc.objects.push(obj);}else{self.doc.objects.insert(0,obj);}
+        let mut selected=Vec::new();
+        let mut rest=Vec::new();
+        for obj in self.doc.objects.drain(..){
+            if ids.contains(&obj.id){selected.push(obj);}
+            else{rest.push(obj);}
+        }
+        self.doc.objects=if front{
+            rest.extend(selected);rest
+        }else{
+            selected.extend(rest);selected
+        };
+        self.status=if front{
+            "Выделенные объекты перемещены на передний план".into()
+        }else{
+            "Выделенные объекты перемещены на задний план".into()
+        };
     }
 }
