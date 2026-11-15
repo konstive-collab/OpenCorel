@@ -469,9 +469,14 @@ impl Document {
     pub fn hit_test(&self,p:Point,tolerance:f32) -> Option<u64> {
         let editable:HashSet<u64>=self.layers.iter()
             .filter(|layer|layer.visible&&!layer.locked).map(|layer|layer.id).collect();
-        self.objects.iter().rev().find(|o|
-            editable.contains(&o.layer_id) && o.bounds().contains(p,tolerance)
-        ).map(|o|o.id)
+        let sources:HashSet<u64>=self.clip_links.iter().map(|c|c.source_id).collect();
+        self.objects.iter().rev().find(|o|{
+            if !editable.contains(&o.layer_id) || sources.contains(&o.id)
+                || !o.bounds().contains(p,tolerance){return false;}
+            self.clip_links.iter().find(|link|link.target_id==o.id)
+                .is_none_or(|link|self.objects.iter().find(|src|src.id==link.source_id)
+                    .is_some_and(|src|clip_contains_point(&src.shape,p)))
+        }).map(|o|o.id)
     }
     pub fn validate(&self)->Result<(),String>{
         if self.schema_version!=SCHEMA_VERSION {return Err("Unknown document schema".into());}
@@ -756,6 +761,60 @@ fn clip_geometry_svg(shape:&Shape)->Option<String>{
         }
         _=>return None
     })
+}
+/// Test visibility inside a clip path. This does not change the underlying
+/// editable geometry and uses the same even-odd rule as SVG clip output.
+fn clip_contains_point(shape:&Shape,p:Point)->bool{
+    match shape{
+        Shape::Rectangle{x,y,w,h}=>p.x>=*x&&p.y>=*y&&p.x<=x+w&&p.y<=y+h,
+        Shape::Ellipse{x,y,w,h}=>{
+            if *w<=0.0||*h<=0.0{return false;}
+            let dx=(p.x-x-w*0.5)/(w*0.5);
+            let dy=(p.y-y-h*0.5)/(h*0.5);
+            dx*dx+dy*dy<=1.0
+        }
+        Shape::Polyline{points,closed}=>*closed&&polygon_contains(points,p),
+        Shape::Bezier{start,segments,closed}=>{
+            *closed&&polygon_contains(&flatten_contour(*start,segments),p)
+        }
+        Shape::CompoundPath{contours}=>contours.iter().filter(|c|
+            c.closed&&polygon_contains(&flatten_contour(c.start,&c.segments),p)
+        ).count()%2==1,
+        _=>false,
+    }
+}
+fn flatten_contour(start:Point,segments:&[CubicSegment])->Vec<Point>{
+    let mut polygon=Vec::with_capacity(1+segments.len()*16);
+    polygon.push(start);
+    let mut from=start;
+    for segment in segments{
+        for step in 1..=16{
+            let t=step as f32/16.0;
+            let u=1.0-t;
+            polygon.push(Point{
+                x:u*u*u*from.x+3.0*u*u*t*segment.control1.x+
+                    3.0*u*t*t*segment.control2.x+t*t*t*segment.end.x,
+                y:u*u*u*from.y+3.0*u*u*t*segment.control1.y+
+                    3.0*u*t*t*segment.control2.y+t*t*t*segment.end.y,
+            });
+        }
+        from=segment.end;
+    }
+    polygon
+}
+fn polygon_contains(points:&[Point],p:Point)->bool{
+    if points.len()<3{return false;}
+    let mut inside=false;
+    let mut previous=points[points.len()-1];
+    for &current in points{
+        if (current.y>p.y)!=(previous.y>p.y){
+            let crossing=(previous.x-current.x)*(p.y-current.y)
+                /(previous.y-current.y)+current.x;
+            if p.x<crossing{inside=!inside;}
+        }
+        previous=current;
+    }
+    inside
 }
 fn raster_signature_matches(mime:&str,raw:&[u8])->bool{
     match mime{
