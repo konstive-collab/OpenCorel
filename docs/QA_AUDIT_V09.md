@@ -40,4 +40,8 @@ Remaining architecture issues: GUI hit-testing uses bounding boxes; drag undo st
 
 ## Status
 
-Audit fixes are on branch fix/v09-audit-hardening; CI and integration tests are the merge gate. The report should be updated with the final exact CI run once all builds are green. After audit merge, I02 v0.10 will implement bounded closed-shape boolean operations in a separate branch.
+**Completed:** [PR #16](https://github.com/konstive-collab/OpenCorel/pull/16) merged to main at commit a51bf49c. The audited snapshot passed debug tests, release-mode tests, Clippy, desktop release, CLI release and artifact publishing on **Windows x64 and Linux x64**. Verified evidence: [GitHub Actions run 43735210079](https://github.com/konstive-collab/OpenCorel/actions/runs/43735210079). Both archived binaries are published as opencorel-Windows-x64 and opencorel-Linux-x64.
+
+The initial Windows stress suite identified a test-harness mistake (attempting to overwrite a still-open NamedTempFile); corrected to write a new path and rerun successfully. This is not evidence of a product save-file bug.
+
+The next iteration I02 v0.10 is being developed separately on branch feat/boolean-ops-v010. Production GUI, color, CDR and legacy OS validation remains explicitly pending.
