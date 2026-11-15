@@ -2,6 +2,8 @@ use eframe::egui::{self,Align2,Color32,FontId,Pos2,Rect,Sense,Stroke,Vec2};
 use opencorel_core::{Bounds,CubicSegment,Document,Object,Point,Shape,Style,valid_color,valid_paint,Alignment,Distribution};
 use std::{f32::consts::TAU,collections::{HashMap,HashSet},hash::{Hash,Hasher},collections::hash_map::DefaultHasher};
 mod workspace;
+mod productivity;
+use opencorel_core::transform;
 mod vector_preview;
 mod raster_preview;
 mod compound_render;
@@ -13,6 +15,18 @@ use workspace::InspectorTab;
 
 #[derive(Clone,Copy,PartialEq)]
 enum Tool { Select, Rect, Ellipse, Text, Curve }
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+enum ResizeCorner{TopLeft,TopRight,BottomLeft,BottomRight}
+impl ResizeCorner{
+    fn point(self,b:Bounds)->Point{
+        match self{
+            Self::TopLeft=>Point{x:b.x,y:b.y},
+            Self::TopRight=>Point{x:b.x+b.w,y:b.y},
+            Self::BottomLeft=>Point{x:b.x,y:b.y+b.h},
+            Self::BottomRight=>Point{x:b.x+b.w,y:b.y+b.h}
+        }
+    }
+}
 
 #[derive(Default)]
 struct FillCache { entries:HashMap<u64,(u64,Vec<usize>)> }
@@ -81,6 +95,10 @@ struct Editor{
     minimum_image_dpi:f32,
     show_safe_area:bool,
     safe_margin_mm:f32,
+    internal_clipboard:Vec<Object>,
+    paste_number:usize,
+    show_welcome:bool,
+    resize_drag:Option<(u64,ResizeCorner)>,
 }
 impl Default for Editor{
     fn default()->Self{
@@ -104,7 +122,9 @@ impl Default for Editor{
             keep_bitmap_ratio:true,
             show_preflight:false,preflight_lines:Vec::new(),
             minimum_image_dpi:150.0,
-            show_safe_area:false,safe_margin_mm:5.0}
+            show_safe_area:false,safe_margin_mm:5.0,
+            internal_clipboard:Vec::new(),paste_number:0,
+            show_welcome:true,resize_drag:None}
     }
 }
 #[derive(Clone,Copy)]
@@ -303,6 +323,46 @@ impl Editor{
         self.compound_cache.clear();
         self.status=format!("{} текстовых объектов преобразовано в кривые. Ctrl+Z вернёт текст.",count);
     }
+    fn corner_at(&self,v:View,pos:Pos2)->Option<(u64,ResizeCorner)>{
+        if self.tool!=Tool::Select || !self.multi_selected.is_empty(){return None;}
+        let id=self.selected?;
+        let o=self.doc.objects.iter().find(|o|o.id==id)?;
+        let editable=self.doc.layer(o.layer_id)
+            .map(|l|l.visible&&!l.locked).unwrap_or(false);
+        if !editable||!transform::resizable(&o.shape){return None;}
+        let b=o.bounds();
+        if b.w<0.1||b.h<0.1{return None;}
+        for corner in [ResizeCorner::TopLeft,ResizeCorner::TopRight,
+            ResizeCorner::BottomLeft,ResizeCorner::BottomRight]{
+            let screen=v.screen(corner.point(b));
+            if (screen-pos).length_sq()<=100.0{return Some((id,corner));}
+        }
+        None
+    }
+    fn resize_from_corner(&mut self,id:u64,corner:ResizeCorner,
+        pointer:Point,keep_ratio:bool){
+        let Some(index)=self.doc.objects.iter().position(|o|o.id==id) else{return;};
+        let b=self.doc.objects[index].bounds();
+        let left=matches!(corner,ResizeCorner::TopLeft|ResizeCorner::BottomLeft);
+        let top=matches!(corner,ResizeCorner::TopLeft|ResizeCorner::TopRight);
+        let ax=if left{b.x+b.w}else{b.x};
+        let ay=if top{b.y+b.h}else{b.y};
+        let mut w=(if left{ax-pointer.x}else{pointer.x-ax}).clamp(0.1,100_000.0);
+        let mut h=(if top{ay-pointer.y}else{pointer.y-ay}).clamp(0.1,100_000.0);
+        if keep_ratio && b.w>0.1 && b.h>0.1{
+            let ratio=b.w/b.h;
+            if w/ratio>h{h=(w/ratio).clamp(0.1,100_000.0);}
+            else{w=(h*ratio).clamp(0.1,100_000.0);}
+        }
+        let target=Bounds{x:if left{ax-w}else{ax},
+            y:if top{ay-h}else{ay},w,h};
+        if let Err(e)=transform::resize_shape(&mut self.doc.objects[index].shape,target){
+            self.status=e;
+        }else{
+            self.fill_cache.entries.clear();
+            self.compound_cache.clear();
+        }
+    }
     fn selection_ids(&self)->Vec<u64>{
         let mut ids=Vec::with_capacity(self.multi_selected.len()+1);
         if let Some(id)=self.selected{ids.push(id);}
@@ -366,6 +426,7 @@ impl Editor{
             self.raster_cache.clear();
             self.selected=None;self.multi_selected.clear();
             self.curve_draft=None;self.curve_start=None;
+            self.resize_drag=None;
             self.status="Отменено".into();
         }
     }
@@ -378,6 +439,7 @@ impl Editor{
             self.raster_cache.clear();
             self.selected=None;self.multi_selected.clear();
             self.curve_draft=None;self.curve_start=None;
+            self.resize_drag=None;
             self.status="Повторено".into();
         }
     }
@@ -497,6 +559,7 @@ impl Editor{
                 self.checkpoint();
                 self.doc=result.document;
                 self.selected=None;self.multi_selected.clear();self.active_layer=1;
+                self.resize_drag=None;
                 self.fill_cache.entries.clear();self.vector_cache.clear();
                 self.compound_cache.clear();
                 self.raster_cache.clear();
@@ -777,6 +840,20 @@ impl eframe::App for Editor{
                 }
             }
         }
+        if !ctx.wants_keyboard_input(){
+            let ctrl=ctx.input(|i|i.modifiers.command);
+            if ctrl&&ctx.input(|i|i.key_pressed(egui::Key::C)){self.copy_selection();}
+            if ctrl&&ctx.input(|i|i.key_pressed(egui::Key::X)){self.cut_selection();}
+            if ctrl&&ctx.input(|i|i.key_pressed(egui::Key::V)){self.paste_selection();}
+            if !ctrl {
+                let step=if ctx.input(|i|i.modifiers.shift){10.0}else{1.0};
+                if ctx.input(|i|i.key_pressed(egui::Key::ArrowLeft)){self.nudge_selection(-step,0.0);}
+                if ctx.input(|i|i.key_pressed(egui::Key::ArrowRight)){self.nudge_selection(step,0.0);}
+                if ctx.input(|i|i.key_pressed(egui::Key::ArrowUp)){self.nudge_selection(0.0,-step);}
+                if ctx.input(|i|i.key_pressed(egui::Key::ArrowDown)){self.nudge_selection(0.0,step);}
+            }
+        }
+        if ctx.input(|i|i.key_pressed(egui::Key::F1)){self.show_welcome=true;}
         if !ctx.wants_keyboard_input() && ctx.input(|i|i.key_pressed(egui::Key::Delete)){
             self.delete_selection();
         }
@@ -801,6 +878,7 @@ impl eframe::App for Editor{
         self.inspector(ctx);
         self.workspace_footer(ctx);
         self.canvas(ctx);
+        self.welcome_window(ctx);
         if self.show_preflight{
             egui::Window::new("Проверка макета")
                 .open(&mut self.show_preflight)
@@ -820,6 +898,16 @@ impl eframe::App for Editor{
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn resize_corner_keeps_opposite_edge(){
+        let mut e=Editor::default();
+        let id=e.doc.objects[0].id;
+        e.resize_from_corner(id,ResizeCorner::BottomRight,
+            Point{x:900.0,y:500.0},false);
+        let b=e.doc.objects[0].bounds();
+        assert_eq!(b.x,70.0);assert_eq!(b.y,110.0);
+        assert_eq!(b.w,830.0);assert_eq!(b.h,390.0);
+    }
     #[test]
     fn additive_selection_toggles_objects(){
         let mut editor=Editor::default();
