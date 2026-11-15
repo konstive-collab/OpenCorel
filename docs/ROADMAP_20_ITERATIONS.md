@@ -50,4 +50,5 @@ No estimated dates are asserted. Capabilities marked "research", especially CDR 
 |---|---|---|---|---|
 | I01 v0.9 | Implemented; manual GUI/production QA pending | [#15](https://github.com/konstive-collab/OpenCorel/pull/15) | [Windows + Linux passed](https://github.com/konstive-collab/OpenCorel/actions/runs/43726921360) | Node edit, tested geometry and published desktop/CLI artifacts; merged as `58466f5` |
 | I02 v0.10 | Implemented; manual GUI/production QA pending | [#17](https://github.com/konstive-collab/OpenCorel/pull/17) | [Windows + Linux passed](https://github.com/konstive-collab/OpenCorel/actions/runs/43736421574) | Boolean union/subtract/intersect/XOR, editable compound result, holes and undo; merged as `4feef2f` |
-| I03–I20 | Planned | — | — | Not implemented |
+| I03 v0.11 | In progress: vector clipping, GUI actions and cached preview implemented; Windows/Linux CI + manual QA pending | [#19](https://github.com/konstive-collab/OpenCorel/pull/19) | pending | Mask links, KDR, SVG/PDF, geometry-aware hit test; alpha masks and external fidelity fixtures outstanding |
+| I04–I20 | Planned | — | — | Not implemented |

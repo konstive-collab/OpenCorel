@@ -228,6 +228,11 @@ impl Object{
     }
 }
 
+/// Non-destructive SVG-compatible vector clipping. The source is preserved as
+/// an editable object, and can clip multiple targets without altering geometry.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ClipLink { pub source_id: u64, pub target_id: u64 }
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Document {
     pub schema_version: u32,
@@ -239,12 +244,14 @@ pub struct Document {
     pub layers: Vec<Layer>,
     #[serde(default="default_next_layer_id")]
     pub next_layer_id: u64,
+    #[serde(default, skip_serializing_if="Vec::is_empty")]
+    pub clip_links: Vec<ClipLink>,
 }
 impl Default for Document {
     fn default() -> Self {
         Self { schema_version:SCHEMA_VERSION, name:"Новый макет".into(),
             page:Page {width_mm:841.0,height_mm:594.0},objects:Vec::new(),next_id:1,
-            layers:default_layers(),next_layer_id:default_next_layer_id() }
+            layers:default_layers(),next_layer_id:default_next_layer_id(),clip_links:Vec::new() }
     }
 }
 
@@ -272,7 +279,47 @@ impl Document {
             total=total.saturating_add(std::mem::size_of::<Object>()
                 +obj.style.fill.len()+obj.style.stroke.len()+obj.name.len()+shape_bytes);
         }
-        total
+        total.saturating_add(self.clip_links.len()*std::mem::size_of::<ClipLink>())
+    }
+    /// Apply a closed vector object as a reusable clipping shape.
+    /// No geometry or styling is destroyed; source remains editable.
+    pub fn check_clip(&self, source_id:u64, target_id:u64)->Result<(),String>{
+        if source_id==target_id {return Err("A clipping source cannot clip itself".into());}
+        let source=self.objects.iter().find(|o|o.id==source_id)
+            .ok_or("Clipping source not found")?;
+        let target=self.objects.iter().find(|o|o.id==target_id)
+            .ok_or("Clipping target not found")?;
+        if !clip_shape_supported(&source.shape) {
+            return Err("Clipping source must be a closed vector shape".into());
+        }
+        if source.group_id.is_some() || target.group_id.is_some() {
+            return Err("Grouped objects cannot be clipping operands".into());
+        }
+        let editable=|layer_id|self.layer(layer_id)
+            .is_some_and(|l|l.visible&&!l.locked);
+        if !editable(source.layer_id)||!editable(target.layer_id) {
+            return Err("Clipping operands must be on visible, unlocked layers".into());
+        }
+        if self.clip_links.iter().any(|c|c.target_id==source_id ||
+            c.source_id==target_id) {
+            return Err("Nested or cyclic clip links are unsupported".into());
+        }
+        if self.clip_links.iter().filter(|c|c.target_id!=target_id).count()>=10000 {
+            return Err("Clipping link limit exceeded".into());
+        }
+        Ok(())
+    }
+    pub fn set_clip(&mut self, source_id:u64, target_id:u64)->Result<(),String>{
+        self.check_clip(source_id,target_id)?;
+        // Replacing an existing target link is atomic.
+        self.clip_links.retain(|c|c.target_id!=target_id);
+        self.clip_links.push(ClipLink{source_id,target_id});
+        Ok(())
+    }
+    pub fn clear_clip(&mut self,target_id:u64)->bool{
+        let n=self.clip_links.len();
+        self.clip_links.retain(|c|c.target_id!=target_id);
+        self.clip_links.len()!=n
     }
     pub fn add(&mut self, shape:Shape, style:Style) -> u64 {
         self.add_to_layer(shape,style,1)
@@ -348,7 +395,11 @@ impl Document {
         self.objects.iter_mut().find(|o|o.id==id)
     }
     pub fn remove(&mut self,id:u64) -> bool {
-        let n=self.objects.len(); self.objects.retain(|o|o.id!=id); self.objects.len()!=n
+        let n=self.objects.len(); self.objects.retain(|o|o.id!=id);
+        if self.objects.len()!=n {
+            self.clip_links.retain(|c|c.source_id!=id&&c.target_id!=id);
+            true
+        }else{false}
     }
     /// Align the bounding boxes of eligible, unlocked objects.
     pub fn align_objects(&mut self,ids:&[u64],alignment:Alignment)->usize {
@@ -419,9 +470,14 @@ impl Document {
     pub fn hit_test(&self,p:Point,tolerance:f32) -> Option<u64> {
         let editable:HashSet<u64>=self.layers.iter()
             .filter(|layer|layer.visible&&!layer.locked).map(|layer|layer.id).collect();
-        self.objects.iter().rev().find(|o|
-            editable.contains(&o.layer_id) && o.bounds().contains(p,tolerance)
-        ).map(|o|o.id)
+        let sources:HashSet<u64>=self.clip_links.iter().map(|c|c.source_id).collect();
+        self.objects.iter().rev().find(|o|{
+            if !editable.contains(&o.layer_id) || sources.contains(&o.id)
+                || !o.bounds().contains(p,tolerance){return false;}
+            self.clip_links.iter().find(|link|link.target_id==o.id)
+                .is_none_or(|link|self.objects.iter().find(|src|src.id==link.source_id)
+                    .is_some_and(|src|clip_contains_point(&src.shape,p)))
+        }).map(|o|o.id)
     }
     pub fn validate(&self)->Result<(),String>{
         if self.schema_version!=SCHEMA_VERSION {return Err("Unknown document schema".into());}
@@ -429,6 +485,24 @@ impl Document {
             return Err("Invalid page dimensions".into());
         }
         if self.objects.len()>100_000{return Err("Object limit exceeded".into());}
+        if self.clip_links.len()>10000{return Err("Clipping link limit exceeded".into());}
+        let mut targets=HashSet::new();
+        for link in &self.clip_links{
+            if link.source_id==link.target_id || !targets.insert(link.target_id) {
+                return Err("Duplicate or self-referencing clipping link".into());
+            }
+            let source=self.objects.iter().find(|o|o.id==link.source_id)
+                .ok_or("Clipping source missing")?;
+            if !clip_shape_supported(&source.shape) {
+                return Err("Invalid or open clipping source".into());
+            }
+            if !self.objects.iter().any(|o|o.id==link.target_id) {
+                return Err("Clipping target missing".into());
+            }
+        }
+        if self.clip_links.iter().any(|c|targets.contains(&c.source_id)) {
+            return Err("Nested or cyclic clipping references are unsupported".into());
+        }
         if self.next_id==0 || self.next_id==u64::MAX ||
             self.next_layer_id==0 || self.next_layer_id==u64::MAX {
             return Err("Invalid identifier allocation state".into());
@@ -559,7 +633,16 @@ impl Document {
             "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{}mm\" height=\"{}mm\" viewBox=\"0 0 {} {}\">\n<title>{}</title>\n",
             self.page.width_mm,self.page.height_mm,self.page.width_mm,self.page.height_mm,
             xml_escape(&self.name));
+        let clip_sources:HashSet<u64>=self.clip_links.iter().map(|c|c.source_id).collect();
+        for link in &self.clip_links{
+            if let Some(source)=self.objects.iter().find(|o|o.id==link.source_id){
+                if let Some(geometry)=clip_geometry_svg(&source.shape){
+                    out.push_str(&format!("<defs><clipPath id=\"clip-target-{}\" clipPathUnits=\"userSpaceOnUse\">{geometry}</clipPath></defs>\n",link.target_id));
+                }
+            }
+        }
         for obj in self.visible_objects() {
+            if clip_sources.contains(&obj.id){continue;}
             let s=&obj.style;
             let common=format!("fill=\"{}\" stroke=\"{}\" stroke-width=\"{}\"",
                 s.fill,s.stroke,s.stroke_width_mm);
@@ -632,10 +715,107 @@ impl Document {
                     } else {format!("<polyline points=\"{coords}\" {common} fill=\"none\"/>")}
                 }
             };
-            out.push_str(&format!("<g id=\"object-{}\">{element}</g>\n",obj.id));
+            if self.clip_links.iter().any(|c|c.target_id==obj.id) {
+                out.push_str(&format!("<g id=\"object-{}\" clip-path=\"url(#clip-target-{})\">{element}</g>\n",obj.id,obj.id));
+            }else{
+                out.push_str(&format!("<g id=\"object-{}\">{element}</g>\n",obj.id));
+            }
         }
         out.push_str("</svg>\n");out
     }
+}
+/// SVG mask geometry is intentionally restricted to closed, filled vector paths.
+fn clip_shape_supported(shape:&Shape)->bool{
+    match shape{
+        Shape::Rectangle{w,h,..}|Shape::Ellipse{w,h,..}=>*w>0.0&&*h>0.0,
+        Shape::Polyline{points,closed}=>*closed&&points.len()>=3,
+        Shape::Bezier{segments,closed,..}=>*closed&&!segments.is_empty(),
+        Shape::CompoundPath{contours}=>!contours.is_empty()&&
+            contours.iter().all(|c|c.closed&&!c.segments.is_empty()),
+        _=>false,
+    }
+}
+fn clip_geometry_svg(shape:&Shape)->Option<String>{
+    if !clip_shape_supported(shape){return None;}
+    let contour_path=|start:Point,segments:&[CubicSegment],closed:bool|{
+        let mut d=format!("M {} {}",start.x,start.y);
+        for seg in segments{
+            d.push_str(&format!(" C {} {}, {} {}, {} {}",
+                seg.control1.x,seg.control1.y,seg.control2.x,seg.control2.y,
+                seg.end.x,seg.end.y));
+        }
+        if closed{d.push_str(" Z");}
+        d
+    };
+    Some(match shape{
+        Shape::Rectangle{x,y,w,h}=>format!("<rect x=\"{x}\" y=\"{y}\" width=\"{w}\" height=\"{h}\"/>"),
+        Shape::Ellipse{x,y,w,h}=>format!("<ellipse cx=\"{}\" cy=\"{}\" rx=\"{}\" ry=\"{}\"/>",x+w/2.0,y+h/2.0,w/2.0,h/2.0),
+        Shape::Polyline{points,..}=>{
+            let coords=points.iter().map(|p|format!("{},{}",p.x,p.y)).collect::<Vec<_>>().join(" ");
+            format!("<polygon points=\"{coords}\"/>")
+        }
+        Shape::Bezier{start,segments,closed}=>format!("<path d=\"{}\"/>",contour_path(*start,segments,*closed)),
+        Shape::CompoundPath{contours}=>{
+            let d=contours.iter().map(|c|contour_path(c.start,&c.segments,c.closed))
+                .collect::<Vec<_>>().join(" ");
+            format!("<path d=\"{d}\" clip-rule=\"evenodd\"/>")
+        }
+        _=>return None
+    })
+}
+/// Test visibility inside a clip path. This does not change the underlying
+/// editable geometry and uses the same even-odd rule as SVG clip output.
+fn clip_contains_point(shape:&Shape,p:Point)->bool{
+    match shape{
+        Shape::Rectangle{x,y,w,h}=>p.x>=*x&&p.y>=*y&&p.x<=*x+*w&&p.y<=*y+*h,
+        Shape::Ellipse{x,y,w,h}=>{
+            if *w<=0.0||*h<=0.0{return false;}
+            let dx=(p.x-*x-*w*0.5)/(*w*0.5);
+            let dy=(p.y-*y-*h*0.5)/(*h*0.5);
+            dx*dx+dy*dy<=1.0
+        }
+        Shape::Polyline{points,closed}=>*closed&&polygon_contains(points,p),
+        Shape::Bezier{start,segments,closed}=>{
+            *closed&&polygon_contains(&flatten_contour(*start,segments),p)
+        }
+        Shape::CompoundPath{contours}=>contours.iter().filter(|c|
+            c.closed&&polygon_contains(&flatten_contour(c.start,&c.segments),p)
+        ).count()%2==1,
+        _=>false,
+    }
+}
+fn flatten_contour(start:Point,segments:&[CubicSegment])->Vec<Point>{
+    let mut polygon=Vec::with_capacity(1+segments.len()*16);
+    polygon.push(start);
+    let mut from=start;
+    for segment in segments{
+        for step in 1..=16{
+            let t=step as f32/16.0;
+            let u=1.0-t;
+            polygon.push(Point{
+                x:u*u*u*from.x+3.0*u*u*t*segment.control1.x+
+                    3.0*u*t*t*segment.control2.x+t*t*t*segment.end.x,
+                y:u*u*u*from.y+3.0*u*u*t*segment.control1.y+
+                    3.0*u*t*t*segment.control2.y+t*t*t*segment.end.y,
+            });
+        }
+        from=segment.end;
+    }
+    polygon
+}
+fn polygon_contains(points:&[Point],p:Point)->bool{
+    if points.len()<3{return false;}
+    let mut inside=false;
+    let mut previous=points[points.len()-1];
+    for &current in points{
+        if (current.y>p.y)!=(previous.y>p.y){
+            let crossing=(previous.x-current.x)*(p.y-current.y)
+                /(previous.y-current.y)+current.x;
+            if p.x<crossing{inside=!inside;}
+        }
+        previous=current;
+    }
+    inside
 }
 fn raster_signature_matches(mime:&str,raw:&[u8])->bool{
     match mime{

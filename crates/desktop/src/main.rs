@@ -8,6 +8,9 @@ use opencorel_core::transform;
 use opencorel_core::node_edit::{self,NodeAddress};
 mod node_interaction;
 mod boolean_commands;
+mod clip_commands;
+mod masked_canvas;
+use masked_canvas::MaskedCanvasCache;
 mod vector_preview;
 mod raster_preview;
 mod compound_render;
@@ -92,6 +95,7 @@ struct Editor{
     vector_cache:VectorCache,
     raster_cache:RasterCache,
     compound_cache:CompoundCache,
+    masked_canvas:MaskedCanvasCache,
     text_outliner:TextOutliner,
     proof_dpi:u32,
     keep_bitmap_ratio:bool,
@@ -127,6 +131,7 @@ impl Default for Editor{
             fill_cache:FillCache::default(),vector_cache:VectorCache::default(),
             raster_cache:RasterCache::default(),
             compound_cache:CompoundCache::default(),
+            masked_canvas:MaskedCanvasCache::default(),
             text_outliner:TextOutliner::new(),proof_dpi:96,
             keep_bitmap_ratio:true,
             show_preflight:false,preflight_lines:Vec::new(),
@@ -779,12 +784,17 @@ impl Editor{
             outline(&painter,v.rect,Color32::GRAY,1.0);
             let page_painter=painter.with_clip_rect(v.rect.intersect(working));
             self.draw_grid_rulers(&painter,&page_painter,v,response.rect);
-            for obj in self.doc.visible_objects(){
-                if v.bounds(obj.bounds()).intersects(v.rect.intersect(response.rect)){
-                    paint(&page_painter,obj,v,&mut self.fill_cache,
-                        &mut self.vector_cache,&mut self.raster_cache,
-                        &mut self.compound_cache,ctx);
+            if self.doc.clip_links.is_empty(){
+                for obj in self.doc.visible_objects(){
+                    if v.bounds(obj.bounds()).intersects(v.rect.intersect(response.rect)){
+                        paint(&page_painter,obj,v,&mut self.fill_cache,
+                            &mut self.vector_cache,&mut self.raster_cache,
+                            &mut self.compound_cache,ctx);
+                    }
                 }
+            }else{
+                // Cached SVG proof uses the same clip paths as PDF/raster output.
+                self.masked_canvas.paint(ctx,&page_painter,&self.doc,v.rect);
             }
             if self.show_safe_area {
                 let margin=self.safe_margin_mm;

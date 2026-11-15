@@ -52,6 +52,17 @@ mod tests{
         assert!(pdf.starts_with(b"%PDF-"));
         assert!(pdf.windows(5).any(|v|v==b"%%EOF"));
     }
+    #[test] fn clipped_document_exports_pdf(){
+        let mut doc=Document::default();
+        let mask=doc.add(Shape::Ellipse{x:10.0,y:10.0,w:40.0,h:40.0},Style::default());
+        let object=doc.add(Shape::Rectangle{x:0.0,y:0.0,w:100.0,h:100.0},Style::default());
+        doc.set_clip(mask,object).unwrap();
+        let svg=doc.to_svg();
+        assert!(svg.contains("clipPath"));
+        let pdf=pdf_bytes(&doc).unwrap();
+        assert!(pdf.starts_with(b"%PDF-"));
+        assert!(pdf.windows(5).any(|bytes|bytes==b"%%EOF"));
+    }
     #[test] fn oversized_pdf_is_explicit_error(){
         let mut doc=Document::default();
         doc.page.width_mm=6000.0;
