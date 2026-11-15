@@ -81,6 +81,7 @@ struct Editor{
     inspector_tab:InspectorTab,
     show_grid:bool,
     snap_grid:bool,
+    grid_mm:f32,
     show_rulers:bool,
     light_theme:bool,
     cursor_mm:Option<Point>,
@@ -116,6 +117,7 @@ impl Default for Editor{
             curve_start:None,curve_draft:None,active_layer:1,pan:Vec2::ZERO,
             undo:Vec::new(),redo:Vec::new(),
             inspector_tab:InspectorTab::Objects,show_grid:false,snap_grid:false,
+            grid_mm:10.0,
             show_rulers:true,light_theme:false,cursor_mm:None,
             fill_cache:FillCache::default(),vector_cache:VectorCache::default(),
             raster_cache:RasterCache::default(),
@@ -677,13 +679,14 @@ impl Editor{
     }
     fn snapped(&self,p:Point)->Point {
         if self.snap_grid {
-            Point{x:(p.x/10.0).round()*10.0,y:(p.y/10.0).round()*10.0}
+            Point{x:(p.x/self.grid_mm).round()*self.grid_mm,
+                y:(p.y/self.grid_mm).round()*self.grid_mm}
         }else{p}
     }
     fn draw_grid_rulers(&self,painter:&egui::Painter, page:&egui::Painter,
         v:View, area:Rect){
         if self.show_grid {
-            let mut step=10.0f32;
+            let mut step=self.grid_mm;
             while step*v.scale<14.0 {step*=2.0;}
             let nx=(self.doc.page.width_mm/step).ceil().min(1200.0) as usize;
             let ny=(self.doc.page.height_mm/step).ceil().min(1200.0) as usize;
@@ -709,7 +712,7 @@ impl Editor{
                 Pos2::new(area.min.x+25.0,area.max.y));
             painter.rect_filled(top,0.0,Color32::from_gray(210));
             painter.rect_filled(left,0.0,Color32::from_gray(210));
-            let mut step=10.0f32;
+            let mut step=self.grid_mm;
             while step*v.scale<35.0 {step*=2.0;}
             let xcount=(self.doc.page.width_mm/step).ceil().min(1200.0) as usize;
             let ycount=(self.doc.page.height_mm/step).ceil().min(1200.0) as usize;
@@ -1106,6 +1109,13 @@ mod tests {
         editor.select_object(Some(editor.doc.objects[0].id),false);
         editor.text_to_curves();
         assert!(editor.undo.is_empty());
+    }
+    #[test]
+    fn adjustable_grid_snaps_to_requested_precision(){
+        let mut e=Editor::default();
+        e.grid_mm=2.5;
+        e.snap_grid=true;
+        assert_eq!(e.snapped(Point{x:6.2,y:11.4}),Point{x:5.0,y:12.5});
     }
     #[test]
     fn grid_snapping_uses_millimetres(){
