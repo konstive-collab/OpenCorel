@@ -31,9 +31,12 @@ fn paint_icon(ui:&egui::Ui,rect:Rect,glyph:Glyph,expanded:bool,active:bool){
     };
     match glyph{
         Glyph::Select=>{
-            let pts=[at(-6.0,-9.0),at(-5.5,8.0),at(-1.0,3.5),at(2.5,11.0),
-                at(5.5,9.5),at(1.0,2.0),at(8.5,1.0)];
-            p.add(egui::Shape::convex_polygon(pts.to_vec(),tint,Stroke::NONE));
+            // Render as simple convex primitives. egui::convex_polygon must
+            // never receive a concave arrow silhouette.
+            p.add(egui::Shape::convex_polygon(
+                vec![at(-8.0,-10.0),at(-7.0,8.0),at(5.0,-0.5)],
+                tint,Stroke::NONE));
+            line((-2.0,2.0),(3.0,11.0),tint);
         }
         Glyph::Nodes=>{
             line((-8.0,6.0),(0.0,-7.0),tint);
@@ -46,12 +49,20 @@ fn paint_icon(ui:&egui::Ui,rect:Rect,glyph:Glyph,expanded:bool,active:bool){
         Glyph::Text=>{p.text(center,Align2::CENTER_CENTER,"T",
             FontId::proportional(22.0),tint);}
         Glyph::Curve=>{
-            // A recognizable pen curve with endpoint handles, no emoji font.
-            for ((a,b)) in [
-                ((-10.0,7.0),(-4.0,-6.0)),
-                ((-4.0,-6.0),(5.0,-6.0)),
-                ((5.0,-6.0),(10.0,7.0))
-            ]{line(a,b,tint);}
+            // Cubic preview; its curvature is visible at 64px and does not
+            // depend on an installed symbol font.
+            let mut pts=Vec::with_capacity(17);
+            for i in 0..=16{
+                let t=i as f32/16.0;
+                let u=1.0-t;
+                pts.push(at(
+                    u*u*u*(-10.0)+3.0*u*u*t*(-4.0)+
+                    3.0*u*t*t*4.0+t*t*t*10.0,
+                    u*u*u*7.0+3.0*u*u*t*(-9.0)+
+                    3.0*u*t*t*(-9.0)+t*t*t*7.0,
+                ));
+            }
+            p.add(egui::Shape::line(pts,Stroke::new(1.8,tint)));
             p.circle_filled(at(-10.0,7.0),2.4,secondary);
             p.circle_filled(at(10.0,7.0),2.4,secondary);
         }
