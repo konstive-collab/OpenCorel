@@ -32,6 +32,14 @@
 - New tests cover Bezier control extrema, invalid coordinates and stale-cache rejection.
 - The bounds are conservative (Bezier control points can lie outside the actual curve). Mouse hit-testing and document-wide alignment still use the legacy document model, and are NOT yet fully glyph accurate.
 
+## Mouse selection and viewport hit-testing
+- Added `Document::hit_test_with_bounds`, a non-persistent viewport override for selection bounds. Existing `hit_test` delegates to it and remains API-compatible.
+- Canvas clicking and dragging now use measured text glyph bounds when available, and fall back to legacy bounds otherwise.
+- Selection checks still respect topmost object ordering, locked/hidden layers, and vector clip links.
+- Picking is based on unsnapped mouse coordinates; tool placement and dragging may still use grid snapping.
+- New core tests verify custom bounds, stacking order, layer restrictions and invalid queries.
+- Picking still uses the glyph **bounding envelope**, not a per-pixel inside-glyph winding test. Cache may not be populated for out-of-viewport artwork; exact caret and individual character selection remain pending.
+
 ## Verification
 GitHub Actions Windows and Linux runs must complete against the latest PR head before merge. Early runs for the initial system-font picker passed, but do not imply later additions have passed.
 
