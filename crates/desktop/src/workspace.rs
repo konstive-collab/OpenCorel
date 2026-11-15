@@ -2,7 +2,8 @@
 //! Uses familiar panel positions and workflows but no proprietary assets.
 use super::{color, Editor, Tool};
 use eframe::egui::{self, Color32, RichText, Vec2};
-use opencorel_core::{Bounds, Shape, valid_paint};
+use opencorel_core::{Bounds, Shape, Alignment, Distribution, valid_paint};
+use std::collections::HashSet;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum InspectorTab { Objects, Properties, Page }
@@ -30,6 +31,7 @@ impl Editor {
         self.vector_cache.clear();
         self.raster_cache.clear();
         self.selected=None;
+        self.multi_selected.clear();
         self.active_layer=1;
         self.pan=Vec2::ZERO;
         self.zoom=1.0;
@@ -66,6 +68,7 @@ impl Editor {
                     if ui.add_enabled(!self.undo.is_empty(),egui::Button::new("Отменить      Ctrl+Z")).clicked(){self.undo();ui.close_menu();}
                     if ui.add_enabled(!self.redo.is_empty(),egui::Button::new("Повторить     Ctrl+Y")).clicked(){self.redo();ui.close_menu();}
                     if ui.button("Дублировать     Ctrl+D").clicked(){self.duplicate_selection();ui.close_menu();}
+                    if ui.button("Выделить все    Ctrl+A").clicked(){self.select_all();ui.close_menu();}
                     if ui.button("Удалить       Del").clicked(){self.delete_selection();ui.close_menu();}
                 });
                 ui.menu_button("Вид",|ui|{
@@ -85,6 +88,25 @@ impl Editor {
                     if ui.button("На передний план").clicked(){self.reorder_selection(true);ui.close_menu();}
                     if ui.button("На задний план").clicked(){self.reorder_selection(false);ui.close_menu();}
                     if ui.button("Дублировать").clicked(){self.duplicate_selection();ui.close_menu();}
+                    ui.separator();
+                    ui.label("Выравнивание объектов (Shift для выделения):");
+                    for (label,mode) in [
+                        ("По левому краю",Alignment::Left),
+                        ("По центру горизонтально",Alignment::CenterX),
+                        ("По правому краю",Alignment::Right),
+                        ("По верхнему краю",Alignment::Top),
+                        ("По центру вертикально",Alignment::CenterY),
+                        ("По нижнему краю",Alignment::Bottom),
+                    ]{
+                        if ui.button(label).clicked(){self.align_selection(mode);ui.close_menu();}
+                    }
+                    ui.separator();
+                    if ui.button("Распределить горизонтально").clicked(){
+                        self.distribute_selection(Distribution::HorizontalCenters);ui.close_menu();
+                    }
+                    if ui.button("Распределить вертикально").clicked(){
+                        self.distribute_selection(Distribution::VerticalCenters);ui.close_menu();
+                    }
                 });
                 ui.menu_button("Окно",|ui|{
                     ui.selectable_value(&mut self.inspector_tab,InspectorTab::Objects,"Объекты и слои");
@@ -246,9 +268,10 @@ impl Editor {
                 };
                 let visible=self.doc.layer(layer_id).map(|l|l.visible).unwrap_or(false);
                 if ui.add_enabled(visible,egui::Button::new(name)
-                    .selected(self.selected==Some(id)).min_size(Vec2::new(ui.available_width(),20.0)))
+                    .selected(self.is_selected(id)).min_size(Vec2::new(ui.available_width(),20.0)))
                     .clicked(){
-                    self.selected=Some(id);
+                    let shift=ui.input(|i|i.modifiers.shift);
+                    self.select_object(Some(id),shift);
                     self.active_layer=layer_id;
                     self.inspector_tab=InspectorTab::Properties;
                 }
@@ -272,6 +295,9 @@ impl Editor {
         let mut object=self.doc.objects[index].clone();
         let editing_allowed=self.doc.layer(object.layer_id).map(|l|l.visible&&!l.locked).unwrap_or(false);
         ui.heading(format!("Объект #{id}"));
+        if !self.multi_selected.is_empty(){
+            ui.label(format!("Выделено {} объектов. Свойства основного объекта:",self.selection_ids().len()));
+        }
         if !editing_allowed {ui.colored_label(Color32::RED,"Слой скрыт или заблокирован");}
         ui.add_enabled_ui(editing_allowed,|ui|{
             let mut changed=false;
@@ -428,6 +454,10 @@ impl Editor {
                 ui.label(pos);
                 ui.separator();
                 ui.label(format!("Объектов: {}",self.doc.objects.len()));
+                if !self.multi_selected.is_empty(){
+                    ui.separator();
+                    ui.label(format!("Выделено: {}",self.selection_ids().len()));
+                }
             });
         });
         egui::TopBottomPanel::bottom("page_navigator").exact_height(29.0).show(ctx,|ui|{
@@ -460,50 +490,61 @@ impl Editor {
 
     fn apply_color(&mut self,value:&str,is_stroke:bool){
         if !valid_paint(value){return;}
-        let Some(id)=self.selected else {
-            self.status="Сначала выберите объект".into();
-            return;
-        };
-        let layer_id=self.doc.objects.iter().find(|o|o.id==id).map(|o|o.layer_id);
-        if !layer_id.and_then(|layer|self.doc.layer(layer)).map(|l|l.visible&&!l.locked).unwrap_or(false){
-            self.status="Слой недоступен для редактирования".into();
-            return;
+        let ids:HashSet<u64>=self.selection_ids().into_iter().collect();
+        if ids.is_empty(){self.status="Сначала выберите объект".into();return;}
+        let editable:HashSet<u64>=self.doc.layers.iter()
+            .filter(|l|l.visible&&!l.locked).map(|l|l.id).collect();
+        if !self.doc.objects.iter().any(|o|ids.contains(&o.id)&&editable.contains(&o.layer_id)){
+            self.status="Слои недоступны для редактирования".into();return;
         }
         self.checkpoint();
-        if let Some(object)=self.doc.get_mut(id){
-            if is_stroke{
-                object.style.stroke=value.into();
-                if value!="none" && object.style.stroke_width_mm==0.0 {
-                    object.style.stroke_width_mm=0.5;
-                }
-            }else{object.style.fill=value.into();}
+        for obj in self.doc.objects.iter_mut(){
+            if ids.contains(&obj.id)&&editable.contains(&obj.layer_id){
+                if is_stroke{
+                    obj.style.stroke=value.into();
+                    if value!="none" && obj.style.stroke_width_mm==0.0{
+                        obj.style.stroke_width_mm=0.5;
+                    }
+                }else{obj.style.fill=value.into();}
+            }
         }
     }
-
     pub(super) fn delete_selection(&mut self){
-        let Some(id)=self.selected else {return;};
-        let layer_id=self.doc.objects.iter().find(|o|o.id==id).map(|o|o.layer_id);
-        if !layer_id.and_then(|layer|self.doc.layer(layer)).map(|l|l.visible&&!l.locked).unwrap_or(false){
-            self.status="Заблокированный слой".into();return;
+        let ids:HashSet<u64>=self.selection_ids().into_iter().collect();
+        if ids.is_empty(){return;}
+        let editable:HashSet<u64>=self.doc.layers.iter()
+            .filter(|l|l.visible&&!l.locked).map(|l|l.id).collect();
+        if !self.doc.objects.iter().any(|o|ids.contains(&o.id)&&editable.contains(&o.layer_id)){
+            self.status="Выделенные объекты заблокированы".into();return;
         }
         self.checkpoint();
-        self.doc.remove(id);
-        self.selected=None;
+        self.doc.objects.retain(|o|!(ids.contains(&o.id)&&editable.contains(&o.layer_id)));
+        self.selected=None;self.multi_selected.clear();
+        self.status="Выделенные объекты удалены".into();
     }
-
     pub(super) fn duplicate_selection(&mut self){
-        let Some(id)=self.selected else {return;};
-        let Some(obj)=self.doc.objects.iter().find(|o|o.id==id).cloned() else {return;};
-        let allowed=self.doc.layer(obj.layer_id).map(|l|l.visible&&!l.locked).unwrap_or(false);
-        if !allowed{self.status="Заблокированный слой".into();return;}
-        let mut shape=obj.shape;
-        shape.translate(10.0,10.0);
+        let ids:HashSet<u64>=self.selection_ids().into_iter().collect();
+        if ids.is_empty(){return;}
+        let editable:HashSet<u64>=self.doc.layers.iter()
+            .filter(|l|l.visible&&!l.locked).map(|l|l.id).collect();
+        let copies:Vec<_>=self.doc.objects.iter()
+            .filter(|o|ids.contains(&o.id)&&editable.contains(&o.layer_id))
+            .cloned().collect();
+        if copies.is_empty(){self.status="Нет доступных объектов".into();return;}
         self.checkpoint();
-        let new_id=self.doc.add_to_layer(shape,obj.style,obj.layer_id);
-        self.selected=Some(new_id);
+        let mut new_ids=Vec::new();
+        for obj in copies{
+            let mut shape=obj.shape;
+            shape.translate(10.0,10.0);
+            new_ids.push(self.doc.add_to_layer(shape,obj.style,obj.layer_id));
+        }
+        self.selected=new_ids.first().copied();
+        self.multi_selected=new_ids.into_iter().skip(1).collect();
     }
-
     pub(super) fn reorder_selection(&mut self,front:bool){
+        if !self.multi_selected.is_empty(){
+            self.status="Порядок наложения меняется по одному объекту".into();return;
+        }
         let Some(id)=self.selected else{return;};
         let Some(index)=self.doc.objects.iter().position(|o|o.id==id) else{return;};
         let layer=self.doc.objects[index].layer_id;
