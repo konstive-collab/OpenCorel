@@ -8,16 +8,12 @@ impl Editor {
             self.status="Для обтравки выберите два разных объекта".into();
             return;
         }
-        // Perform on a lightweight working copy? A preflight copy would
-        // duplicate embedded raster assets. Instead snapshot the document
-        // only after the operation has been validated in a clone, and commit
-        // with the normal history path.
         let (source,target)=(ids[0],ids[1]);
-        let mut candidate=self.doc.clone();
-        match candidate.set_clip(source,target) {
+        match self.doc.check_clip(source,target) {
             Ok(())=>{
                 self.checkpoint();
-                self.doc.clip_links=candidate.clip_links;
+                // check_clip guarantees an infallible commit for unchanged state.
+                self.doc.set_clip(source,target).expect("clip preflight succeeded");
                 self.selected=Some(target);
                 self.multi_selected.clear();
                 self.fill_cache.entries.clear();
