@@ -387,6 +387,13 @@ impl Editor{
         self.compound_cache.clear();
         self.status=format!("{} текстовых объектов преобразовано в кривые. Ctrl+Z вернёт текст.",count);
     }
+    /// The canvas uses the same measured glyph envelope for visual selection
+    /// and picking. Core still owns stacking, clipping and layer permissions.
+    fn hit_test_at(&self,p:Point,tolerance:f32)->Option<u64>{
+        self.doc.hit_test_with_bounds(p,tolerance,|object|{
+            self.text_preview.ink_bounds(object).unwrap_or_else(||object.bounds())
+        })
+    }
     fn corner_at(&self,v:View,pos:Pos2)->Option<(u64,ResizeCorner)>{
         if self.tool!=Tool::Select || !self.multi_selected.is_empty(){return None;}
         let id=self.selected?;
@@ -892,7 +899,7 @@ impl Editor{
                                     self.checkpoint();
                                     self.resize_drag=Some((id,corner));
                                 }else if !ctx.input(|i|i.modifiers.shift){
-                                    let hit=self.doc.hit_test(p,2.0);
+                                    let hit=self.hit_test_at(v.mm(pos),2.0);
                                     if let Some(id)=hit{
                                         if !self.is_selected(id){self.select_object(Some(id),false);}
                                         self.checkpoint();
@@ -986,7 +993,7 @@ impl Editor{
                         let shape=match self.tool{
                             Tool::Nodes=>{self.select_node_near(v,pos);return;},
                             Tool::Select=>{
-                                let id=self.doc.hit_test(p,2.0);
+                                let id=self.hit_test_at(v.mm(pos),2.0);
                                 let shift=ctx.input(|i|i.modifiers.shift);
                                 if shift{self.select_object(id,true);}
                                 else if !id.map(|id|self.is_selected(id)).unwrap_or(false){
