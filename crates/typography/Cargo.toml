@@ -1,0 +1,10 @@
+[package]
+name = "opencorel-typography"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+opencorel-core = { path = "../core" }
+fontdb = "0.24"
+rustybuzz = "0.20"
