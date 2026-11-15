@@ -35,10 +35,22 @@ pub fn save_kdr(doc:&Document,path:impl AsRef<Path>)->Result<(),String>{
         generator:"OpenCorel".into()
     };
     let metadata=serde_json::to_vec(&manifest).map_err(io_error)?;
-    let preview=doc.to_svg();
-    if preview.len() as u64>MAX_PREVIEW_SIZE{
-        return Err("KDR preview exceeds the supported size".into());
-    }
+    // Large embedded photos can make an inline SVG preview bigger than
+    // the entire KDR limit. The preview is optional; never reject valid artwork
+    // merely because it cannot fit the metadata preview budget.
+    let preview_estimate:u64=doc.objects.iter().map(|object|{
+        match &object.shape{
+            crate::Shape::Raster{data_base64,..}=>data_base64.len() as u64,
+            crate::Shape::EmbeddedSvg{svg,..}=>svg.len() as u64*2,
+            _=>128,
+        }
+    }).sum();
+    let preview=if preview_estimate>MAX_PREVIEW_SIZE-1_000_000{
+        None
+    }else{
+        let svg=doc.to_svg();
+        if svg.len() as u64>MAX_PREVIEW_SIZE{None}else{Some(svg)}
+    };
     let path=path.as_ref();
     let dir=path.parent().filter(|p|!p.as_os_str().is_empty())
         .unwrap_or_else(||Path::new("."));
@@ -51,8 +63,10 @@ pub fn save_kdr(doc:&Document,path:impl AsRef<Path>)->Result<(),String>{
         zip.write_all(&metadata).map_err(io_error)?;
         zip.start_file("document.json",options).map_err(io_error)?;
         zip.write_all(&raw).map_err(io_error)?;
-        zip.start_file("preview.svg",options).map_err(io_error)?;
-        zip.write_all(preview.as_bytes()).map_err(io_error)?;
+        if let Some(ref svg)=preview{
+            zip.start_file("preview.svg",options).map_err(io_error)?;
+            zip.write_all(svg.as_bytes()).map_err(io_error)?;
+        }
         zip.finish().map_err(io_error)?;
     }
     temp.as_file().sync_all().map_err(io_error)?;
@@ -139,6 +153,24 @@ mod tests{
             writer.finish().unwrap();
         }
         assert!(read_kdr(&file).unwrap_err().contains("integrity"));
+    }
+    #[test]
+    fn large_embedded_image_omits_optional_preview(){
+        use base64::Engine;
+        let doc_dir=tempfile::tempdir().unwrap();
+        let mut doc=Document::default();
+        // Large valid-by-header blob simulates a 26 MiB encoded photo.
+        let mut bytes=vec![0u8;26*1024*1024];
+        bytes[..8].copy_from_slice(b"\x89PNG\r\n\x1a\n");
+        doc.add(Shape::Raster{x:1.0,y:1.0,w:100.0,h:100.0,
+            pixel_width:100,pixel_height:100,mime:"image/png".into(),
+            data_base64:base64::engine::general_purpose::STANDARD.encode(&bytes)},
+            Style::default());
+        let path=doc_dir.path().join("large.kdr");
+        save_kdr(&doc,&path).unwrap();
+        assert_eq!(read_kdr(&path).unwrap(),doc);
+        let zip=ZipArchive::new(File::open(&path).unwrap()).unwrap();
+        assert_eq!(zip.len(),2);
     }
     #[test]
     fn invalid_save_preserves_previous_project(){

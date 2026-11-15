@@ -1,6 +1,9 @@
 //! File format router and deliberately labeled compatibility adapters.
 //! External formats are not lossless CorelDRAW project files.
 use flate2::{read::GzDecoder,write::GzEncoder,Compression};
+use base64::Engine;
+use image::{ImageFormat, ImageReader};
+use std::io::Cursor;
 use opencorel_core::{kdr,svg_import,Document,Shape,Style};
 use std::{fs,io::{Read,Write},path::Path,process::{Command,Stdio},time::Duration};
 use wait_timeout::ChildExt;
@@ -15,6 +18,7 @@ pub enum ImportQuality {
     NativeEditable,
     SimplifiedEditable,
     PlacedVector,
+    PlacedRaster,
 }
 #[derive(Debug,Clone)]
 pub struct OpenResult{
@@ -29,10 +33,66 @@ pub fn extension(path:&Path)->String{
 }
 pub const IMPORT_EXTENSIONS:&[&str]=&[
     "kdr","ocd","svg","svgz","pdf","cdr","cmx","ai","eps","ps",
-    "odg","fodg","dxf","wmf","emf","wpg","vsd","vsdx","sxd"
+    "odg","fodg","dxf","wmf","emf","wpg","vsd","vsdx","sxd",
+    "png","jpg","jpeg","webp","gif","bmp","tif","tiff"
 ];
-pub const EXPORT_EXTENSIONS:&[&str]=&["kdr","ocd","svg","svgz","pdf"];
+pub const EXPORT_EXTENSIONS:&[&str]=&["kdr","ocd","svg","svgz","pdf","png","jpg","jpeg"];
 
+/// Raster import applies limits BEFORE decoding, to avoid huge allocations from
+/// malformed image dimensions. PNG/JPEG keep compressed originals; other supported
+/// formats are normalized to PNG, so every saved KDR can export to SVG.
+pub fn import_raster_shape(path:impl AsRef<Path>)->Result<Shape,String>{
+    let path=path.as_ref();
+    let bytes=fs::read(path).map_err(|e|e.to_string())?;
+    if bytes.is_empty() || bytes.len()>40*1024*1024{
+        return Err("Raster image must be between 1 byte and 40 MiB".into());
+    }
+    let actual=image::guess_format(&bytes).map_err(|e|e.to_string())?;
+    let supported=matches!(actual,ImageFormat::Png|ImageFormat::Jpeg|
+        ImageFormat::WebP|ImageFormat::Gif|ImageFormat::Bmp|ImageFormat::Tiff);
+    if !supported{return Err(format!("Raster codec {actual:?} is not yet supported"));}
+    let (width,height)=ImageReader::new(Cursor::new(bytes.as_slice()))
+        .with_guessed_format().map_err(|e|e.to_string())?
+        .into_dimensions().map_err(|e|e.to_string())?;
+    if width==0||height==0||width>16_000||height>16_000 ||
+        u64::from(width)*u64::from(height)>40_000_000 {
+        return Err("Raster exceeds 40 megapixels or 16000 pixels per side".into());
+    }
+    let (mime,data)=if actual==ImageFormat::Png{
+        ("image/png".to_string(),bytes)
+    }else if actual==ImageFormat::Jpeg{
+        ("image/jpeg".to_string(),bytes)
+    }else {
+        let image=image::load_from_memory(&bytes).map_err(|e|e.to_string())?;
+        let mut normalized=Vec::new();
+        image.write_to(&mut Cursor::new(&mut normalized),ImageFormat::Png)
+            .map_err(|e|e.to_string())?;
+        if normalized.len()>40*1024*1024 {
+            return Err("PNG normalization exceeds 40 MiB".into());
+        }
+        ("image/png".into(),normalized)
+    };
+    let data_base64=base64::engine::general_purpose::STANDARD.encode(data);
+    let shape=Shape::Raster{x:0.0,y:0.0,
+        w:width as f32*25.4/96.0,h:height as f32*25.4/96.0,
+        pixel_width:width,pixel_height:height,mime,data_base64};
+    Ok(shape)
+}
+fn load_raster(path:&Path)->Result<OpenResult,String>{
+    let ext=extension(path).to_ascii_uppercase();
+    let shape=import_raster_shape(path)?;
+    let bounds=shape.bounds();
+    let mut document=Document::default();
+    document.name=path.file_stem().and_then(|s|s.to_str())
+        .unwrap_or("Imported photo").to_string();
+    document.page.width_mm=bounds.w.max(1.0);
+    document.page.height_mm=bounds.h.max(1.0);
+    document.add(shape,Style{fill:"none".into(),stroke:"none".into(),
+        stroke_width_mm:0.0});
+    document.validate()?;
+    Ok(OpenResult{document,quality:ImportQuality::PlacedRaster,
+        source_format:ext,warning:"Raster image placed at 96 DPI. It is movable and scalable but not vectorized. Color management and EXIF orientation are not yet guaranteed.".into()})
+}
 fn check_file_size(path:&Path)->Result<(),String>{
     if fs::metadata(path).map_err(|e|e.to_string())?.len()>MAX_EXTERNAL_FILE{
         return Err("File is too large for current import limits".into());
@@ -224,6 +284,7 @@ pub fn open_any(path:impl AsRef<Path>)->Result<OpenResult,String>{
         "ocd"=>Document::read(path).map(native),
         "svg"=>load_svg(read_svg_bytes(path,false)?,"SVG",false),
         "svgz"=>load_svg(read_svg_bytes(path,true)?,"SVGZ",false),
+        "png"|"jpg"|"jpeg"|"webp"|"gif"|"bmp"|"tif"|"tiff"=>load_raster(path),
         "pdf"|"cdr"|"cmx"|"ai"|"eps"|"ps"|"odg"|"fodg"|"dxf"|
         "wmf"|"emf"|"wpg"|"vsd"|"vsdx"|"sxd"=>external_vector(path,&ext),
         _=>Err(format!("Unsupported file extension .{ext}; supported: {}",
@@ -251,6 +312,7 @@ pub fn save_document(doc:&Document,path:impl AsRef<Path>)->Result<(),String>{
             Ok(())
         },
         "pdf"=>opencorel_export::export_pdf(doc,path),
+        "png"|"jpg"|"jpeg"=>opencorel_export::raster_export::export_raster(doc,path,96),
         "cdr"=>Err("CDR export is not implemented. Save as .kdr or export SVG/PDF; do not rename files.".into()),
         other=>Err(format!("Saving .{other} is unsupported. Supported: {}",EXPORT_EXTENSIONS.join(", ")))
     }
@@ -258,6 +320,35 @@ pub fn save_document(doc:&Document,path:impl AsRef<Path>)->Result<(),String>{
 #[cfg(test)]
 mod tests{
     use super::*;
+    #[test] fn raster_png_import_roundtrip_kdr_and_svg(){
+        let dir=tempfile::tempdir().unwrap();
+        let image_path=dir.path().join("photo.png");
+        let mut img=image::RgbaImage::new(10,8);
+        for pixel in img.pixels_mut(){*pixel=image::Rgba([255,20,30,255]);}
+        img.save(&image_path).unwrap();
+        let source=open_any(&image_path).unwrap();
+        assert_eq!(source.quality,ImportQuality::PlacedRaster);
+        assert_eq!(source.document.objects.len(),1);
+        let kdr_path=dir.path().join("photo.kdr");
+        save_document(&source.document,&kdr_path).unwrap();
+        let restored=open_any(&kdr_path).unwrap();
+        assert_eq!(source.document,restored.document);
+        assert!(restored.document.to_svg().contains("data:image/png;base64,"));
+    }
+    #[test] fn raster_png_customer_proof(){
+        let dir=tempfile::tempdir().unwrap();
+        let doc=Document::default();
+        let file=dir.path().join("proof.png");
+        save_document(&doc,&file).unwrap();
+        let loaded=image::open(&file).unwrap();
+        assert!(loaded.width()>1000);
+        assert!(loaded.height()>500);
+    }
+    #[test] fn raster_refuses_oversized_dimensions(){
+        let dir=tempfile::tempdir().unwrap();
+        let path=dir.path().join("missing.jpg");
+        assert!(import_raster_shape(&path).is_err());
+    }
     #[test] fn kdr_and_legacy_ocd_load(){
         let dir=tempfile::tempdir().unwrap();
         let mut doc=Document::default();doc.name="Company poster".into();

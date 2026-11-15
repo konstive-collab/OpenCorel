@@ -2,13 +2,17 @@
 
 [Русская версия](README.ru.md) · [Format matrix](docs/FORMAT_SUPPORT.md) · [KDR specification](docs/KDR_SPEC.md) · [Contributing](CONTRIBUTING.md) · [QA criteria](docs/QA_MATRIX.md)
 
-**Alpha v0.3 preview — NOT a fully compatible replacement for CorelDRAW.** Designed for posters, maps and large advertising sheets, currently targeting Windows 10/11 x64 and Linux x64.
+**Alpha v0.4 preview — NOT a fully compatible replacement for CorelDRAW.** Designed for posters, maps and large advertising sheets, currently targeting Windows 10/11 x64 and Linux x64.
 
 - Familiar professional graphics workspace, page rulers, toolbox, layers, color palette, undo/redo, Bézier paths and grid snapping.
 - **New `.kdr` (Kodi Draw)** native compressed editable project: versioned manifest, checksum and SVG preview; backward-compatible import of old `.ocd`.
 - SVG and SVGZ import with a documented editable subset.
 - Unsupported complex vector details can be preserved as one placed SVG artwork object, not individual editable entities.
 - Experimental local LibreOffice/Poppler import adapters for CDR, CMX, PDF, AI, EPS, ODG, DXF, WMF/EMF, WPG, Visio, etc.
+- PNG/JPEG photos and logos placed inside vector layouts; support WebP/GIF/BMP/TIFF input via normalization.
+- Multi-object Shift selection and Ctrl+A; align edges and distribute centers; group dragging and edits.
+- RGB PNG/JPEG customer proofs at configurable 36–300 DPI (maximum 24 megapixels, 10k pixels per side).
+- Memory-bounded history, thumbnail caches and geometry-only editing of embedded artwork.
 - Basic SVG export and RGB PDF proof export. **No CDR export, no PDF/X or CMYK, no verified Windows 7 support.**
 
 ## Build

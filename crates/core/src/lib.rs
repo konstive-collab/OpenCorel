@@ -13,6 +13,11 @@ pub const SCHEMA_VERSION: u32 = 1;
 pub struct Point { pub x: f32, pub y: f32 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Alignment { Left, CenterX, Right, Top, CenterY, Bottom }
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Distribution { HorizontalCenters, VerticalCenters }
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Bounds { pub x: f32, pub y: f32, pub w: f32, pub h: f32 }
 
 impl Bounds {
@@ -63,13 +68,18 @@ pub enum Shape {
     // Imported vector artwork preserved as one repositionable/scalable object.
     // Its inner text/paths are NOT independently editable yet.
     EmbeddedSvg { x:f32,y:f32,w:f32,h:f32, svg:String, source_format:String },
+    /// Self-contained bitmap artwork, using original PNG/JPEG encoded bytes.
+    /// Dimensions in mm stay independent of source pixel dimensions.
+    Raster { x:f32,y:f32,w:f32,h:f32, pixel_width:u32,pixel_height:u32,
+        mime:String,data_base64:String },
 }
 
 impl Shape {
     pub fn bounds(&self) -> Bounds {
         match self {
             Self::Rectangle {x,y,w,h} | Self::Ellipse {x,y,w,h} |
-            Self::EmbeddedSvg {x,y,w,h,..} => Bounds {x:*x,y:*y,w:*w,h:*h},
+            Self::EmbeddedSvg {x,y,w,h,..} |
+            Self::Raster {x,y,w,h,..} => Bounds {x:*x,y:*y,w:*w,h:*h},
             Self::Text {x,y,value,size_mm} => Bounds {
                 x:*x, y:*y, w:size_mm * (value.chars().count().max(1) as f32) * 0.6,
                 h:size_mm * 1.25,
@@ -95,7 +105,8 @@ impl Shape {
     pub fn translate(&mut self, dx:f32, dy:f32) {
         match self {
             Self::Rectangle {x,y,..} | Self::Ellipse {x,y,..} |
-            Self::Text {x,y,..} | Self::EmbeddedSvg {x,y,..} => {*x+=dx;*y+=dy;},
+            Self::Text {x,y,..} | Self::EmbeddedSvg {x,y,..} |
+            Self::Raster {x,y,..} => {*x+=dx;*y+=dy;},
             Self::Polyline {points,..} => for p in points {p.x+=dx;p.y+=dy;},
             Self::Bezier {start,segments,..} => {
                 start.x+=dx;start.y+=dy;
@@ -139,6 +150,27 @@ impl Default for Document {
 }
 
 impl Document {
+    /// Approximate owned memory size, used to cap undo history on low-RAM PCs.
+    /// Does not include allocator overhead or GPU textures.
+    pub fn estimated_size_bytes(&self)->usize {
+        let mut total=std::mem::size_of::<Document>()+self.name.len();
+        for layer in &self.layers{
+            total=total.saturating_add(std::mem::size_of::<Layer>()+layer.name.len());
+        }
+        for obj in &self.objects{
+            let shape_bytes=match &obj.shape{
+                Shape::Text{value,..}=>value.len(),
+                Shape::Polyline{points,..}=>points.len()*std::mem::size_of::<Point>(),
+                Shape::Bezier{segments,..}=>segments.len()*std::mem::size_of::<CubicSegment>(),
+                Shape::EmbeddedSvg{svg,..}=>svg.len(),
+                Shape::Raster{data_base64,..}=>data_base64.len(),
+                _=>0,
+            };
+            total=total.saturating_add(std::mem::size_of::<Object>()
+                +obj.style.fill.len()+obj.style.stroke.len()+shape_bytes);
+        }
+        total
+    }
     pub fn add(&mut self, shape:Shape, style:Style) -> u64 {
         self.add_to_layer(shape,style,1)
     }
@@ -168,6 +200,62 @@ impl Document {
     }
     pub fn remove(&mut self,id:u64) -> bool {
         let n=self.objects.len(); self.objects.retain(|o|o.id!=id); self.objects.len()!=n
+    }
+    /// Align the bounding boxes of eligible, unlocked objects.
+    pub fn align_objects(&mut self,ids:&[u64],alignment:Alignment)->usize {
+        let wanted:HashSet<u64>=ids.iter().copied().collect();
+        let editable:HashSet<u64>=self.layers.iter()
+            .filter(|l|l.visible&&!l.locked).map(|l|l.id).collect();
+        let objects:Vec<_>=self.objects.iter().filter(|o|
+            wanted.contains(&o.id)&&editable.contains(&o.layer_id))
+            .map(|o|(o.id,o.shape.bounds())).collect();
+        if objects.len()<2{return 0;}
+        let left=objects.iter().map(|(_,b)|b.x).fold(f32::INFINITY,f32::min);
+        let right=objects.iter().map(|(_,b)|b.x+b.w).fold(f32::NEG_INFINITY,f32::max);
+        let top=objects.iter().map(|(_,b)|b.y).fold(f32::INFINITY,f32::min);
+        let bottom=objects.iter().map(|(_,b)|b.y+b.h).fold(f32::NEG_INFINITY,f32::max);
+        let count=objects.len();
+        for (id,b) in objects{
+            let (dx,dy)=match alignment{
+                Alignment::Left=>(left-b.x,0.0),
+                Alignment::CenterX=>((left+right-b.w)*0.5-b.x,0.0),
+                Alignment::Right=>(right-b.x-b.w,0.0),
+                Alignment::Top=>(0.0,top-b.y),
+                Alignment::CenterY=>(0.0,(top+bottom-b.h)*0.5-b.y),
+                Alignment::Bottom=>(0.0,bottom-b.y-b.h),
+            };
+            if let Some(obj)=self.get_mut(id){obj.shape.translate(dx,dy);}
+        }
+        count
+    }
+    /// Space object centers uniformly between the first and last center.
+    pub fn distribute_objects(&mut self,ids:&[u64],direction:Distribution)->usize {
+        let wanted:HashSet<u64>=ids.iter().copied().collect();
+        let editable:HashSet<u64>=self.layers.iter()
+            .filter(|l|l.visible&&!l.locked).map(|l|l.id).collect();
+        let mut positions:Vec<(u64,f32)>=self.objects.iter().filter(|o|
+            wanted.contains(&o.id)&&editable.contains(&o.layer_id))
+            .map(|o|{
+                let b=o.shape.bounds();
+                (o.id,match direction{
+                    Distribution::HorizontalCenters=>b.x+b.w*0.5,
+                    Distribution::VerticalCenters=>b.y+b.h*0.5,
+                })
+            }).collect();
+        if positions.len()<3{return 0;}
+        positions.sort_by(|a,b|a.1.total_cmp(&b.1));
+        let step=(positions.last().unwrap().1-positions[0].1)/(positions.len()-1) as f32;
+        let first=positions[0].1;
+        for (index,(id,center)) in positions.iter().enumerate().skip(1).take(positions.len()-2){
+            let delta=first+index as f32*step-*center;
+            if let Some(obj)=self.get_mut(*id){
+                match direction{
+                    Distribution::HorizontalCenters=>obj.shape.translate(delta,0.0),
+                    Distribution::VerticalCenters=>obj.shape.translate(0.0,delta),
+                }
+            }
+        }
+        positions.len()
     }
     pub fn hit_test(&self,p:Point,tolerance:f32) -> Option<u64> {
         let editable:HashSet<u64>=self.layers.iter()
@@ -240,6 +328,22 @@ impl Document {
                         return Err("Invalid embedded vector artwork".into());
                     }
                 }
+                Shape::Raster{w,h,pixel_width,pixel_height,mime,data_base64,..}=>{
+                    if *w<=0.0||*h<=0.0 ||
+                        *pixel_width==0 || *pixel_height==0 ||
+                        *pixel_width>16_000 || *pixel_height>16_000 ||
+                        u64::from(*pixel_width)*u64::from(*pixel_height)>40_000_000 ||
+                        data_base64.len()>56*1024*1024 ||
+                        !matches!(mime.as_str(),"image/png"|"image/jpeg") {
+                        return Err("Invalid raster metadata".into());
+                    }
+                    let raw=base64::engine::general_purpose::STANDARD
+                        .decode(data_base64.as_bytes())
+                        .map_err(|_|"Invalid raster base64 data")?;
+                    if raw.len()>40*1024*1024 || !raster_signature_matches(mime,&raw){
+                        return Err("Invalid raster image header or size".into());
+                    }
+                }
                 _=>{}
             }
             if let Shape::Text{size_mm,..}=&o.shape {
@@ -296,6 +400,9 @@ impl Document {
                     let encoded=base64::engine::general_purpose::STANDARD.encode(svg.as_bytes());
                     format!("<image x=\"{x}\" y=\"{y}\" width=\"{w}\" height=\"{h}\" href=\"data:image/svg+xml;base64,{encoded}\"/>")
                 }
+                Shape::Raster{x,y,w,h,mime,data_base64,..}=>{
+                    format!("<image x=\"{x}\" y=\"{y}\" width=\"{w}\" height=\"{h}\" preserveAspectRatio=\"none\" href=\"data:{mime};base64,{data_base64}\"/>")
+                }
                 Shape::Polyline{points,closed} => {
                     let coords=points.iter().map(|p|format!("{},{}",p.x,p.y)).collect::<Vec<_>>().join(" ");
                     if *closed {format!("<polygon points=\"{coords}\" {common}/>")
@@ -305,6 +412,13 @@ impl Document {
             out.push_str(&format!("<g id=\"object-{}\">{element}</g>\n",obj.id));
         }
         out.push_str("</svg>\n");out
+    }
+}
+fn raster_signature_matches(mime:&str,raw:&[u8])->bool{
+    match mime{
+        "image/png"=>raw.starts_with(b"\x89PNG\r\n\x1a\n"),
+        "image/jpeg"=>raw.starts_with(&[0xFF,0xD8,0xFF]),
+        _=>false,
     }
 }
 fn finite_point(p:Point)->bool{p.x.is_finite()&&p.y.is_finite()}
@@ -395,6 +509,59 @@ mod tests{
         doc.add(shape,Style::default());
         doc.validate().unwrap();
         assert!(doc.to_svg().contains("data:image/svg+xml;base64,"));
+    }
+    #[test] fn raster_roundtrip_and_svg_embedding(){
+        let png=base64::engine::general_purpose::STANDARD
+            .encode(b"\x89PNG\r\n\x1a\nplaceholder");
+        let mut doc=Document::default();
+        doc.add(Shape::Raster{x:5.0,y:6.0,w:15.0,h:20.0,
+            pixel_width:1,pixel_height:1,mime:"image/png".into(),
+            data_base64:png},Style::default());
+        doc.validate().unwrap();
+        assert!(doc.to_svg().contains("data:image/png;base64,"));
+        let copy:Document=serde_json::from_str(&serde_json::to_string(&doc).unwrap()).unwrap();
+        assert_eq!(doc,copy);
+    }
+    #[test] fn raster_rejects_wrong_mime_and_invalid_base64(){
+        let mut doc=Document::default();
+        let id=doc.add(Shape::Raster{x:0.0,y:0.0,w:10.0,h:10.0,
+            pixel_width:100,pixel_height:100,mime:"image/jpeg".into(),
+            data_base64:"invalid!".into()},Style::default());
+        assert!(doc.validate().is_err());
+        if let Shape::Raster{data_base64,..}=&mut doc.get_mut(id).unwrap().shape{
+            *data_base64=base64::engine::general_purpose::STANDARD.encode(b"\x89PNG\r\n\x1a\n");
+        }
+        assert!(doc.validate().is_err());
+    }
+    #[test] fn aligns_shape_edges_and_distributes_centers(){
+        let mut doc=Document::default();
+        let mut ids=Vec::new();
+        for x in [10.0,60.0,110.0]{
+            ids.push(doc.add(Shape::Rectangle{x,y:20.0,w:10.0,h:15.0},Style::default()));
+        }
+        assert_eq!(doc.align_objects(&ids,Alignment::Top),3);
+        assert_eq!(doc.distribute_objects(&ids,Distribution::HorizontalCenters),3);
+        let b:Vec<_>=doc.objects.iter().map(|o|o.shape.bounds()).collect();
+        assert_eq!(b[0].y,b[2].y);
+        assert!((b[1].x-60.0).abs()<0.001);
+        assert_eq!(doc.align_objects(&ids,Alignment::Left),3);
+        assert!(doc.objects.iter().all(|o|(o.shape.bounds().x-10.0).abs()<0.001));
+    }
+    #[test] fn alignment_respects_locked_layer(){
+        let mut doc=Document::default();
+        let locked=doc.add_layer("Locked".into());
+        let a=doc.add(Shape::Rectangle{x:0.0,y:0.0,w:10.0,h:10.0},Style::default());
+        let b=doc.add_to_layer(Shape::Rectangle{x:100.0,y:20.0,w:10.0,h:10.0},Style::default(),locked);
+        doc.layers[1].locked=true;
+        assert_eq!(doc.align_objects(&[a,b],Alignment::Left),0);
+        assert_eq!(doc.get_mut(b).unwrap().shape.bounds().x,100.0);
+    }
+    #[test] fn memory_estimate_accounts_for_assets(){
+        let mut doc=Document::default();
+        let before=doc.estimated_size_bytes();
+        doc.add(Shape::EmbeddedSvg{x:0.0,y:0.0,w:10.0,h:10.0,
+            source_format:"SVG".into(),svg:"a".repeat(5000)},Style::default());
+        assert!(doc.estimated_size_bytes()>before+5000);
     }
     #[test] fn document_roundtrip(){
         let mut a=Document::default();

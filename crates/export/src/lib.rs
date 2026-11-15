@@ -1,5 +1,6 @@
 //! Preliminary vector PDF export for RGB proofing and customer review.
 //! NOT a PDF/X prepress exporter: no CMYK, output intents, trapping, or bleed.
+pub mod raster_export;
 use opencorel_core::Document;
 use std::{fs, io::Write, path::Path};
 

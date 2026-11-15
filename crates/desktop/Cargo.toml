@@ -16,3 +16,6 @@ rfd = { version = "0.15.4", default-features = false, features = ["gtk3"] }
 
 opencorel-formats = { path = "../formats" }
 resvg = "0.48"
+
+image = { version = "0.25", default-features = false, features = ["png","jpeg"] }
+base64 = "0.22"
