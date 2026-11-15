@@ -71,6 +71,9 @@ struct Editor{
     raster_cache:RasterCache,
     proof_dpi:u32,
     keep_bitmap_ratio:bool,
+    show_preflight:bool,
+    preflight_lines:Vec<String>,
+    minimum_image_dpi:f32,
 }
 impl Default for Editor{
     fn default()->Self{
@@ -89,7 +92,9 @@ impl Default for Editor{
             show_rulers:true,light_theme:true,cursor_mm:None,
             fill_cache:FillCache::default(),vector_cache:VectorCache::default(),
             raster_cache:RasterCache::default(),proof_dpi:96,
-            keep_bitmap_ratio:true}
+            keep_bitmap_ratio:true,
+            show_preflight:false,preflight_lines:Vec::new(),
+            minimum_image_dpi:150.0}
     }
 }
 #[derive(Clone,Copy)]
@@ -229,6 +234,24 @@ fn trim_history(history:&mut Vec<Document>) {
     }
 }
 impl Editor{
+    fn run_preflight(&mut self){
+        let issues=opencorel_core::preflight::check(&self.doc,
+            opencorel_core::preflight::PreflightOptions{
+                minimum_image_dpi:self.minimum_image_dpi,
+                safe_margin_mm:5.0,
+            });
+        let warning_count=issues.iter().filter(|i|
+            i.severity!=opencorel_core::preflight::Severity::Notice).count();
+        self.preflight_lines=issues.iter().map(|issue|format!(
+            "{:?} [{}] {}{}",
+            issue.severity,issue.code,
+            issue.object_id.map(|id|format!("Объект #{id}: ")).unwrap_or_default(),
+            issue.message
+        )).collect();
+        self.status=format!("Проверка макета: замечаний {}, информационных {}",
+            warning_count,issues.len()-warning_count);
+        self.show_preflight=true;
+    }
     fn selection_ids(&self)->Vec<u64>{
         let mut ids=Vec::with_capacity(self.multi_selected.len()+1);
         if let Some(id)=self.selected{ids.push(id);}
@@ -713,6 +736,20 @@ impl eframe::App for Editor{
         self.inspector(ctx);
         self.workspace_footer(ctx);
         self.canvas(ctx);
+        if self.show_preflight{
+            egui::Window::new("Проверка макета")
+                .open(&mut self.show_preflight)
+                .default_width(600.0)
+                .resizable(true).show(ctx,|ui|{
+                    ui.label(format!("Минимальное разрешение фотографий: {:.0} DPI",
+                        self.minimum_image_dpi));
+                    ui.label("Результат является предварительной проверкой, не сертификатом готовности к печати.");
+                    ui.separator();
+                    egui::ScrollArea::vertical().max_height(450.0).show(ui,|ui|{
+                        for item in &self.preflight_lines{ui.label(item);}
+                    });
+                });
+        }
     }
 }
 #[cfg(test)]

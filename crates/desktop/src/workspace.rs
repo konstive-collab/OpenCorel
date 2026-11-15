@@ -63,6 +63,8 @@ impl Editor {
                     });
                     if ui.button("Экспорт PNG...").clicked(){self.raster_proof("png");ui.close_menu();}
                     if ui.button("Экспорт JPEG...").clicked(){self.raster_proof("jpg");ui.close_menu();}
+                    ui.separator();
+                    if ui.button("Проверка макета...").clicked(){self.run_preflight();ui.close_menu();}
                 });
                 ui.menu_button("Правка",|ui|{
                     if ui.add_enabled(!self.undo.is_empty(),egui::Button::new("Отменить      Ctrl+Z")).clicked(){self.undo();ui.close_menu();}
@@ -569,6 +571,14 @@ impl Editor {
         ui.checkbox(&mut self.show_grid,"Показать сетку");
         ui.checkbox(&mut self.snap_grid,"Привязка к сетке 10 мм");
         ui.checkbox(&mut self.show_rulers,"Показать линейки");
+        ui.separator();
+        ui.heading("Предпечатная проверка");
+        ui.horizontal(|ui|{
+            ui.label("Порог DPI для фото");
+            ui.add(egui::DragValue::new(&mut self.minimum_image_dpi)
+                .speed(5.0).range(30.0..=600.0));
+        });
+        if ui.button("Проверить макет").clicked(){self.run_preflight();}
         ui.label("Один редактируемый лист. Многостраничность — следующий этап.");
     }
 
