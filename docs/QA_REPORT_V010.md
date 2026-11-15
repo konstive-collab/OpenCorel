@@ -22,7 +22,7 @@ The initial v0.10 feature PR #17 passed the same two-platform automated release 
 | CLI round trip | Create native file → inspect → export SVG → import SVG as native project → inspect |
 | Performance safeguards | Caps on Boolean complexity, node preview count and contour depth (not a throughput benchmark) |
 
-PR #18 adds an explicit panic boundary across **all** Boolean geometry conversion and operations, since compound input reconstruction may itself perform topology work before the final set operation. It also adds the degenerate-contact and corrupted-input regression cases. Results of PR #18 must be validated by its latest CI run before merge.
+PR #18 adds an explicit panic boundary across **all** Boolean geometry conversion and operations, since compound input reconstruction may itself perform topology work before the final set operation. It also adds the degenerate-contact and corrupted-input regression cases. **Validated and merged:** [PR #18](https://github.com/konstive-collab/OpenCorel/pull/18) passed both Windows and Linux CI, including debug and release tests, Clippy, desktop and CLI release builds, end-to-end KDR/SVG/KDR CLI smoke checks, and rejection of missing/corrupt KDR input. [Verified run 43737625143](https://github.com/konstive-collab/OpenCorel/actions/runs/43737625143). Both artifacts were published, and the changes merged into main as `e568a278`.
 
 ### Not yet tested (remain open)
 
