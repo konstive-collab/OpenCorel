@@ -14,7 +14,7 @@ use raster_preview::RasterCache;
 use workspace::InspectorTab;
 
 #[derive(Clone,Copy,PartialEq)]
-enum Tool { Select, Rect, Ellipse, Text, Curve }
+enum Tool { Select, Rect, Ellipse, Text, Curve, Line, Polygon }
 #[derive(Clone,Copy,Debug,PartialEq,Eq)]
 enum ResizeCorner{TopLeft,TopRight,BottomLeft,BottomRight}
 impl ResizeCorner{
@@ -147,6 +147,14 @@ impl View{
         Rect::from_min_size(self.screen(Point{x:b.x,y:b.y}),
             Vec2::new(b.w*self.scale,b.h*self.scale))
     }
+}
+fn hexagon(bounds:Bounds)->Vec<Point>{
+    let (cx,cy)=(bounds.x+bounds.w*0.5,bounds.y+bounds.h*0.5);
+    (0..6).map(|i|{
+        let angle=i as f32/6.0*TAU-TAU*0.25;
+        Point{x:cx+bounds.w*0.5*angle.cos(),
+            y:cy+bounds.h*0.5*angle.sin()}
+    }).collect()
 }
 fn color(s:&str)->Color32{
     if s=="none"{return Color32::TRANSPARENT;}
@@ -743,13 +751,20 @@ impl Editor{
                                     }else{self.select_object(None,false);}
                                 }
                             }
-                            Tool::Rect|Tool::Ellipse=>{
-                                let shape=if self.tool==Tool::Rect{
-                                    Shape::Rectangle{x:p.x,y:p.y,w:1.0,h:1.0}
-                                }else{
-                                    Shape::Ellipse{x:p.x,y:p.y,w:1.0,h:1.0}
+                            Tool::Rect|Tool::Ellipse|Tool::Line|Tool::Polygon=>{
+                                let shape=match self.tool {
+                                    Tool::Rect=>Shape::Rectangle{x:p.x,y:p.y,w:1.0,h:1.0},
+                                    Tool::Ellipse=>Shape::Ellipse{x:p.x,y:p.y,w:1.0,h:1.0},
+                                    Tool::Line=>Shape::Polyline{points:vec![p,p],closed:false},
+                                    Tool::Polygon=>Shape::Polyline{
+                                        points:hexagon(Bounds{x:p.x,y:p.y,w:1.0,h:1.0}),closed:true},
+                                    _=>unreachable!()
                                 };
-                                if let Some(id)=self.add_shape(shape,Style::default()){
+                                let style=if self.tool==Tool::Line{
+                                    Style{fill:"none".into(),stroke:"#262D3B".into(),
+                                        stroke_width_mm:1.0}
+                                }else{Style::default()};
+                                if let Some(id)=self.add_shape(shape,style){
                                     self.creation_start=Some((p,id));
                                 }
                             }
@@ -773,6 +788,14 @@ impl Editor{
                                 Shape::Rectangle{x:rx,y:ry,w:rw,h:rh}|
                                 Shape::Ellipse{x:rx,y:ry,w:rw,h:rh}=>{
                                     *rx=x;*ry=y;*rw=w;*rh=h;
+                                }
+                                Shape::Polyline{points,closed} if self.tool==Tool::Line=>{
+                                    *closed=false;
+                                    *points=vec![p,now];
+                                }
+                                Shape::Polyline{points,closed} if self.tool==Tool::Polygon=>{
+                                    *closed=true;
+                                    *points=hexagon(Bounds{x,y,w,h});
                                 }
                                 _=>{}
                             }
@@ -817,10 +840,16 @@ impl Editor{
                             Tool::Curve=>{self.curve_click(p);return;},
                             Tool::Rect=>Shape::Rectangle{x:p.x,y:p.y,w:60.0,h:40.0},
                             Tool::Ellipse=>Shape::Ellipse{x:p.x,y:p.y,w:60.0,h:40.0},
+                            Tool::Line=>Shape::Polyline{
+                                points:vec![p,Point{x:p.x+80.0,y:p.y}],closed:false},
+                            Tool::Polygon=>Shape::Polyline{
+                                points:hexagon(Bounds{x:p.x,y:p.y,w:60.0,h:60.0}),closed:true},
                             Tool::Text=>Shape::Text{x:p.x,y:p.y,value:self.text.clone(),size_mm:18.0},
                         };
                         let style=if self.tool==Tool::Text{
                             Style{fill:"#202020".into(),stroke:"#202020".into(),stroke_width_mm:0.0}
+                        }else if self.tool==Tool::Line{
+                            Style{fill:"none".into(),stroke:"#262D3B".into(),stroke_width_mm:1.0}
                         }else{Style::default()};
                         self.add_shape(shape,style);
                         if self.tool==Tool::Text{self.tool=Tool::Select;}
@@ -890,6 +919,10 @@ impl eframe::App for Editor{
             if ctx.input(|i|i.key_pressed(egui::Key::F6)){self.change_tool(Tool::Rect);}
             if ctx.input(|i|i.key_pressed(egui::Key::F7)){self.change_tool(Tool::Ellipse);}
             if ctx.input(|i|i.key_pressed(egui::Key::F8)){self.change_tool(Tool::Text);}
+            if ctx.input(|i|i.key_pressed(egui::Key::V)){self.change_tool(Tool::Select);}
+            if ctx.input(|i|i.key_pressed(egui::Key::B)){self.change_tool(Tool::Curve);}
+            if ctx.input(|i|i.key_pressed(egui::Key::L)){self.change_tool(Tool::Line);}
+            if ctx.input(|i|i.key_pressed(egui::Key::P)){self.change_tool(Tool::Polygon);}
         }
         self.top_workspace(ctx);
         self.tool_sidebar(ctx);
@@ -917,6 +950,12 @@ impl eframe::App for Editor{
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn polygon_has_six_vertices(){
+        let points=hexagon(Bounds{x:0.0,y:0.0,w:60.0,h:40.0});
+        assert_eq!(points.len(),6);
+        assert!(points.iter().all(|p|p.x>=0.0&&p.x<=60.0&&p.y>=0.0&&p.y<=40.0));
+    }
     #[test]
     fn resize_corner_keeps_opposite_edge(){
         let mut e=Editor::default();
