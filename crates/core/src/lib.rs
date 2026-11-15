@@ -283,7 +283,7 @@ impl Document {
     }
     /// Apply a closed vector object as a reusable clipping shape.
     /// No geometry or styling is destroyed; source remains editable.
-    pub fn set_clip(&mut self, source_id:u64, target_id:u64)->Result<(),String>{
+    pub fn check_clip(&self, source_id:u64, target_id:u64)->Result<(),String>{
         if source_id==target_id {return Err("A clipping source cannot clip itself".into());}
         let source=self.objects.iter().find(|o|o.id==source_id)
             .ok_or("Clipping source not found")?;
@@ -306,6 +306,10 @@ impl Document {
         if self.clip_links.iter().filter(|c|c.target_id!=target_id).count()>=10000 {
             return Err("Clipping link limit exceeded".into());
         }
+        Ok(())
+    }
+    pub fn set_clip(&mut self, source_id:u64, target_id:u64)->Result<(),String>{
+        self.check_clip(source_id,target_id)?;
         // Replacing an existing target link is atomic.
         self.clip_links.retain(|c|c.target_id!=target_id);
         self.clip_links.push(ClipLink{source_id,target_id});
