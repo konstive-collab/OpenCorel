@@ -766,11 +766,11 @@ fn clip_geometry_svg(shape:&Shape)->Option<String>{
 /// editable geometry and uses the same even-odd rule as SVG clip output.
 fn clip_contains_point(shape:&Shape,p:Point)->bool{
     match shape{
-        Shape::Rectangle{x,y,w,h}=>p.x>=*x&&p.y>=*y&&p.x<=x+w&&p.y<=y+h,
+        Shape::Rectangle{x,y,w,h}=>p.x>=*x&&p.y>=*y&&p.x<=*x+*w&&p.y<=*y+*h,
         Shape::Ellipse{x,y,w,h}=>{
             if *w<=0.0||*h<=0.0{return false;}
-            let dx=(p.x-x-w*0.5)/(w*0.5);
-            let dy=(p.y-y-h*0.5)/(h*0.5);
+            let dx=(p.x-*x-*w*0.5)/(*w*0.5);
+            let dy=(p.y-*y-*h*0.5)/(*h*0.5);
             dx*dx+dy*dy<=1.0
         }
         Shape::Polyline{points,closed}=>*closed&&polygon_contains(points,p),
