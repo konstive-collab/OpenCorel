@@ -498,6 +498,11 @@ impl Editor{
     }
     fn import_svg(&mut self){self.open();}
     fn save(&mut self){
+        // New documents have only a suggested filename. Ask where to save
+        // instead of silently writing into an unpredictable working directory.
+        if !std::path::Path::new(&self.file).is_absolute(){
+            self.save_as_picker();return;
+        }
         self.status=match opencorel_formats::save_document(&self.doc,&self.file){
             Ok(())=>format!("Сохранено: {}",self.file),
             Err(e)=>format!("Ошибка сохранения: {e}"),
@@ -545,14 +550,50 @@ impl Editor{
         }
     }
     fn save_as_picker(&mut self){
+        let suggested=std::path::Path::new(&self.file)
+            .file_name().and_then(|s|s.to_str()).unwrap_or("project.kdr")
+            .to_string();
         if let Some(path)=rfd::FileDialog::new()
             .add_filter("Kodi Draw (.kdr)",&["kdr"])
             .add_filter("Старый OpenCorel (.ocd)",&["ocd"])
-            .set_file_name("project.kdr")
+            .set_file_name(&suggested)
             .save_file(){
             let chosen=if path.extension().is_none(){path.with_extension("kdr")}else{path};
-            self.file=chosen.to_string_lossy().into_owned();
-            self.save();
+            let result=opencorel_formats::save_document(&self.doc,&chosen);
+            self.status=match result {
+                Ok(())=>{
+                    self.file=chosen.to_string_lossy().into_owned();
+                    format!("Сохранено: {}",chosen.display())
+                },
+                Err(e)=>format!("Ошибка сохранения: {e}"),
+            };
+        }
+    }
+    fn export_dialog(&mut self,ext:&str){
+        let stem=std::path::Path::new(&self.file).file_stem()
+            .and_then(|s|s.to_str()).unwrap_or("Макет");
+        let suggested=format!("{stem}.{ext}");
+        let caption=match ext{
+            "svg"|"svgz"=>"SVG векторная графика",
+            "pdf"=>"PDF для просмотра (RGB)",
+            "png"|"jpg"=>"Изображение для согласования",
+            _=>return,
+        };
+        if let Some(chosen)=rfd::FileDialog::new()
+            .add_filter(caption,&[ext])
+            .set_file_name(&suggested)
+            .save_file(){
+            let path=chosen.with_extension(ext);
+            let result=match ext{
+                "png"|"jpg"=>opencorel_export::raster_export::export_raster(
+                    &self.doc,&path,self.proof_dpi),
+                _=>opencorel_formats::save_document(&self.doc,&path),
+            };
+            self.status=match result{
+                Ok(())=>format!("Экспортировано: {} ({}).",path.display(),
+                    if ext=="pdf"{"PDF RGB, не PDF/X"}else{"контрольный файл"}),
+                Err(e)=>format!("Ошибка экспорта: {e}"),
+            };
         }
     }
     fn import_svg_picker(&mut self){
@@ -574,9 +615,13 @@ impl Editor{
                 self.curve_start=None;self.curve_draft=None;
                 let source=opencorel_formats::extension(std::path::Path::new(&self.file));
                 if source!="kdr"&&source!="ocd"{
-                    self.file=std::path::Path::new(&self.file)
-                        .with_extension("kdr").to_string_lossy().into_owned();
+                    // Imported artwork must not automatically overwrite an existing
+                    // neighbouring KDR file on the first Ctrl+S.
+                    let source_name=std::path::Path::new(&self.file)
+                        .file_stem().and_then(|s|s.to_str()).unwrap_or("Импорт");
+                    self.file=format!("{source_name} - импорт.kdr");
                 }
+                self.show_welcome=false;
                 self.status=if result.warning.is_empty(){
                     "Проект открыт".into()
                 }else{format!("Импорт: {}",result.warning)};
