@@ -28,6 +28,7 @@ impl Editor {
         self.doc=Default::default();
         self.fill_cache.entries.clear();
         self.vector_cache.clear();
+        self.raster_cache.clear();
         self.selected=None;
         self.active_layer=1;
         self.pan=Vec2::ZERO;
@@ -47,6 +48,7 @@ impl Editor {
                     if ui.button("Новый                 Ctrl+N").clicked(){self.new_document();ui.close_menu();}
                     if ui.button("Открыть...         Ctrl+O").clicked(){self.open_picker();ui.close_menu();}
                     if ui.button("Импорт SVG/SVGZ...").clicked(){self.import_svg_picker();ui.close_menu();}
+                    if ui.button("Поместить изображение...").clicked(){self.place_bitmap_picker();ui.close_menu();}
                     if ui.button("Сохранить           Ctrl+S").clicked(){self.save();ui.close_menu();}
                     if ui.button("Сохранить как...  Ctrl+Shift+S").clicked(){self.save_as_picker();ui.close_menu();}
                     if ui.button("Экспорт SVG").clicked(){self.svg();ui.close_menu();}
@@ -99,6 +101,7 @@ impl Editor {
                 if ui.add_enabled(!self.redo.is_empty(),egui::Button::new("↷")).on_hover_text("Повторить").clicked(){self.redo();}
                 ui.separator();
                 if ui.button("Импорт SVG").clicked(){self.import_svg_picker();}
+                if ui.button("Фото +").on_hover_text("Поместить фотографию или логотип").clicked(){self.place_bitmap_picker();}
                 if ui.button("SVG ↗").on_hover_text("Экспорт SVG").clicked(){self.svg();}
                 if ui.button("PDF ↗").on_hover_text("PDF для просмотра (RGB, не PDF/X)").clicked(){self.pdf();}
                 ui.separator();
@@ -231,6 +234,7 @@ impl Editor {
                     Shape::Bezier{..}=>"⌁  Кривая Безье".into(),
                     Shape::Polyline{..}=>"⌁  Линия".into(),
                     Shape::EmbeddedSvg{source_format,..}=>format!("▧  Вектор {source_format}"),
+                    Shape::Raster{pixel_width,pixel_height,..}=>format!("▧  Фото {pixel_width}×{pixel_height}"),
                 };
                 let visible=self.doc.layer(layer_id).map(|l|l.visible).unwrap_or(false);
                 if ui.add_enabled(visible,egui::Button::new(name)
@@ -284,6 +288,18 @@ impl Editor {
                         });
                     }
                     *size_mm=size_mm.max(0.1);
+                }
+                Shape::Raster{x,y,w,h,pixel_width,pixel_height,..}=>{
+                    ui.label(format!("Растровое изображение: {} × {} пикселей",pixel_width,pixel_height));
+                    let effective_dpi=if *w>0.0{*pixel_width as f32*25.4 / *w}else{0.0};
+                    ui.label(format!("Разрешение по ширине: {:.0} DPI",effective_dpi));
+                    for (label,num) in [("X мм",x),("Y мм",y),("Ширина мм",w),("Высота мм",h)]{
+                        ui.horizontal(|ui|{
+                            ui.label(label);
+                            changed|=ui.add(egui::DragValue::new(num).speed(1.0)).changed();
+                        });
+                    }
+                    *w=w.max(0.1);*h=h.max(0.1);
                 }
                 Shape::EmbeddedSvg{x,y,w,h,source_format,..}=>{
                     ui.colored_label(Color32::from_rgb(187,105,28),

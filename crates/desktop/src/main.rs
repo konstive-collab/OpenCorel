@@ -3,7 +3,9 @@ use opencorel_core::{Bounds,CubicSegment,Document,Object,Point,Shape,Style,valid
 use std::{f32::consts::TAU,collections::HashMap,hash::{Hash,Hasher},collections::hash_map::DefaultHasher};
 mod workspace;
 mod vector_preview;
+mod raster_preview;
 use vector_preview::VectorCache;
+use raster_preview::RasterCache;
 use workspace::InspectorTab;
 
 #[derive(Clone,Copy,PartialEq)]
@@ -47,7 +49,9 @@ struct Editor{
     text:String,
     status:String,
     zoom:f32,
-    drag_start:Option<(Point,Shape,u64)>,
+    // Keep only last pointer position and object ID; never clone megabytes of
+    // embedded artwork for every frame during drag.
+    drag_start:Option<(Point,u64)>,
     creation_start:Option<(Point,u64)>,
     curve_start:Option<Point>,
     curve_draft:Option<u64>,
@@ -63,6 +67,7 @@ struct Editor{
     cursor_mm:Option<Point>,
     fill_cache:FillCache,
     vector_cache:VectorCache,
+    raster_cache:RasterCache,
 }
 impl Default for Editor{
     fn default()->Self{
@@ -79,7 +84,8 @@ impl Default for Editor{
             undo:Vec::new(),redo:Vec::new(),
             inspector_tab:InspectorTab::Objects,show_grid:false,snap_grid:false,
             show_rulers:true,light_theme:true,cursor_mm:None,
-            fill_cache:FillCache::default(),vector_cache:VectorCache::default()}
+            fill_cache:FillCache::default(),vector_cache:VectorCache::default(),
+            raster_cache:RasterCache::default()}
     }
 }
 #[derive(Clone,Copy)]
@@ -124,7 +130,7 @@ fn cubic(p0:Point,p1:Point,p2:Point,p3:Point,t:f32)->Point {
     Point{x:a*p0.x+b*p1.x+c*p2.x+d*p3.x,y:a*p0.y+b*p1.y+c*p2.y+d*p3.y}
 }
 fn paint(p:&egui::Painter,obj:&Object,v:View,cache:&mut FillCache,
-    vectors:&mut VectorCache,ctx:&egui::Context){
+    vectors:&mut VectorCache,rasters:&mut RasterCache,ctx:&egui::Context){
     let fill=color(&obj.style.fill);
     let stroke=if obj.style.stroke=="none" {
         Stroke::new(0.0,Color32::TRANSPARENT)
@@ -176,6 +182,10 @@ fn paint(p:&egui::Painter,obj:&Object,v:View,cache:&mut FillCache,
             vectors.paint(ctx,p,obj.id,svg,
                 v.bounds(Bounds{x:*x,y:*y,w:*w,h:*h}));
         }
+        Shape::Raster{x,y,w,h,data_base64,..}=>{
+            rasters.paint(ctx,p,obj.id,data_base64,
+                v.bounds(Bounds{x:*x,y:*y,w:*w,h:*h}));
+        }
         Shape::Polyline{points,closed}=>{
             if *closed{cache.fill(p,obj.id,points,v,fill);}
             if stroke.width>0.0{
@@ -197,6 +207,7 @@ impl Editor{
             self.redo.push(std::mem::replace(&mut self.doc,prev));
             self.fill_cache.entries.clear();
             self.vector_cache.clear();
+            self.raster_cache.clear();
             self.selected=None;self.curve_draft=None;self.curve_start=None;
             self.status="Отменено".into();
         }
@@ -206,6 +217,7 @@ impl Editor{
             self.undo.push(std::mem::replace(&mut self.doc,next));
             self.fill_cache.entries.clear();
             self.vector_cache.clear();
+            self.raster_cache.clear();
             self.selected=None;self.curve_draft=None;self.curve_start=None;
             self.status="Повторено".into();
         }
@@ -261,11 +273,40 @@ impl Editor{
             Err(e)=>format!("Ошибка сохранения: {e}"),
         };
     }
+    fn place_bitmap_picker(&mut self){
+        if let Some(path)=rfd::FileDialog::new().add_filter(
+            "Изображения", &["png","jpg","jpeg","webp","gif","bmp","tif","tiff"]
+        ).pick_file(){
+            self.place_bitmap(&path);
+        }
+    }
+    fn place_bitmap(&mut self,path:&std::path::Path){
+        match opencorel_formats::import_raster_shape(path){
+            Ok(mut shape)=>{
+                if let Shape::Raster{x,y,w,h,..}=&mut shape {
+                    let scale=(self.doc.page.width_mm*0.70/ *w)
+                        .min(self.doc.page.height_mm*0.70/ *h)
+                        .min(1.0);
+                    *w*=scale;*h*=scale;
+                    *x=(self.doc.page.width_mm-*w)*0.5;
+                    *y=(self.doc.page.height_mm-*h)*0.5;
+                }
+                let style=Style{fill:"none".into(),stroke:"none".into(),
+                    stroke_width_mm:0.0};
+                if self.add_shape(shape,style).is_some(){
+                    self.inspector_tab=InspectorTab::Properties;
+                    self.status=format!("Изображение добавлено: {}",path.display());
+                }
+            }
+            Err(e)=>self.status=format!("Ошибка изображения: {e}"),
+        }
+    }
     fn open_picker(&mut self){
         if let Some(path)=rfd::FileDialog::new()
             .add_filter("Документы и графика",&[
                 "kdr","ocd","svg","svgz","cdr","cmx","pdf","ai","eps","ps",
-                "odg","fodg","dxf","wmf","emf","wpg","vsd","vsdx","sxd"
+                "odg","fodg","dxf","wmf","emf","wpg","vsd","vsdx","sxd",
+                "png","jpg","jpeg","webp","gif","bmp","tif","tiff"
             ]).pick_file(){
             let previous=self.file.clone();
             self.file=path.to_string_lossy().into_owned();
@@ -297,6 +338,7 @@ impl Editor{
                 self.doc=result.document;
                 self.selected=None;self.active_layer=1;
                 self.fill_cache.entries.clear();self.vector_cache.clear();
+                self.raster_cache.clear();
                 self.curve_start=None;self.curve_draft=None;
                 let source=opencorel_formats::extension(std::path::Path::new(&self.file));
                 if source!="kdr"&&source!="ocd"{
@@ -417,7 +459,8 @@ impl Editor{
             self.draw_grid_rulers(&painter,&page_painter,v,response.rect);
             for obj in self.doc.visible_objects(){
                 if v.bounds(obj.shape.bounds()).intersects(v.rect.intersect(response.rect)){
-                    paint(&page_painter,obj,v,&mut self.fill_cache,&mut self.vector_cache,ctx);
+                    paint(&page_painter,obj,v,&mut self.fill_cache,
+                        &mut self.vector_cache,&mut self.raster_cache,ctx);
                 }
             }
             if let Some(id)=self.selected{
@@ -436,9 +479,11 @@ impl Editor{
                                 self.selected=self.doc.hit_test(p,2.0);
                                 if let Some(id)=self.selected{
                                     if let Some(o)=self.doc.objects.iter().find(|o|o.id==id){
-                                        let shape=o.shape.clone();
+                                        // The drag checkpoint is created once, even for large
+                                        // embedded photographs and complex source documents.
+                                        let _=o;
                                         self.checkpoint();
-                                        self.drag_start=Some((p,shape,id));
+                                        self.drag_start=Some((p,id));
                                     }
                                 }
                             }
@@ -473,9 +518,11 @@ impl Editor{
                                 _=>{}
                             }
                         }
-                    }else if let Some((p,mut before,id))=self.drag_start.clone(){
-                        before.translate(now.x-p.x,now.y-p.y);
-                        if let Some(o)=self.doc.get_mut(id){o.shape=before;}
+                    }else if let Some((previous,id))=self.drag_start {
+                        if let Some(o)=self.doc.get_mut(id){
+                            o.shape.translate(now.x-previous.x,now.y-previous.y);
+                        }
+                        self.drag_start=Some((now,id));
                     }
                 }
             }
@@ -522,6 +569,22 @@ impl eframe::App for Editor{
         if save_as{self.save_as_picker();}
         else if ctx.input(|i|i.modifiers.command&&i.key_pressed(egui::Key::S)){self.save();}
         if ctx.input(|i|i.modifiers.command&&i.key_pressed(egui::Key::O)){self.open_picker();}
+        if !ctx.wants_keyboard_input(){
+            let dropped=ctx.input(|i|i.raw.dropped_files.clone());
+            for file in dropped{
+                if let Some(path)=file.path {
+                    if matches!(opencorel_formats::extension(&path).as_str(),
+                        "png"|"jpg"|"jpeg"|"webp"|"gif"|"bmp"|"tif"|"tiff"){
+                        self.place_bitmap(&path);
+                    }else{
+                        let old=self.file.clone();
+                        self.file=path.to_string_lossy().into_owned();
+                        self.open();
+                        if self.status.starts_with("Ошибка"){self.file=old;}
+                    }
+                }
+            }
+        }
          if !ctx.wants_keyboard_input() && ctx.input(|i|i.key_pressed(egui::Key::Delete)){
             if let Some(id)=self.selected{
                 if self.doc.layer(self.doc.objects.iter().find(|o|o.id==id).map(|o|o.layer_id).unwrap_or(0))
