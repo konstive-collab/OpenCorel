@@ -994,18 +994,31 @@ impl Editor {
                 ui.label("Название шрифта (системного):");
                 changed|=ui.text_edit_singleline(&mut object.text_format.family).changed();
                 ui.collapsing("Выбрать из установленных шрифтов",|ui|{
+                    ui.add(egui::TextEdit::singleline(&mut self.font_search)
+                        .hint_text("Поиск по названию шрифта..."));
+                    let query=self.font_search.trim().to_lowercase();
                     let fonts=self.text_outliner.font_families();
-                    if fonts.is_empty(){
-                        ui.label("Системные шрифты не обнаружены");
-                    }else{
-                        ui.label(format!("Доступно семейств: {}",fonts.len()));
-                        egui::ScrollArea::vertical().max_height(180.0).show(ui,|ui|{
-                            for family in fonts {
-                                changed|=ui.selectable_value(
-                                    &mut object.text_format.family,family.clone(),family
-                                ).changed();
-                            }
+                    let matches:Vec<_>=fonts.into_iter().filter(|name|
+                        name.to_lowercase().contains(&query)).collect();
+                    if matches.is_empty(){
+                        ui.label(if query.is_empty() {
+                            "Системные шрифты не обнаружены"
+                        } else {
+                            "По запросу шрифты не найдены"
                         });
+                    }else{
+                        ui.label(format!("Найдено семейств: {}",matches.len()));
+                        egui::ScrollArea::vertical().max_height(180.0)
+                            .id_salt("font_family_list")
+                            .show_rows(ui,24.0,matches.len(),|ui,rows|{
+                                for index in rows{
+                                    let family=&matches[index];
+                                    changed|=ui.selectable_value(
+                                        &mut object.text_format.family,
+                                        family.clone(),family
+                                    ).changed();
+                                }
+                            });
                     }
                 });
                 if ui.button("Шрифт по умолчанию").clicked(){
