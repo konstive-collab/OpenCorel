@@ -12,6 +12,7 @@ This release focuses on **discoverability and everyday editing** rather than add
 - Arrow-key precise movement (1 mm, 10 mm with Shift).
 - Simpler main toolbar and task-organized menus; honest page indicator instead of fake multipage controls.
 - Russian task-oriented guide at `docs/USER_GUIDE_RU.md`.
+- Explicit save-as for unsaved and imported documents; export file dialogs avoid silent overwrites and unknown output directories.
 - Unit tests for transformations, style-preserving duplication, sample validity, clipboard size limit, resizing and undo.
 
 ### Known limitations
