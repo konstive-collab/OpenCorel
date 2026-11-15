@@ -140,6 +140,132 @@ pub fn flip_shape(shape:&mut Shape,center:Point,horizontal:bool)->Result<(),Stri
     }
     Ok(())
 }
+/// Apply an arbitrary-angle rotation about an exact page-space pivot.
+/// Rectangle/ellipse primitives are converted into editable vector paths
+/// (unless the angle is a multiple of 90 degrees). All mutations are atomic.
+pub fn rotate_shape(shape:&mut Shape,pivot:Point,degrees:f32)->Result<(),String>{
+    check_transform_params(pivot,&[degrees])?;
+    if degrees==0.0{return Ok(());}
+    if degrees.rem_euclid(90.0)==0.0{
+        let turns=(degrees/90.0).rem_euclid(4.0) as usize;
+        let mut candidate=shape.clone();
+        for _ in 0..turns{
+            rotate_90(&mut candidate,pivot,QuarterTurn::Clockwise)?;
+        }
+        validate_transformed_bounds(&candidate)?;
+        *shape=candidate;
+        return Ok(());
+    }
+    let (sin,cos)=degrees.to_radians().sin_cos();
+    affine_vector(shape,|point|{
+        let (dx,dy)=(point.x-pivot.x,point.y-pivot.y);
+        Point{x:pivot.x+cos*dx-sin*dy,y:pivot.y+sin*dx+cos*dy}
+    })
+}
+/// Skew around a point. Angles are limited to avoid near-singular transforms.
+pub fn skew_shape(shape:&mut Shape,pivot:Point,x_degrees:f32,y_degrees:f32)
+    ->Result<(),String>{
+    check_transform_params(pivot,&[x_degrees,y_degrees])?;
+    if x_degrees.abs()>=80.0||y_degrees.abs()>=80.0{
+        return Err("Skew angles must be strictly between -80 and 80 degrees".into());
+    }
+    if x_degrees==0.0&&y_degrees==0.0{return Ok(());}
+    let sx=x_degrees.to_radians().tan();
+    let sy=y_degrees.to_radians().tan();
+    affine_vector(shape,|point|{
+        let (dx,dy)=(point.x-pivot.x,point.y-pivot.y);
+        Point{x:point.x+sx*dy,y:point.y+sy*dx}
+    })
+}
+/// Scale selected geometry about a common pivot. Positive factors preserve
+/// winding and allow raster/vector placements to retain their original data.
+pub fn scale_shape(shape:&mut Shape,pivot:Point,sx:f32,sy:f32)->Result<(),String>{
+    if ![pivot.x,pivot.y,sx,sy].iter().all(|v|v.is_finite())
+        || pivot.x.abs()>100_000.0||pivot.y.abs()>100_000.0
+        || !(0.01..=100.0).contains(&sx)||!(0.01..=100.0).contains(&sy){
+        return Err("Invalid pivot or scale factors".into());
+    }
+    if sx==1.0&&sy==1.0{return Ok(());}
+    let mut candidate=shape.clone();
+    match &mut candidate{
+        Shape::Rectangle{x,y,w,h}|Shape::Ellipse{x,y,w,h}|
+        Shape::EmbeddedSvg{x,y,w,h,..}|Shape::Raster{x,y,w,h,..}=>{
+            *x=pivot.x+(*x-pivot.x)*sx;
+            *y=pivot.y+(*y-pivot.y)*sy;
+            *w*=sx;*h*=sy;
+        }
+        Shape::Text{x,y,size_mm,..}=>{
+            if (sx-sy).abs()>0.00001{
+                return Err("Text requires proportional scaling until text shaping support".into());
+            }
+            *x=pivot.x+(*x-pivot.x)*sx;
+            *y=pivot.y+(*y-pivot.y)*sy;
+            *size_mm*=sx;
+            if !(0.1..=10_000.0).contains(size_mm){
+                return Err("Scaled text size is outside supported limits".into());
+            }
+        }
+        _=>{
+            for_all_points(&mut candidate,|point|{
+                point.x=pivot.x+(point.x-pivot.x)*sx;
+                point.y=pivot.y+(point.y-pivot.y)*sy;
+            });
+        }
+    }
+    validate_transformed_bounds(&candidate)?;
+    *shape=candidate;
+    Ok(())
+}
+fn check_transform_params(pivot:Point,angles:&[f32])->Result<(),String>{
+    if ![pivot.x,pivot.y].iter().all(|v|v.is_finite()&&v.abs()<=100_000.0)
+        || angles.iter().any(|v|!v.is_finite()||v.abs()>36_000.0) {
+        return Err("Invalid transform pivot or angles".into());
+    }
+    Ok(())
+}
+fn validate_transformed_bounds(shape:&Shape)->Result<(),String>{
+    let bounds=shape.bounds();
+    if ![bounds.x,bounds.y,bounds.w,bounds.h,
+        bounds.x+bounds.w,bounds.y+bounds.h].iter()
+        .all(|v|v.is_finite()&&v.abs()<=200_000.0){
+        return Err("Transform would create coordinates outside the safe canvas range".into());
+    }
+    Ok(())
+}
+fn editable_outline(shape:Shape)->Result<Shape,String>{
+    use crate::CubicSegment;
+    match shape{
+        Shape::Rectangle{x,y,w,h}=>{
+            Ok(Shape::Polyline{
+                points:vec![Point{x,y},Point{x:x+w,y},Point{x:x+w,y:y+h},Point{x,y:y+h}],
+                closed:true
+            })
+        }
+        Shape::Ellipse{x,y,w,h}=>{
+            let (cx,cy,rx,ry)=(x+w*0.5,y+h*0.5,w*0.5,h*0.5);
+            let k=0.5522848_f32;
+            Ok(Shape::Bezier{
+                start:Point{x:cx+rx,y:cy},
+                segments:vec![
+                    CubicSegment{control1:Point{x:cx+rx,y:cy+ry*k},control2:Point{x:cx+rx*k,y:cy+ry},end:Point{x:cx,y:cy+ry}},
+                    CubicSegment{control1:Point{x:cx-rx*k,y:cy+ry},control2:Point{x:cx-rx,y:cy+ry*k},end:Point{x:cx-rx,y:cy}},
+                    CubicSegment{control1:Point{x:cx-rx,y:cy-ry*k},control2:Point{x:cx-rx*k,y:cy-ry},end:Point{x:cx,y:cy-ry}},
+                    CubicSegment{control1:Point{x:cx+rx*k,y:cy-ry},control2:Point{x:cx+rx,y:cy-ry*k},end:Point{x:cx+rx,y:cy}},
+                ],closed:true
+            })
+        }
+        Shape::Polyline{..}|Shape::Bezier{..}|Shape::CompoundPath{..}=>Ok(shape),
+        _=>Err("Arbitrary transforms require editable vector geometry; convert text or images first".into()),
+    }
+}
+fn affine_vector<F:FnMut(Point)->Point>(shape:&mut Shape,mut map:F)->Result<(),String>{
+    let mut candidate=editable_outline(shape.clone())?;
+    for_all_points(&mut candidate,|point|*point=map(*point));
+    validate_transformed_bounds(&candidate)?;
+    *shape=candidate;
+    Ok(())
+}
+
 impl Document{
     /// Copies an object into the destination layer, retaining its text format.
     /// Every pasted object receives a fresh ID; the source remains unchanged.
@@ -159,6 +285,65 @@ impl Document{
 mod tests{
     use super::*;
     use crate::{CubicSegment,Style,TextFormat};
+    #[test] fn rotation_about_custom_pivot_preserves_bounds_for_quarters(){
+        let mut shape=Shape::Rectangle{x:10.0,y:10.0,w:30.0,h:20.0};
+        rotate_shape(&mut shape,Point{x:0.0,y:0.0},90.0).unwrap();
+        assert_eq!(shape.bounds(),Bounds{x:-30.0,y:10.0,w:20.0,h:30.0});
+        rotate_shape(&mut shape,Point{x:0.0,y:0.0},270.0).unwrap();
+        assert_eq!(shape.bounds(),Bounds{x:10.0,y:10.0,w:30.0,h:20.0});
+    }
+    #[test] fn arbitrary_rotation_converts_rectangle_into_editable_closed_path(){
+        let mut shape=Shape::Rectangle{x:0.0,y:0.0,w:10.0,h:10.0};
+        rotate_shape(&mut shape,Point{x:5.0,y:5.0},45.0).unwrap();
+        assert!(matches!(shape,Shape::Polyline{closed:true,..}));
+        let bounds=shape.bounds();
+        assert!((bounds.w-14.142136).abs()<0.001);
+        rotate_shape(&mut shape,Point{x:5.0,y:5.0},-45.0).unwrap();
+        let bounds=shape.bounds();
+        assert!((bounds.x).abs()<0.001 && (bounds.w-10.0).abs()<0.001);
+    }
+    #[test] fn skew_ellipse_preserves_editable_bezier_controls(){
+        let mut shape=Shape::Ellipse{x:0.0,y:0.0,w:20.0,h:10.0};
+        skew_shape(&mut shape,Point{x:0.0,y:0.0},15.0,0.0).unwrap();
+        assert!(matches!(shape,Shape::Bezier{closed:true,..}));
+        assert!(shape.bounds().w>20.0);
+    }
+    #[test] fn invalid_params_reject_without_mutation(){
+        let original=Shape::Rectangle{x:0.0,y:0.0,w:20.0,h:10.0};
+        let mut value=original.clone();
+        assert!(rotate_shape(&mut value,Point{x:f32::NAN,y:0.0},30.0).is_err());
+        assert!(skew_shape(&mut value,Point::default(),89.0,0.0).is_err());
+        assert_eq!(value,original);
+        let mut text=Shape::Text{x:1.0,y:2.0,value:"test".into(),size_mm:5.0};
+        assert!(rotate_shape(&mut text,Point::default(),33.0).is_err());
+    }
+    #[test] fn shared_pivot_scale_preserves_relative_layout(){
+        let pivot=Point{x:0.0,y:0.0};
+        let mut a=Shape::Rectangle{x:10.0,y:10.0,w:10.0,h:10.0};
+        let mut b=Shape::Rectangle{x:40.0,y:10.0,w:20.0,h:10.0};
+        scale_shape(&mut a,pivot,2.0,3.0).unwrap();
+        scale_shape(&mut b,pivot,2.0,3.0).unwrap();
+        assert_eq!(a.bounds(),Bounds{x:20.0,y:30.0,w:20.0,h:30.0});
+        assert_eq!(b.bounds(),Bounds{x:80.0,y:30.0,w:40.0,h:30.0});
+    }
+    #[test] fn raster_scales_without_touching_image_bytes(){
+        let mut photo=Shape::Raster{x:10.0,y:10.0,w:50.0,h:30.0,
+            pixel_width:1,pixel_height:1,mime:"image/png".into(),data_base64:"unchanged".into()};
+        scale_shape(&mut photo,Point::default(),1.2,1.5).unwrap();
+        if let Shape::Raster{w,h,data_base64,..}=photo{
+            assert!((w-60.0).abs()<0.01);
+            assert!((h-45.0).abs()<0.01);
+            assert_eq!(data_base64,"unchanged");
+        }else{panic!("Raster must remain a raster");}
+    }
+    #[test] fn nonuniform_text_rejection_is_atomic(){
+        let mut text=Shape::Text{x:10.0,y:10.0,value:"Sample".into(),size_mm:8.0};
+        let before=text.clone();
+        assert!(scale_shape(&mut text,Point::default(),1.2,1.1).is_err());
+        assert_eq!(text,before);
+        scale_shape(&mut text,Point::default(),2.0,2.0).unwrap();
+        assert_eq!(text.bounds().x,20.0);
+    }
     #[test] fn resize_rect_is_exact(){
         let mut r=Shape::Rectangle{x:10.,y:20.,w:30.,h:40.};
         resize_shape(&mut r,Bounds{x:5.,y:6.,w:60.,h:80.}).unwrap();

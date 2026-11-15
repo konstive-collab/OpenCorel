@@ -96,6 +96,14 @@ struct Editor{
     raster_cache:RasterCache,
     compound_cache:CompoundCache,
     masked_canvas:MaskedCanvasCache,
+    rotation_degrees:f32,
+    skew_x_degrees:f32,
+    skew_y_degrees:f32,
+    scale_x_percent:f32,
+    scale_y_percent:f32,
+    custom_pivot:bool,
+    pivot_x:f32,
+    pivot_y:f32,
     text_outliner:TextOutliner,
     proof_dpi:u32,
     keep_bitmap_ratio:bool,
@@ -132,6 +140,9 @@ impl Default for Editor{
             raster_cache:RasterCache::default(),
             compound_cache:CompoundCache::default(),
             masked_canvas:MaskedCanvasCache::default(),
+            rotation_degrees:30.0,skew_x_degrees:15.0,skew_y_degrees:0.0,
+            scale_x_percent:100.0,scale_y_percent:100.0,
+            custom_pivot:false,pivot_x:0.0,pivot_y:0.0,
             text_outliner:TextOutliner::new(),proof_dpi:96,
             keep_bitmap_ratio:true,
             show_preflight:false,preflight_lines:Vec::new(),
@@ -1089,6 +1100,64 @@ mod tests {
         assert_eq!(editor.doc,before);
         assert_eq!(editor.undo.len(),history);
         assert!(editor.status.contains("Группу"));
+    }
+    #[test]
+    fn numeric_rotation_around_pivot_is_undoable(){
+        let mut e=Editor::default();
+        let id=e.doc.objects[0].id;
+        let original=e.doc.clone();
+        e.select_object(Some(id),false);
+        e.rotation_degrees=45.0;
+        e.custom_pivot=true;e.pivot_x=0.0;e.pivot_y=0.0;
+        e.rotate_arbitrary();
+        assert_ne!(e.doc,original);
+        assert_eq!(e.undo.len(),1);
+        assert!(matches!(&e.doc.objects[0].shape,Shape::Polyline{closed:true,..}));
+        e.undo();
+        assert_eq!(e.doc,original);
+    }
+    #[test]
+    fn partial_group_transform_rejects_atomically(){
+        let mut e=Editor::default();
+        let a=e.doc.objects[0].id;
+        let b=e.doc.add(Shape::Rectangle{x:10.0,y:10.0,w:20.0,h:20.0},Style::default());
+        e.doc.group_objects(&[a,b]).unwrap();
+        let before=e.doc.clone();
+        e.selected=Some(a);e.multi_selected.clear();
+        e.rotation_degrees=32.0;
+        e.rotate_arbitrary();
+        assert_eq!(e.doc,before);
+        assert!(e.undo.is_empty());
+        assert!(e.status.contains("часть группы"));
+    }
+    #[test]
+    fn group_scale_is_atomic_and_undoable(){
+        let mut e=Editor::default();
+        let a=e.doc.objects[0].id;
+        let b=e.doc.add(Shape::Rectangle{x:800.0,y:100.0,w:10.0,h:10.0},Style::default());
+        e.doc.group_objects(&[a,b]).unwrap();
+        let before=e.doc.clone();
+        e.select_object(Some(a),false);
+        e.scale_x_percent=110.0;e.scale_y_percent=110.0;
+        e.scale_selected();
+        assert_ne!(e.doc,before);
+        e.doc.validate().unwrap();
+        e.undo();
+        assert_eq!(e.doc,before);
+    }
+    #[test]
+    fn group_rotation_transforms_both_members(){
+        let mut e=Editor::default();
+        let a=e.doc.objects[0].id;
+        let b=e.doc.add(Shape::Rectangle{x:5.0,y:5.0,w:20.0,h:20.0},Style::default());
+        e.doc.group_objects(&[a,b]).unwrap();
+        let before=e.doc.clone();
+        e.select_object(Some(a),false);
+        e.rotation_degrees=30.0;
+        e.rotate_arbitrary();
+        assert_ne!(e.doc.objects[0].shape,before.objects[0].shape);
+        assert_ne!(e.doc.objects.last().unwrap().shape,before.objects.last().unwrap().shape);
+        e.doc.validate().unwrap();
     }
     #[test]
     fn polygon_has_six_vertices(){

@@ -166,6 +166,49 @@ impl Editor {
                     if ui.button("Повернуть влево на 90°").clicked(){self.rotate_selection(opencorel_core::transform::QuarterTurn::CounterClockwise);ui.close_menu();}
                     if ui.button("Отразить по горизонтали").clicked(){self.mirror_selection(true);ui.close_menu();}
                     if ui.button("Отразить по вертикали").clicked(){self.mirror_selection(false);ui.close_menu();}
+                    ui.menu_button("Поворот и наклон — точно",|ui|{
+                        ui.label("Угол поворота, градусы:");
+                        ui.add(egui::DragValue::new(&mut self.rotation_degrees)
+                            .speed(0.5).range(-360.0..=360.0).suffix("°"));
+                        ui.label("Наклон X / Y, градусы:");
+                        ui.horizontal(|ui|{
+                            ui.add(egui::DragValue::new(&mut self.skew_x_degrees)
+                                .speed(0.5).range(-79.0..=79.0).suffix("°"));
+                            ui.add(egui::DragValue::new(&mut self.skew_y_degrees)
+                                .speed(0.5).range(-79.0..=79.0).suffix("°"));
+                        });
+                        ui.checkbox(&mut self.custom_pivot,"Задать центр преобразования (мм)");
+                        if self.custom_pivot{
+                            ui.horizontal(|ui|{
+                                ui.label("X:");
+                                ui.add(egui::DragValue::new(&mut self.pivot_x)
+                                    .speed(0.5).range(-100_000.0..=100_000.0));
+                                ui.label("Y:");
+                                ui.add(egui::DragValue::new(&mut self.pivot_y)
+                                    .speed(0.5).range(-100_000.0..=100_000.0));
+                            });
+                        }else{
+                            ui.small("Центр — геометрический центр выделения.");
+                        }
+                        if ui.button("Применить поворот").clicked(){
+                            self.rotate_arbitrary();ui.close_menu();
+                        }
+                        if ui.button("Применить наклон").clicked(){
+                            self.skew_arbitrary();ui.close_menu();
+                        }
+                        ui.separator();
+                        ui.label("Масштаб выделения, % X / Y:");
+                        ui.horizontal(|ui|{
+                            ui.add(egui::DragValue::new(&mut self.scale_x_percent)
+                                .speed(1.0).range(1.0..=1000.0).suffix("%"));
+                            ui.add(egui::DragValue::new(&mut self.scale_y_percent)
+                                .speed(1.0).range(1.0..=1000.0).suffix("%"));
+                        });
+                        if ui.button("Масштабировать всё выделение").clicked(){
+                            self.scale_selected();ui.close_menu();
+                        }
+                        ui.small("Ctrl+Z — отмена. Растровые изображения и текст требуют преобразования.");
+                    });
                     if ui.button("Редактировать узлы      F10").clicked(){
                         self.change_tool(Tool::Nodes);ui.close_menu();
                     }
