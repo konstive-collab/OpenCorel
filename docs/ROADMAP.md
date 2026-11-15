@@ -12,7 +12,7 @@ Goal: fast, legally independent vector graphics editor for advertising, posters 
 - **v0.7**: labelled and explained toolbox, onboarding, sample job, line/hexagon, corner resizing, internal clipboard, correct style duplication, nudging, safe quarter-rotation/mirroring
 - **v0.8**: unified dark/light theme, named objects and filtered list, persistent flat groups, atomic group actions, accurate property geometry, page centering and configurable grid
 
-- **v0.9**: editable curve nodes on the canvas (anchor and control handle move, segment split, guarded deletion, undo) — pending CI/production acceptance
+- **v0.9**: editable curve nodes on the canvas (anchor and control handle move, segment split, guarded deletion, undo) — Windows/Linux CI passed; manual production acceptance pending
 
 ## Long-term milestone plan
 
