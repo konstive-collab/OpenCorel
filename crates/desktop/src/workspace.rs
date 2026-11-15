@@ -62,16 +62,16 @@ impl Editor {
                     if ui.button("Поместить изображение...").clicked(){self.place_bitmap_picker();ui.close_menu();}
                     if ui.button("Сохранить           Ctrl+S").clicked(){self.save();ui.close_menu();}
                     if ui.button("Сохранить как...  Ctrl+Shift+S").clicked(){self.save_as_picker();ui.close_menu();}
-                    if ui.button("Экспорт SVG").clicked(){self.svg();ui.close_menu();}
-                    if ui.button("Экспорт SVGZ").clicked(){self.svgz();ui.close_menu();}
-                    if ui.button("Экспорт PDF (RGB)").clicked(){self.pdf();ui.close_menu();}
+                    if ui.button("Экспорт SVG...").clicked(){self.export_dialog("svg");ui.close_menu();}
+                    if ui.button("Экспорт SVGZ...").clicked(){self.export_dialog("svgz");ui.close_menu();}
+                    if ui.button("Экспорт PDF (RGB)...").clicked(){self.export_dialog("pdf");ui.close_menu();}
                     ui.separator();
                     ui.horizontal(|ui|{
                         ui.label("DPI");
                         ui.add(egui::DragValue::new(&mut self.proof_dpi).range(36..=300));
                     });
-                    if ui.button("Экспорт PNG...").clicked(){self.raster_proof("png");ui.close_menu();}
-                    if ui.button("Экспорт JPEG...").clicked(){self.raster_proof("jpg");ui.close_menu();}
+                    if ui.button("Экспорт PNG...").clicked(){self.export_dialog("png");ui.close_menu();}
+                    if ui.button("Экспорт JPEG...").clicked(){self.export_dialog("jpg");ui.close_menu();}
                     ui.separator();
                     if ui.button("Проверка макета...").clicked(){self.run_preflight();ui.close_menu();}
                 });
@@ -163,10 +163,10 @@ impl Editor {
                 ui.separator();
                 if ui.button("Фото / логотип").on_hover_text("Добавить PNG, JPEG, WebP и другие изображения").clicked(){self.place_bitmap_picker();}
                 ui.menu_button("Экспорт",|ui|{
-                    if ui.button("SVG — редактируемый обмен").clicked(){self.svg();ui.close_menu();}
-                    if ui.button("PDF — проверочный RGB").clicked(){self.pdf();ui.close_menu();}
-                    if ui.button("PNG — для согласования").clicked(){self.raster_proof("png");ui.close_menu();}
-                    if ui.button("JPEG — для согласования").clicked(){self.raster_proof("jpg");ui.close_menu();}
+                    if ui.button("SVG — редактируемый обмен...").clicked(){self.export_dialog("svg");ui.close_menu();}
+                    if ui.button("PDF — проверочный RGB...").clicked(){self.export_dialog("pdf");ui.close_menu();}
+                    if ui.button("PNG — для согласования...").clicked(){self.export_dialog("png");ui.close_menu();}
+                    if ui.button("JPEG — для согласования...").clicked(){self.export_dialog("jpg");ui.close_menu();}
                 });
                 ui.separator();
                 if ui.small_button("−").on_hover_text("Уменьшить масштаб").clicked(){self.zoom=(self.zoom/1.25).max(0.2);}
