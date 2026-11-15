@@ -25,6 +25,13 @@
 - New tests cover Cyrillic, emoji, special characters, empty search, no-match cases and size overflow.
 - This is object-local find and replace, not a document-wide search or rich-text editor.
 
+## Visual bounds upgrade
+- For supported on-canvas text, selection frames use the cached glyph-outline control-hull bounds instead of the approximate text-width estimate.
+- Cache signatures ensure geometry derived from an older position, font, or string is not reused after edits.
+- Invalid (NaN/Infinity) glyph coordinates are rejected for selection bounds. Empty contours continue to use the legacy frame.
+- New tests cover Bezier control extrema, invalid coordinates and stale-cache rejection.
+- The bounds are conservative (Bezier control points can lie outside the actual curve). Mouse hit-testing and document-wide alignment still use the legacy document model, and are NOT yet fully glyph accurate.
+
 ## Verification
 GitHub Actions Windows and Linux runs must complete against the latest PR head before merge. Early runs for the initial system-font picker passed, but do not imply later additions have passed.
 
