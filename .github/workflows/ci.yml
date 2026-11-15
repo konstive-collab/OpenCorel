@@ -25,6 +25,10 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libwayland-dev libasound2-dev libudev-dev
       - name: Tests
         run: cargo test --workspace
+      - name: Release-mode tests
+        run: cargo test --release --workspace
+      - name: Static Rust analysis
+        run: cargo clippy --workspace --all-targets
       - name: Build desktop
         run: cargo build --release -p opencorel-desktop
       - name: Build CLI
