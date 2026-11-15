@@ -8,6 +8,7 @@ pub mod svg_import;
 pub mod kdr;
 pub mod preflight;
 pub mod transform;
+pub mod node_edit;
 
 pub const SCHEMA_VERSION: u32 = 1;
 
