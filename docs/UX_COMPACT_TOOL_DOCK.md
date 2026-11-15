@@ -10,7 +10,8 @@ The prior 184–248 px sidebar used eight full-width, 35 px primitive buttons pl
 - Four primary tool buttons: Select, Node edit, Text, Bézier curve. Vector glyphs are drawn with egui painter; no operating-system icon font dependency, reducing missing-glyph boxes.
 - Less-frequent rectangle/ellipse/line/hexagon share a flyout button. Existing F6/F7/L/P shortcuts stay intact.
 - Direct access to image placement, preflight, help and compact overflow for sample/copy/paste.
-- The large permanent how-to and duplicate quick-action section are removed. Per-tool hints appear via hover and the full tutorial via F1.
+- The large permanent how-to and duplicate quick-action section are removed.
+- **F9 focus mode** can hide/show the inspector; choosing Text or Nodes restores it automatically. The Window menu can recover and select any inspector tab. Per-tool hints appear via hover and the full tutorial via F1.
 - Text creation and numeric node X/Y controls now appear in the Properties inspector; the tool mode/shortcut appears in the context bar.
 - All menu actions, keyboard commands, core vector tools, image import and layer operations remain implemented.
 
@@ -24,7 +25,7 @@ The prior 184–248 px sidebar used eight full-width, 35 px primitive buttons pl
 
 - Check actual pixels/rendering on Windows 10/11 at 100%, 125%, 150% DPI and Linux.
 - Verify open/close of primitive and overflow flyouts, compact/expanded transitions, keyboard-only tool switching, tooltips, node and text editing in right inspector.
-- Verify main window minimum width 780 px, full HD, and large displays.
+- Verify main window minimum width 780 px, full HD, and large displays; F9 hides/returns the right inspector and Window menu can restore it.
 - Validate screen-reader and accessibility navigation; egui tooltips are not a replacement for full accessibility support.
 - Check mouse pointer targeting and touch devices if targeted later.
 
