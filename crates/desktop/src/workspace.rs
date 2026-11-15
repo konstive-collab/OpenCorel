@@ -266,8 +266,27 @@ impl Editor {
                     ui.add(egui::Label::new(productivity::tool_hint(self.tool)).wrap());
                     if self.tool==Tool::Nodes{
                         ui.add_space(4.0);
-                        if let Some((_,address))=self.active_node{
+                        if let Some((id,address))=self.active_node{
                             ui.label(format!("Выбран узел: {address:?}"));
+                            let point=self.doc.objects.iter().find(|o|o.id==id)
+                                .and_then(|o|opencorel_core::node_edit::point_at(&o.shape,address));
+                            if let Some(point)=point{
+                                let (mut x,mut y)=(point.x,point.y);
+                                let mut changed=false;
+                                ui.horizontal(|ui|{
+                                    ui.label("X, мм");
+                                    changed|=ui.add(egui::DragValue::new(&mut x)
+                                        .speed(0.25).range(-100_000.0..=100_000.0)).changed();
+                                });
+                                ui.horizontal(|ui|{
+                                    ui.label("Y, мм");
+                                    changed|=ui.add(egui::DragValue::new(&mut y)
+                                        .speed(0.25).range(-100_000.0..=100_000.0)).changed();
+                                });
+                                if changed{
+                                    self.nudge_active_node(x-point.x,y-point.y);
+                                }
+                            }
                         }
                         if ui.button("Удалить узел   Del")
                             .on_hover_text("Удалить выбранную опорную точку; Ctrl+Z отменяет").clicked(){
