@@ -3,7 +3,7 @@ use super::{Editor,Tool};
 use eframe::egui::{self,RichText};
 use opencorel_core::{Bounds,Document,Object,Point,Shape,Style};
 use opencorel_core::transform::{self,QuarterTurn};
-use std::collections::HashSet;
+use std::collections::{HashSet,HashMap};
 
 const CLIPBOARD_LIMIT:usize=24*1024*1024;
 pub(super) fn tool_label(tool:Tool)->&'static str{
@@ -41,6 +41,20 @@ fn object_bytes(object:&Object)->usize{
             .map(|c|std::mem::size_of::<opencorel_core::Contour>()+
                 c.segments.len()*std::mem::size_of::<opencorel_core::CubicSegment>()).sum(),
         _=>0,
+    }
+}
+fn remap_groups(doc:&mut Document,sources:&[Object],new_ids:&[u64]){
+    let mut grouped:HashMap<u64,Vec<u64>>=HashMap::new();
+    for (original,id) in sources.iter().zip(new_ids.iter()){
+        if let Some(group)=original.group_id{
+            grouped.entry(group).or_default().push(*id);
+        }
+    }
+    for members in grouped.values(){
+        if members.len()>=2{
+            // New IDs point only at copied objects; never reuse source group IDs.
+            let _=doc.group_objects(members);
+        }
     }
 }
 fn plain(fill:&str)->Style{
@@ -98,6 +112,7 @@ impl Editor{
         self.checkpoint();
         let ids:Vec<u64>=copied.iter()
             .map(|obj|self.doc.copy_object(obj,self.active_layer,offset,offset)).collect();
+        remap_groups(&mut self.doc,&copied,&ids);
         self.selected=ids.first().copied();
         self.multi_selected=ids.into_iter().skip(1).collect();
         self.paste_number=self.paste_number.saturating_add(1);
@@ -118,9 +133,48 @@ impl Editor{
         }
         self.checkpoint();
         let new_ids:Vec<_>=copies.iter().map(|o|self.doc.copy_object(o,o.layer_id,10.0,10.0)).collect();
+        remap_groups(&mut self.doc,&copies,&new_ids);
         self.selected=new_ids.first().copied();
         self.multi_selected=new_ids.into_iter().skip(1).collect();
         self.status=format!("Создано копий: {}",self.selection_ids().len());
+    }
+    pub(super) fn group_selection(&mut self){
+        let ids=self.selection_ids();
+        if ids.len()<2{
+            self.status="Для группировки выделите минимум два объекта с Shift".into();return;
+        }
+        let selected:HashSet<u64>=ids.iter().copied().collect();
+        let editable:HashSet<u64>=self.doc.layers.iter()
+            .filter(|layer|layer.visible&&!layer.locked).map(|layer|layer.id).collect();
+        if self.doc.objects.iter().filter(|o|selected.contains(&o.id)).count()!=selected.len()
+            || self.doc.objects.iter().filter(|o|selected.contains(&o.id))
+            .any(|o|o.group_id.is_some()||!editable.contains(&o.layer_id)){
+            self.status="Сначала разгруппируйте прежние группы и разблокируйте слои".into();
+            return;
+        }
+        self.checkpoint();
+        match self.doc.group_objects(&ids){
+            Ok(group)=>self.status=format!("Группа #{group} создана ({} объектов). Ctrl+Shift+G — разгруппировать",ids.len()),
+            Err(e)=>self.status=e,
+        }
+    }
+    pub(super) fn ungroup_selection(&mut self){
+        let ids=self.selection_ids();
+        let groups:HashSet<u64>=self.doc.objects.iter()
+            .filter(|obj|ids.contains(&obj.id)).filter_map(|obj|obj.group_id).collect();
+        if groups.is_empty(){self.status="В выделении нет групп".into();return;}
+        let editable:HashSet<u64>=self.doc.layers.iter()
+            .filter(|l|l.visible&&!l.locked).map(|l|l.id).collect();
+        if self.doc.objects.iter().any(|o|o.group_id
+            .map(|g|groups.contains(&g)).unwrap_or(false)
+            && !editable.contains(&o.layer_id)){
+            self.status="Группа содержит объект из заблокированного слоя".into();return;
+        }
+        self.checkpoint();
+        match self.doc.ungroup_objects(&ids){
+            Ok(count)=>self.status=format!("Разгруппировано объектов: {count}"),
+            Err(e)=>self.status=e,
+        }
     }
     pub(super) fn selection_bounds(&self)->Option<Bounds>{
         let ids:HashSet<u64>=self.selection_ids().into_iter().collect();
@@ -138,6 +192,65 @@ impl Editor{
             });
         }
         b
+    }
+    /// Move every selected member together; never partially move a locked group.
+    pub(super) fn center_selection_on_page(&mut self){
+        if let Some(bounds)=self.selection_bounds(){
+            self.set_selection_position(
+                (self.doc.page.width_mm-bounds.w)*0.5,
+                (self.doc.page.height_mm-bounds.h)*0.5,
+            );
+            self.status="Выделение центрировано относительно листа".into();
+        }else{
+            self.status="Сначала выделите объекты для центрирования".into();
+        }
+    }
+    pub(super) fn set_selection_position(&mut self,new_x:f32,new_y:f32){
+        if !new_x.is_finite()||!new_y.is_finite()||
+            new_x.abs()>100_000.0||new_y.abs()>100_000.0{return;}
+        let Some(bounds)=self.selection_bounds() else{return;};
+        let ids:HashSet<u64>=self.selection_ids().into_iter().collect();
+        let layers:HashSet<u64>=self.doc.layers.iter()
+            .filter(|layer|layer.visible&&!layer.locked).map(|l|l.id).collect();
+        if self.doc.objects.iter().any(|o|ids.contains(&o.id)&&!layers.contains(&o.layer_id)){
+            self.status="Выделение включает заблокированный слой".into();return;
+        }
+        let dx=new_x-bounds.x;
+        let dy=new_y-bounds.y;
+        if dx.abs()<0.00001 && dy.abs()<0.00001{return;}
+        self.checkpoint();
+        for o in &mut self.doc.objects{
+            if ids.contains(&o.id){o.shape.translate(dx,dy);}
+        }
+        self.fill_cache.entries.clear();
+        self.compound_cache.clear();
+    }
+    pub(super) fn resize_single(&mut self,width:f32,height:f32){
+        if !self.multi_selected.is_empty(){
+            self.status="Изменять ширину/высоту можно у одного объекта".into();return;
+        }
+        let Some(id)=self.selected else{return;};
+        let Some(index)=self.doc.objects.iter().position(|o|o.id==id) else{return;};
+        let obj=&self.doc.objects[index];
+        if !self.doc.layer(obj.layer_id).map(|layer|layer.visible&&!layer.locked)
+            .unwrap_or(false){
+            self.status="Слой заблокирован".into();return;
+        }
+        if !transform::resizable(&obj.shape){
+            self.status="Для текста измените размер шрифта во вкладке свойств".into();return;
+        }
+        let b=obj.bounds();
+        if (b.w-width).abs()<0.00001&&(b.h-height).abs()<0.00001{return;}
+        let mut resized=obj.shape.clone();
+        match transform::resize_shape(&mut resized,
+            Bounds{x:b.x,y:b.y,w:width,h:height}){
+            Ok(())=>{
+                self.checkpoint();
+                self.doc.objects[index].shape=resized;
+                self.fill_cache.entries.clear();self.compound_cache.clear();
+            }
+            Err(e)=>self.status=e,
+        }
     }
     pub(super) fn rotate_selection(&mut self,turn:QuarterTurn){
         self.transform_selection(|s,c|transform::rotate_90(s,c,turn),"Поворот на 90°");
@@ -178,12 +291,15 @@ impl Editor{
         let ids:HashSet<u64>=self.selection_ids().into_iter().collect();
         let editable:HashSet<u64>=self.doc.layers.iter()
             .filter(|l|l.visible&&!l.locked).map(|l|l.id).collect();
-        if !self.doc.objects.iter().any(|o|ids.contains(&o.id)&&editable.contains(&o.layer_id)){
+        if self.doc.objects.iter().any(|o|
+            ids.contains(&o.id)&&!editable.contains(&o.layer_id)){
+            self.status="Сдвиг отменён: в выделении есть заблокированный объект".into();
             return;
         }
+        if !self.doc.objects.iter().any(|o|ids.contains(&o.id)){return;}
         self.checkpoint();
         for o in self.doc.objects.iter_mut().filter(|o|
-            ids.contains(&o.id)&&editable.contains(&o.layer_id)){
+            ids.contains(&o.id)){
             o.shape.translate(dx,dy);
         }
         self.fill_cache.entries.clear();
@@ -310,6 +426,46 @@ impl Editor{
 #[cfg(test)]
 mod tests{
     use super::*;
+    #[test]
+    fn centered_group_preserves_relative_geometry(){
+        let mut e=Editor::default();
+        e.select_all();
+        let before=e.doc.objects[1].bounds().x-e.doc.objects[0].bounds().x;
+        e.center_selection_on_page();
+        let after=e.doc.objects[1].bounds().x-e.doc.objects[0].bounds().x;
+        assert!((before-after).abs()<1e-4);
+    }
+    #[test]
+    fn exact_move_and_resize_preserve_geometry(){
+        let mut e=Editor::default();
+        let id=e.doc.objects[0].id;
+        e.select_object(Some(id),false);
+        e.set_selection_position(20.0,30.0);
+        assert!((e.doc.objects[0].bounds().x-20.0).abs()<0.01);
+        e.resize_single(100.0,200.0);
+        assert!((e.doc.objects[0].bounds().w-100.0).abs()<0.01);
+        e.undo();
+        assert!((e.doc.objects[0].bounds().w-700.0).abs()<0.01);
+    }
+    #[test]
+    fn group_duplicate_creates_independent_linked_copies(){
+        let mut e=Editor::default();
+        e.select_all();
+        e.group_selection();
+        assert!(e.doc.objects[0].group_id.is_some());
+        e.duplicate_preserving_styles();
+        assert_eq!(e.doc.objects.len(),4);
+        let original=e.doc.objects[0].group_id;
+        let duplicate=e.doc.objects[2].group_id;
+        assert_ne!(original,duplicate);
+        assert_eq!(duplicate,e.doc.objects[3].group_id);
+        e.select_object(Some(e.doc.objects[3].id),false);
+        assert_eq!(e.selection_ids().len(),2);
+        e.ungroup_selection();
+        assert!(e.doc.objects[2].group_id.is_none());
+        assert!(e.doc.objects[0].group_id.is_some());
+        e.doc.validate().unwrap();
+    }
     #[test]
     fn clipboard_retains_text_format_and_undo(){
         let mut editor=Editor::default();

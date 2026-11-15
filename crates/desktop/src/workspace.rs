@@ -48,7 +48,11 @@ impl Editor {
     pub(super) fn top_workspace(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::top("main_menubar").exact_height(28.0).show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
-                ui.label(RichText::new("OpenCorel").strong().size(15.0));
+                ui.label(RichText::new("◈ OpenCorel").strong().size(17.0)
+                    .color(Color32::from_rgb(32,201,170)));
+                ui.label(RichText::new("v0.8  •  EDITOR").small()
+                    .color(Color32::from_rgb(129,144,162)));
+
                 ui.separator();
                 ui.menu_button("Файл",|ui|{
                     if ui.button("Новый лист A4").clicked(){self.blank_page(210.0,297.0);ui.close_menu();}
@@ -104,6 +108,17 @@ impl Editor {
                     if ui.button("Баннер 6×3 м (SVG)").clicked(){self.page_size(6000.0,3000.0);ui.close_menu();}
                 });
                 ui.menu_button("Объект",|ui|{
+                    ui.label(RichText::new("ГРУППЫ").strong());
+                    if ui.button("Центрировать по листу").clicked(){
+                        self.center_selection_on_page();ui.close_menu();
+                    }
+                    if ui.button("Группировать       Ctrl+G").clicked(){
+                        self.group_selection();ui.close_menu();
+                    }
+                    if ui.button("Разгруппировать    Ctrl+Shift+G").clicked(){
+                        self.ungroup_selection();ui.close_menu();
+                    }
+                    ui.separator();
                     if ui.button("На передний план").clicked(){self.reorder_selection(true);ui.close_menu();}
                     if ui.button("На задний план").clicked(){self.reorder_selection(false);ui.close_menu();}
                     if ui.button("Дублировать").clicked(){self.duplicate_preserving_styles();ui.close_menu();}
@@ -188,6 +203,9 @@ impl Editor {
                     ui.label(format!("X {:.1}  Y {:.1}  Ш {:.1}  В {:.1} мм",
                         bounds.x,bounds.y,bounds.w,bounds.h));
                     ui.separator();
+                    if ui.small_button("Центр листа").on_hover_text("Поместить выбранные объекты по центру страницы").clicked(){
+                        self.center_selection_on_page();
+                    }
                     if ui.small_button("Копия").on_hover_text("Ctrl+D").clicked(){
                         self.duplicate_preserving_styles();
                     }
@@ -206,11 +224,12 @@ impl Editor {
 
     pub(super) fn tool_sidebar(&mut self,ctx:&egui::Context){
         egui::SidePanel::left("vertical_toolbox")
-            .default_width(174.0).width_range(154.0..=238.0)
+            .default_width(184.0).width_range(160.0..=248.0)
             .resizable(true).show(ctx,|ui|{
                 egui::ScrollArea::vertical().show(ui,|ui|{
                     ui.add_space(6.0);
-                    ui.label(RichText::new("ИНСТРУМЕНТЫ").strong().size(13.0));
+                    ui.label(RichText::new("ИНСТРУМЕНТЫ").strong().size(13.0)
+                        .color(Color32::from_rgb(38,200,172)));
                     ui.add_space(3.0);
                     for (tool,symbol,shortcut) in [
                         (Tool::Select,"↖","V"),
@@ -223,9 +242,8 @@ impl Editor {
                     ]{
                         let selected=self.tool==tool;
                         let label=format!("{}  {}",symbol,productivity::tool_label(tool));
-                        let response=ui.add_sized(
-                            [ui.available_width()-4.0,34.0],
-                            egui::Button::new(label).selected(selected));
+                        let button=egui::Button::new(label).selected(selected);
+                        let response=ui.add_sized([ui.available_width()-4.0,35.0],button);
                         if response.on_hover_text(format!(
                             "{} — {}\n{}",
                             productivity::tool_label(tool),shortcut,
@@ -282,76 +300,140 @@ impl Editor {
     pub(super) fn inspector(&mut self,ctx:&egui::Context){
         egui::SidePanel::right("inspector_docker").default_width(272.0)
             .width_range(220.0..=450.0).resizable(true).show(ctx,|ui|{
+            ui.label(RichText::new("ПАНЕЛЬ УПРАВЛЕНИЯ").strong().size(11.0)
+                .color(Color32::from_rgb(35,183,159)));
             ui.horizontal(|ui|{
                 ui.selectable_value(&mut self.inspector_tab,InspectorTab::Objects,"Объекты");
                 ui.selectable_value(&mut self.inspector_tab,InspectorTab::Properties,"Свойства");
                 ui.selectable_value(&mut self.inspector_tab,InspectorTab::Page,"Лист");
             });
             ui.separator();
-            match self.inspector_tab{
-                InspectorTab::Objects=>self.inspector_objects(ui),
-                InspectorTab::Properties=>self.inspector_properties(ui),
-                InspectorTab::Page=>self.inspector_page(ui),
+            if self.inspector_tab==InspectorTab::Objects{
+                // The virtualized object list owns its own scroll viewport.
+                self.inspector_objects(ui);
+            }else{
+                // Long typography/path properties must remain reachable on
+                // compact laptop displays rather than being clipped offscreen.
+                egui::ScrollArea::vertical()
+                    .id_salt("properties_docker")
+                    .auto_shrink([false,false])
+                    .show(ui,|ui|{
+                        match self.inspector_tab{
+                            InspectorTab::Properties=>self.inspector_properties(ui),
+                            InspectorTab::Page=>self.inspector_page(ui),
+                            InspectorTab::Objects=>{},
+                        }
+                    });
             }
         });
     }
 
     fn inspector_objects(&mut self,ui:&mut egui::Ui){
         ui.horizontal(|ui|{
-            ui.heading("Слои");
-            if ui.small_button("+").on_hover_text("Создать слой").clicked(){
+            ui.heading("СЛОИ");
+            if ui.small_button("+ Слой").on_hover_text("Создать новый слой").clicked(){
                 self.checkpoint();
                 let name=format!("Слой {}",self.doc.layers.len()+1);
                 self.active_layer=self.doc.add_layer(name);
             }
         });
-        let layers:Vec<_>=self.doc.layers.iter().map(|l|(l.id,l.name.clone(),l.visible,l.locked)).collect();
+        let layers:Vec<_>=self.doc.layers.iter()
+            .map(|layer|(layer.id,layer.name.clone(),layer.visible,layer.locked)).collect();
         for (id,name,mut visible,mut locked) in layers{
             ui.horizontal(|ui|{
-                if ui.selectable_label(self.active_layer==id,format!("{} {}",if visible{"◉"}else{"○"},name)).clicked(){
+                if ui.selectable_label(self.active_layer==id,
+                    format!("{} {}",if visible{"●"}else{"○"},name)).clicked(){
                     self.active_layer=id;
                 }
-                if ui.checkbox(&mut visible,"").on_hover_text("Видимость слоя").changed(){
+                if ui.checkbox(&mut visible,"").on_hover_text("Видимость").changed(){
                     self.checkpoint();
-                    if let Some(layer)=self.doc.layers.iter_mut().find(|l|l.id==id){layer.visible=visible;}
+                    if let Some(layer)=self.doc.layers.iter_mut().find(|l|l.id==id){
+                        layer.visible=visible;
+                    }
                 }
-                if ui.checkbox(&mut locked,"🔒").on_hover_text("Блокировать слой").changed(){
+                if ui.checkbox(&mut locked,"").on_hover_text("Блокировка").changed(){
                     self.checkpoint();
-                    if let Some(layer)=self.doc.layers.iter_mut().find(|l|l.id==id){layer.locked=locked;}
+                    if let Some(layer)=self.doc.layers.iter_mut().find(|l|l.id==id){
+                        layer.locked=locked;
+                    }
                 }
             });
         }
         ui.separator();
-        ui.label(RichText::new("Объекты").strong());
-        let count=self.doc.objects.len();
-        // Virtualized rows: remain responsive when designs contain thousands of objects.
-        egui::ScrollArea::vertical().id_salt("objects_list").show_rows(ui,23.0,count,|ui,rows|{
-            for row in rows{
-                let index=count-1-row;
-                let obj=&self.doc.objects[index];
-                let id=obj.id;
-                let layer_id=obj.layer_id;
-                let name=match &obj.shape{
-                    Shape::Rectangle{..}=>"▭  Прямоугольник".to_string(),
-                    Shape::Ellipse{..}=>"◯  Эллипс".into(),
-                    Shape::Text{value,..}=>format!("T  {}",value.chars().take(24).collect::<String>()),
-                    Shape::Bezier{..}=>"⌁  Кривая Безье".into(),
-                    Shape::CompoundPath{contours}=>format!("✒  Контуры ({})",contours.len()),
-                    Shape::Polyline{..}=>"⌁  Линия".into(),
-                    Shape::EmbeddedSvg{source_format,..}=>format!("▧  Вектор {source_format}"),
-                    Shape::Raster{pixel_width,pixel_height,..}=>format!("▧  Фото {pixel_width}×{pixel_height}"),
-                };
-                let visible=self.doc.layer(layer_id).map(|l|l.visible).unwrap_or(false);
-                if ui.add_enabled(visible,egui::Button::new(name)
-                    .selected(self.is_selected(id)).min_size(Vec2::new(ui.available_width(),20.0)))
-                    .clicked(){
-                    let shift=ui.input(|i|i.modifiers.shift);
-                    self.select_object(Some(id),shift);
-                    self.active_layer=layer_id;
-                    self.inspector_tab=InspectorTab::Properties;
-                }
+        ui.horizontal(|ui|{
+            ui.heading("ОБЪЕКТЫ");
+            ui.label(RichText::new(format!("{}",self.doc.objects.len()))
+                .color(Color32::from_rgb(33,187,161)));
+        });
+        ui.add(egui::TextEdit::singleline(&mut self.object_filter)
+            .hint_text("Поиск объекта или названия..."));
+        ui.horizontal(|ui|{
+            if ui.add_enabled(self.selection_ids().len()>=2,
+                egui::Button::new("Группа  Ctrl+G")).clicked(){
+                self.group_selection();
+            }
+            if ui.button("Разгрупп.").on_hover_text("Ctrl+Shift+G").clicked(){
+                self.ungroup_selection();
             }
         });
+        let query=self.object_filter.trim().to_lowercase();
+        let filtered:Option<Vec<usize>>=if query.is_empty(){None}else{
+            Some(self.doc.objects.iter().enumerate().filter_map(|(index,obj)|{
+                let label=if !obj.name.is_empty(){obj.name.to_lowercase()}else{
+                    match &obj.shape{
+                        Shape::Text{value,..}=>value.to_lowercase(),
+                        Shape::Rectangle{..}=>"прямоугольник".into(),
+                        Shape::Ellipse{..}=>"эллипс".into(),
+                        Shape::Raster{..}=>"фото изображение".into(),
+                        Shape::EmbeddedSvg{..}=>"вектор".into(),
+                        Shape::CompoundPath{..}=>"контуры".into(),
+                        Shape::Bezier{..}=>"кривая".into(),
+                        Shape::Polyline{..}=>"линия".into(),
+                    }
+                };
+                if label.contains(&query)||obj.id.to_string().contains(&query){
+                    Some(index)
+                }else{None}
+            }).collect())
+        };
+        let count=filtered.as_ref().map_or(self.doc.objects.len(),Vec::len);
+        ui.label(RichText::new(format!("Показано: {count}. Shift — множественное выделение."))
+            .small().color(Color32::GRAY));
+        egui::ScrollArea::vertical().id_salt("objects_list")
+            .show_rows(ui,26.0,count,|ui,rows|{
+                for row in rows{
+                    let index=if let Some(ref filtered)=filtered{
+                        filtered[count-1-row]
+                    }else{count-1-row};
+                    let obj=&self.doc.objects[index];
+                    let id=obj.id;let layer_id=obj.layer_id;
+                    let display=if obj.name.is_empty(){
+                        match &obj.shape{
+                            Shape::Rectangle{..}=>"▭ Прямоугольник".to_string(),
+                            Shape::Ellipse{..}=>"◯ Эллипс".into(),
+                            Shape::Text{value,..}=>format!("T {}",value.chars().take(20).collect::<String>()),
+                            Shape::Bezier{..}=>"⌁ Безье".into(),
+                            Shape::CompoundPath{contours}=>format!("✒ Контуры ({})",contours.len()),
+                            Shape::Polyline{..}=>"╱ Линия".into(),
+                            Shape::EmbeddedSvg{source_format,..}=>format!("▧ Вектор {source_format}"),
+                            Shape::Raster{pixel_width,pixel_height,..}=>format!("▧ Фото {pixel_width}×{pixel_height}"),
+                        }
+                    }else{obj.name.clone()};
+                    let name=if let Some(group)=obj.group_id{
+                        format!("▣ {}  · G{}",display,group)
+                    }else{display};
+                    let visible=self.doc.layer(layer_id).map(|l|l.visible).unwrap_or(false);
+                    let button=egui::Button::new(name)
+                        .selected(self.is_selected(id))
+                        .min_size(Vec2::new(ui.available_width(),23.0));
+                    if ui.add_enabled(visible,button).clicked(){
+                        let shift=ui.input(|i|i.modifiers.shift);
+                        self.select_object(Some(id),shift);
+                        self.active_layer=layer_id;
+                        self.inspector_tab=InspectorTab::Properties;
+                    }
+                }
+            });
     }
 
     fn inspector_properties(&mut self,ui:&mut egui::Ui){
@@ -368,6 +450,63 @@ impl Editor {
         let Some(index)=self.doc.objects.iter().position(|o|o.id==id) else{
             self.selected=None;return;
         };
+        ui.collapsing("Название и группа",|ui|{
+            let mut label=self.doc.objects[index].name.clone();
+            ui.label("Название объекта в панели слоёв:");
+            if ui.add(egui::TextEdit::singleline(&mut label)
+                .hint_text("Например: логотип, заголовок, фон...")).changed(){
+                if label.len()<=256 && !label.chars().any(|c|c.is_control()){
+                    self.checkpoint();
+                    self.doc.objects[index].name=label;
+                }else{
+                    self.status="Название: максимум 256 байт, без управляющих символов".into();
+                }
+            }
+            if let Some(group)=self.doc.objects[index].group_id{
+                ui.label(format!("Группа #{group}: {} элементов",
+                    self.doc.group_members(id).len()));
+                if ui.button("Разгруппировать    Ctrl+Shift+G").clicked(){
+                    self.ungroup_selection();
+                }
+            }else if self.selection_ids().len()>=2{
+                if ui.button("Сгруппировать выделенное    Ctrl+G").clicked(){
+                    self.group_selection();
+                }
+            }
+        });
+        ui.collapsing("Точное положение и размер (мм)",|ui|{
+            if let Some(bounds)=self.selection_bounds(){
+                let (mut x,mut y)=(bounds.x,bounds.y);
+                let mut pos_change=false;
+                ui.horizontal(|ui|{
+                    ui.label("X");
+                    pos_change|=ui.add(egui::DragValue::new(&mut x)
+                        .speed(0.5).range(-100_000.0..=100_000.0)).changed();
+                    ui.label("Y");
+                    pos_change|=ui.add(egui::DragValue::new(&mut y)
+                        .speed(0.5).range(-100_000.0..=100_000.0)).changed();
+                });
+                if pos_change{self.set_selection_position(x,y);}
+                if self.multi_selected.is_empty() &&
+                    opencorel_core::transform::resizable(&self.doc.objects[index].shape){
+                    let (mut w,mut h)=(bounds.w,bounds.h);
+                    let mut size_change=false;
+                    ui.horizontal(|ui|{
+                        ui.label("Ш");
+                        size_change|=ui.add(egui::DragValue::new(&mut w)
+                            .speed(1.0).range(0.1..=100_000.0)).changed();
+                        ui.label("В");
+                        size_change|=ui.add(egui::DragValue::new(&mut h)
+                            .speed(1.0).range(0.1..=100_000.0)).changed();
+                    });
+                    if size_change{self.resize_single(w,h);}
+                }else{
+                    ui.label(RichText::new("Размер группы меняется через отдельные элементы.")
+                        .small().color(Color32::GRAY));
+                }
+            }
+        });
+        ui.separator();
         // Images may contain tens of megabytes of Base64. Never clone the
         // whole object per GUI frame just to show a few numeric fields.
         let asset=match &self.doc.objects[index].shape{
@@ -760,7 +899,12 @@ impl Editor {
         });
         ui.separator();
         ui.checkbox(&mut self.show_grid,"Показать сетку");
-        ui.checkbox(&mut self.snap_grid,"Привязка к сетке 10 мм");
+        ui.checkbox(&mut self.snap_grid,"Привязка к сетке");
+        ui.horizontal(|ui|{
+            ui.label("Шаг сетки, мм");
+            ui.add(egui::DragValue::new(&mut self.grid_mm)
+                .speed(0.5).range(0.5..=1000.0));
+        });
         ui.checkbox(&mut self.show_rulers,"Показать линейки");
         ui.checkbox(&mut self.show_safe_area,"Показать безопасную область");
         ui.horizontal(|ui|{
@@ -783,7 +927,9 @@ impl Editor {
     pub(super) fn workspace_footer(&mut self,ctx:&egui::Context){
         egui::TopBottomPanel::bottom("statusbar").exact_height(26.0).show(ctx,|ui|{
             ui.horizontal(|ui|{
-                ui.label(&self.status);
+                ui.label(RichText::new(&self.status).color(
+                    if self.status.starts_with("Ошибка"){Color32::from_rgb(242,115,115)}
+                    else{Color32::from_rgb(171,202,206)}));
                 ui.separator();
                 let pos=if let Some(p)=self.cursor_mm{
                     format!("X: {:.1} мм   Y: {:.1} мм",p.x,p.y)
@@ -802,7 +948,7 @@ impl Editor {
                 ui.label(RichText::new("Страница 1 из 1").strong())
                     .on_hover_text("Многостраничные проекты пока не реализованы.");
                 ui.separator();
-                ui.label("Цветовая палитра документа");
+                ui.label(RichText::new("ЦВЕТА").strong().small());
                 for swatch in SWATCHES.iter().take(14){
                     let res=ui.add_sized([16.0,16.0],egui::Button::new("").fill(color(swatch)))
                         .on_hover_text(format!("{swatch} — заливка"));
@@ -831,9 +977,12 @@ impl Editor {
         if ids.is_empty(){self.status="Сначала выберите объект".into();return;}
         let editable:HashSet<u64>=self.doc.layers.iter()
             .filter(|l|l.visible&&!l.locked).map(|l|l.id).collect();
-        if !self.doc.objects.iter().any(|o|ids.contains(&o.id)&&editable.contains(&o.layer_id)){
-            self.status="Слои недоступны для редактирования".into();return;
+        if self.doc.objects.iter().filter(|o|ids.contains(&o.id))
+            .any(|o|!editable.contains(&o.layer_id)){
+            self.status="Цвет не изменён: часть выделения находится в закрытом слое".into();
+            return;
         }
+        if !self.doc.objects.iter().any(|o|ids.contains(&o.id)){return;}
         self.checkpoint();
         for obj in self.doc.objects.iter_mut(){
             if ids.contains(&obj.id)&&editable.contains(&obj.layer_id){
@@ -851,11 +1000,14 @@ impl Editor {
         if ids.is_empty(){return;}
         let editable:HashSet<u64>=self.doc.layers.iter()
             .filter(|l|l.visible&&!l.locked).map(|l|l.id).collect();
-        if !self.doc.objects.iter().any(|o|ids.contains(&o.id)&&editable.contains(&o.layer_id)){
-            self.status="Выделенные объекты заблокированы".into();return;
+        if self.doc.objects.iter().any(|o|ids.contains(&o.id)&&
+            !editable.contains(&o.layer_id)){
+            self.status="Удаление отменено: выделение включает заблокированные слои".into();
+            return;
         }
+        if !self.doc.objects.iter().any(|o|ids.contains(&o.id)){return;}
         self.checkpoint();
-        self.doc.objects.retain(|o|!(ids.contains(&o.id)&&editable.contains(&o.layer_id)));
+        self.doc.objects.retain(|o|!ids.contains(&o.id));
         self.selected=None;self.multi_selected.clear();
         self.status="Выделенные объекты удалены".into();
     }
@@ -864,15 +1016,31 @@ impl Editor {
         self.duplicate_preserving_styles();
     }
     pub(super) fn reorder_selection(&mut self,front:bool){
-        if !self.multi_selected.is_empty(){
-            self.status="Порядок наложения меняется по одному объекту".into();return;
+        let ids:HashSet<u64>=self.selection_ids().into_iter().collect();
+        if ids.is_empty(){return;}
+        let editable:HashSet<u64>=self.doc.layers.iter()
+            .filter(|l|l.visible&&!l.locked).map(|l|l.id).collect();
+        if self.doc.objects.iter().any(|o|ids.contains(&o.id)&&
+            !editable.contains(&o.layer_id)){
+            self.status="Порядок не изменён: слой заблокирован".into();return;
         }
-        let Some(id)=self.selected else{return;};
-        let Some(index)=self.doc.objects.iter().position(|o|o.id==id) else{return;};
-        let layer=self.doc.objects[index].layer_id;
-        if !self.doc.layer(layer).map(|l|l.visible&&!l.locked).unwrap_or(false){return;}
+        if !self.doc.objects.iter().any(|o|ids.contains(&o.id)){return;}
         self.checkpoint();
-        let obj=self.doc.objects.remove(index);
-        if front{self.doc.objects.push(obj);}else{self.doc.objects.insert(0,obj);}
+        let mut selected=Vec::new();
+        let mut rest=Vec::new();
+        for obj in self.doc.objects.drain(..){
+            if ids.contains(&obj.id){selected.push(obj);}
+            else{rest.push(obj);}
+        }
+        self.doc.objects=if front{
+            rest.extend(selected);rest
+        }else{
+            selected.extend(rest);selected
+        };
+        self.status=if front{
+            "Выделенные объекты перемещены на передний план".into()
+        }else{
+            "Выделенные объекты перемещены на задний план".into()
+        };
     }
 }
