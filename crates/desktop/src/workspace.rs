@@ -2,7 +2,7 @@
 //! Uses familiar panel positions and workflows but no proprietary assets.
 use super::{color, Editor, Tool};
 use eframe::egui::{self, Color32, RichText, Vec2};
-use opencorel_core::{Bounds, Shape, Alignment, Distribution, valid_paint};
+use opencorel_core::{Bounds, Shape, Alignment, Distribution, TextAlign, valid_paint};
 use std::collections::HashSet;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -63,6 +63,8 @@ impl Editor {
                     });
                     if ui.button("Экспорт PNG...").clicked(){self.raster_proof("png");ui.close_menu();}
                     if ui.button("Экспорт JPEG...").clicked(){self.raster_proof("jpg");ui.close_menu();}
+                    ui.separator();
+                    if ui.button("Проверка макета...").clicked(){self.run_preflight();ui.close_menu();}
                 });
                 ui.menu_button("Правка",|ui|{
                     if ui.add_enabled(!self.undo.is_empty(),egui::Button::new("Отменить      Ctrl+Z")).clicked(){self.undo();ui.close_menu();}
@@ -79,10 +81,13 @@ impl Editor {
                     ui.checkbox(&mut self.light_theme,"Светлая тема");
                 });
                 ui.menu_button("Макет",|ui|{
+                    if ui.button("A0 — 841×1189 мм").clicked(){self.page_size(841.0,1189.0);ui.close_menu();}
+                    if ui.button("A2 — 420×594 мм").clicked(){self.page_size(420.0,594.0);ui.close_menu();}
                     if ui.button("A4 — 210×297 мм").clicked(){self.page_size(210.0,297.0);ui.close_menu();}
                     if ui.button("A3 — 297×420 мм").clicked(){self.page_size(297.0,420.0);ui.close_menu();}
                     if ui.button("A1 — 594×841 мм").clicked(){self.page_size(594.0,841.0);ui.close_menu();}
                     if ui.button("Баннер 3×2 м").clicked(){self.page_size(3000.0,2000.0);ui.close_menu();}
+                    if ui.button("Баннер 6×3 м (SVG)").clicked(){self.page_size(6000.0,3000.0);ui.close_menu();}
                 });
                 ui.menu_button("Объект",|ui|{
                     if ui.button("На передний план").clicked(){self.reorder_selection(true);ui.close_menu();}
@@ -399,7 +404,7 @@ impl Editor {
                             changed|=ui.add(egui::DragValue::new(num).speed(0.5)).changed();
                         });
                     }
-                    *size_mm=size_mm.max(0.1);
+                    *size_mm=size_mm.clamp(0.1,10_000.0);
                 }
                 Shape::Raster{x,y,w,h,pixel_width,pixel_height,..}=>{
                     ui.label(format!("Растровое изображение: {} × {} пикселей",pixel_width,pixel_height));
@@ -468,6 +473,56 @@ impl Editor {
                     }
                 }
             }
+            if matches!(object.shape,Shape::Text{..}){
+                ui.separator();
+                ui.label(RichText::new("Типографика").strong());
+                ui.label("Название шрифта (системного):");
+                changed|=ui.text_edit_singleline(&mut object.text_format.family).changed();
+                if ui.button("Шрифт по умолчанию").clicked(){
+                    object.text_format.family="sans-serif".into();changed=true;
+                }
+                ui.horizontal(|ui|{
+                    ui.label("Начертание:");
+                    egui::ComboBox::from_id_salt("text_weight")
+                        .selected_text(format!("{}",object.text_format.weight))
+                        .show_ui(ui,|ui|{
+                            for (label,weight) in [
+                                ("Тонкий",100),("Светлый",300),
+                                ("Обычный",400),("Средний",500),
+                                ("Полужирный",600),("Жирный",700),
+                                ("Очень жирный",800),("Чёрный",900),
+                            ]{
+                                changed|=ui.selectable_value(&mut object.text_format.weight,
+                                    weight,label).changed();
+                            }
+                        });
+                    changed|=ui.checkbox(&mut object.text_format.italic,"Курсив").changed();
+                });
+                ui.label("Выравнивание строк:");
+                ui.horizontal(|ui|{
+                    for (label,align) in [
+                        ("Слева",TextAlign::Left),("Центр",TextAlign::Center),
+                        ("Справа",TextAlign::Right)
+                    ]{
+                        changed|=ui.selectable_value(&mut object.text_format.alignment,
+                            align,label).changed();
+                    }
+                });
+                ui.horizontal(|ui|{
+                    ui.label("Межбуквенный интервал, мм");
+                    changed|=ui.add(egui::DragValue::new(
+                        &mut object.text_format.letter_spacing_mm)
+                        .speed(0.05).range(-100.0..=100.0)).changed();
+                });
+                ui.horizontal(|ui|{
+                    ui.label("Межстрочный множитель");
+                    changed|=ui.add(egui::DragValue::new(
+                        &mut object.text_format.line_height)
+                        .speed(0.05).range(0.7..=4.0)).changed();
+                });
+                ui.label(RichText::new("На холсте — упрощённый предпросмотр. Шрифты и печать сверяйте по PDF.")
+                    .small().color(Color32::GRAY));
+            }
             ui.separator();
             ui.label("Заливка: #RRGGBB или none");
             changed|=ui.text_edit_singleline(&mut object.style.fill).changed();
@@ -477,7 +532,8 @@ impl Editor {
             changed|=ui.add(egui::DragValue::new(&mut object.style.stroke_width_mm)
                 .speed(0.1).range(0.0..=1000.0)).changed();
             if changed{
-                if valid_paint(&object.style.fill)&&valid_paint(&object.style.stroke){
+                if valid_paint(&object.style.fill)&&valid_paint(&object.style.stroke)
+                    && object.text_format.validate().is_ok(){
                     self.checkpoint();
                     self.doc.objects[index]=object.clone();
                 }else{
@@ -509,6 +565,8 @@ impl Editor {
         let height=ui.add(egui::DragValue::new(&mut h).speed(1.0).range(1.0..=100_000.0)).changed();
         if width || height{self.page_size(w,h);}
         ui.horizontal_wrapped(|ui|{
+            if ui.small_button("A0").clicked(){self.page_size(841.0,1189.0);}
+            if ui.small_button("A2").clicked(){self.page_size(420.0,594.0);}
             if ui.small_button("A4").clicked(){self.page_size(210.0,297.0);}
             if ui.small_button("A3").clicked(){self.page_size(297.0,420.0);}
             if ui.small_button("A1").clicked(){self.page_size(594.0,841.0);}
@@ -518,6 +576,21 @@ impl Editor {
         ui.checkbox(&mut self.show_grid,"Показать сетку");
         ui.checkbox(&mut self.snap_grid,"Привязка к сетке 10 мм");
         ui.checkbox(&mut self.show_rulers,"Показать линейки");
+        ui.checkbox(&mut self.show_safe_area,"Показать безопасную область");
+        ui.horizontal(|ui|{
+            ui.label("Отступ от края, мм");
+            ui.add(egui::DragValue::new(&mut self.safe_margin_mm)
+                .speed(0.5).range(0.0..=100.0));
+        });
+        ui.label("Оранжевая рамка — только экранная подсказка, в файл не выводится.");
+        ui.separator();
+        ui.heading("Предпечатная проверка");
+        ui.horizontal(|ui|{
+            ui.label("Порог DPI для фото");
+            ui.add(egui::DragValue::new(&mut self.minimum_image_dpi)
+                .speed(5.0).range(30.0..=600.0));
+        });
+        if ui.button("Проверить макет").clicked(){self.run_preflight();}
         ui.label("Один редактируемый лист. Многостраничность — следующий этап.");
     }
 

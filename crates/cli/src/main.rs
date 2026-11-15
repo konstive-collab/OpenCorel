@@ -13,6 +13,17 @@ fn main()->ExitCode{
                 Style::default());
             save_document(&d,path)
         }
+        [_,op,path] if op=="preflight" => open_any(path).and_then(|r|{
+            let issues=opencorel_core::preflight::check(&r.document,Default::default());
+            for issue in &issues{
+                println!("{:?} [{}] #{}: {}",issue.severity,issue.code,
+                    issue.object_id.map(|v|v.to_string()).unwrap_or_else(||"-".into()),
+                    issue.message);
+            }
+            if issues.iter().any(|i|i.severity==opencorel_core::preflight::Severity::Error){
+                Err("The document contains preflight errors".into())
+            }else{Ok(())}
+        }),
         [_,op,path] if op=="inspect" => open_any(path).map(|r|{
             println!("{}: {} x {} mm; {} objects",
                 r.document.name,r.document.page.width_mm,r.document.page.height_mm,r.document.objects.len());
@@ -33,7 +44,7 @@ fn main()->ExitCode{
             .and_then(|r|save_document(&r.document,dst)),
         [_,op,src,dst] if op=="export-svg" => open_any(src)
             .and_then(|r|save_document(&r.document,dst)),
-        _=>{eprintln!("Usage:\n  opencorel-cli benchmark COUNT\n  opencorel-cli new FILE.kdr\n  opencorel-cli inspect FILE.kdr\n  opencorel-cli convert INPUT OUTPUT\n  opencorel-cli export-bitmap FILE.kdr FILE.png DPI\n  opencorel-cli export-svg FILE.kdr FILE.svg\n  opencorel-cli export-pdf FILE.kdr FILE.pdf\n  opencorel-cli import-svg FILE.svg FILE.kdr");
+        _=>{eprintln!("Usage:\n  opencorel-cli benchmark COUNT\n  opencorel-cli new FILE.kdr\n  opencorel-cli inspect FILE.kdr\n  opencorel-cli preflight FILE.kdr\n  opencorel-cli convert INPUT OUTPUT\n  opencorel-cli export-bitmap FILE.kdr FILE.png DPI\n  opencorel-cli export-svg FILE.kdr FILE.svg\n  opencorel-cli export-pdf FILE.kdr FILE.pdf\n  opencorel-cli import-svg FILE.svg FILE.kdr");
             return ExitCode::FAILURE;}
     };
     match outcome{

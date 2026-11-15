@@ -71,6 +71,11 @@ struct Editor{
     raster_cache:RasterCache,
     proof_dpi:u32,
     keep_bitmap_ratio:bool,
+    show_preflight:bool,
+    preflight_lines:Vec<String>,
+    minimum_image_dpi:f32,
+    show_safe_area:bool,
+    safe_margin_mm:f32,
 }
 impl Default for Editor{
     fn default()->Self{
@@ -89,7 +94,10 @@ impl Default for Editor{
             show_rulers:true,light_theme:true,cursor_mm:None,
             fill_cache:FillCache::default(),vector_cache:VectorCache::default(),
             raster_cache:RasterCache::default(),proof_dpi:96,
-            keep_bitmap_ratio:true}
+            keep_bitmap_ratio:true,
+            show_preflight:false,preflight_lines:Vec::new(),
+            minimum_image_dpi:150.0,
+            show_safe_area:false,safe_margin_mm:5.0}
     }
 }
 #[derive(Clone,Copy)]
@@ -157,8 +165,27 @@ fn paint(p:&egui::Painter,obj:&Object,v:View,cache:&mut FillCache,
             p.add(egui::Shape::convex_polygon(vertices,fill,stroke));
         }
         Shape::Text{x,y,value,size_mm}=>{
-            p.text(v.screen(Point{x:*x,y:*y}),Align2::LEFT_TOP,value,
-                FontId::proportional((size_mm*v.scale).clamp(1.0,400.0)),fill);
+            let fmt=&obj.text_format;
+            let family=fmt.family.to_ascii_lowercase();
+            let monospaced=["mono","consolas","courier","menlo","code"]
+                .iter().any(|needle|family.contains(needle));
+            let font=if monospaced {
+                FontId::monospace((size_mm*v.scale).clamp(1.0,400.0))
+            }else{
+                FontId::proportional((size_mm*v.scale).clamp(1.0,400.0))
+            };
+            let max_width=fmt.line_width_mm(value,*size_mm);
+            for (i,line) in value.split('\n').take(1000).enumerate(){
+                let line_width=fmt.line_width_mm(line,*size_mm);
+                let x_offset=match fmt.alignment{
+                    opencorel_core::TextAlign::Left=>0.0,
+                    opencorel_core::TextAlign::Center=>(max_width-line_width)*0.5,
+                    opencorel_core::TextAlign::Right=>max_width-line_width,
+                };
+                p.text(v.screen(Point{x:*x+x_offset,
+                        y:*y+i as f32*fmt.line_height* *size_mm}),
+                    Align2::LEFT_TOP,line,font.clone(),fill);
+            }
         }
         Shape::Bezier{start,segments,closed}=>{
             let mut contour=vec![*start];
@@ -210,6 +237,24 @@ fn trim_history(history:&mut Vec<Document>) {
     }
 }
 impl Editor{
+    fn run_preflight(&mut self){
+        let issues=opencorel_core::preflight::check(&self.doc,
+            opencorel_core::preflight::PreflightOptions{
+                minimum_image_dpi:self.minimum_image_dpi,
+                safe_margin_mm:self.safe_margin_mm,
+            });
+        let warning_count=issues.iter().filter(|i|
+            i.severity!=opencorel_core::preflight::Severity::Notice).count();
+        self.preflight_lines=issues.iter().map(|issue|format!(
+            "{:?} [{}] {}{}",
+            issue.severity,issue.code,
+            issue.object_id.map(|id|format!("Объект #{id}: ")).unwrap_or_default(),
+            issue.message
+        )).collect();
+        self.status=format!("Проверка макета: замечаний {}, информационных {}",
+            warning_count,issues.len()-warning_count);
+        self.show_preflight=true;
+    }
     fn selection_ids(&self)->Vec<u64>{
         let mut ids=Vec::with_capacity(self.multi_selected.len()+1);
         if let Some(id)=self.selected{ids.push(id);}
@@ -532,15 +577,25 @@ impl Editor{
             let page_painter=painter.with_clip_rect(v.rect.intersect(working));
             self.draw_grid_rulers(&painter,&page_painter,v,response.rect);
             for obj in self.doc.visible_objects(){
-                if v.bounds(obj.shape.bounds()).intersects(v.rect.intersect(response.rect)){
+                if v.bounds(obj.bounds()).intersects(v.rect.intersect(response.rect)){
                     paint(&page_painter,obj,v,&mut self.fill_cache,
                         &mut self.vector_cache,&mut self.raster_cache,ctx);
+                }
+            }
+            if self.show_safe_area {
+                let margin=self.safe_margin_mm;
+                if margin>0.0 && self.doc.page.width_mm>2.0*margin &&
+                    self.doc.page.height_mm>2.0*margin {
+                    let r=v.bounds(Bounds{x:margin,y:margin,
+                        w:self.doc.page.width_mm-2.0*margin,
+                        h:self.doc.page.height_mm-2.0*margin});
+                    outline(&page_painter,r,Color32::from_rgb(222,129,48),1.0);
                 }
             }
             let selected:HashSet<u64>=self.selection_ids().into_iter().collect();
             for o in self.doc.objects.iter().filter(|o|selected.contains(&o.id)){
                 if self.doc.layer(o.layer_id).map(|l|l.visible).unwrap_or(false){
-                    outline(&page_painter,v.bounds(o.shape.bounds()).expand(3.0),Color32::BLUE,2.0);
+                    outline(&page_painter,v.bounds(o.bounds()).expand(3.0),Color32::BLUE,2.0);
                 }
             }
             if response.drag_started_by(egui::PointerButton::Primary){
@@ -694,6 +749,20 @@ impl eframe::App for Editor{
         self.inspector(ctx);
         self.workspace_footer(ctx);
         self.canvas(ctx);
+        if self.show_preflight{
+            egui::Window::new("Проверка макета")
+                .open(&mut self.show_preflight)
+                .default_width(600.0)
+                .resizable(true).show(ctx,|ui|{
+                    ui.label(format!("Минимальное разрешение фотографий: {:.0} DPI",
+                        self.minimum_image_dpi));
+                    ui.label("Результат является предварительной проверкой, не сертификатом готовности к печати.");
+                    ui.separator();
+                    egui::ScrollArea::vertical().max_height(450.0).show(ui,|ui|{
+                        for item in &self.preflight_lines{ui.label(item);}
+                    });
+                });
+        }
     }
 }
 #[cfg(test)]

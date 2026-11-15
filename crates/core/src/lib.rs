@@ -6,6 +6,7 @@ use std::{collections::HashSet, fs, io::{self, Write}, path::Path};
 
 pub mod svg_import;
 pub mod kdr;
+pub mod preflight;
 
 pub const SCHEMA_VERSION: u32 = 1;
 
@@ -80,9 +81,11 @@ impl Shape {
             Self::Rectangle {x,y,w,h} | Self::Ellipse {x,y,w,h} |
             Self::EmbeddedSvg {x,y,w,h,..} |
             Self::Raster {x,y,w,h,..} => Bounds {x:*x,y:*y,w:*w,h:*h},
-            Self::Text {x,y,value,size_mm} => Bounds {
-                x:*x, y:*y, w:size_mm * (value.chars().count().max(1) as f32) * 0.6,
-                h:size_mm * 1.25,
+            Self::Text {x,y,value,size_mm} => {
+                let widest=value.split('\n').map(|line|line.chars().count()).max().unwrap_or(0);
+                let lines=value.split('\n').count().max(1);
+                Bounds{x:*x,y:*y,w:*size_mm*widest as f32*0.6,
+                    h:*size_mm*(1.0+(lines-1) as f32*1.2)}
             },
             Self::Bezier {start,segments,..} => {
                 let (mut x1,mut y1,mut x2,mut y2)=(start.x,start.y,start.x,start.y);
@@ -120,6 +123,49 @@ impl Shape {
     }
 }
 
+#[derive(Clone,Copy,Debug,PartialEq,Eq,Serialize,Deserialize,Default)]
+#[serde(rename_all="snake_case")]
+pub enum TextAlign{#[default] Left,Center,Right}
+
+#[derive(Clone,Debug,PartialEq,Serialize,Deserialize)]
+#[serde(default)]
+pub struct TextFormat{
+    pub family:String,
+    pub weight:u16,
+    pub italic:bool,
+    pub alignment:TextAlign,
+    pub letter_spacing_mm:f32,
+    pub line_height:f32,
+}
+impl Default for TextFormat{
+    fn default()->Self{
+        Self{family:"sans-serif".into(),weight:400,italic:false,
+            alignment:TextAlign::Left,letter_spacing_mm:0.0,line_height:1.2}
+    }
+}
+impl TextFormat{
+    pub fn line_width_mm(&self,value:&str,size_mm:f32)->f32{
+        let max_chars=value.split('\n').map(|line|line.chars().count()).max().unwrap_or(0);
+        (size_mm*0.6*max_chars as f32 +
+            (max_chars.saturating_sub(1) as f32)*self.letter_spacing_mm).max(0.0)
+    }
+    pub fn validate(&self)->Result<(),String>{
+        if self.family.is_empty() || self.family.len()>128 ||
+            self.family.chars().any(|c|c.is_control()) {
+            return Err("Font family must contain 1–128 printable bytes".into());
+        }
+        if !(100..=900).contains(&self.weight) || self.weight%100!=0{
+            return Err("Font weight must be 100–900 in steps of 100".into());
+        }
+        if !self.letter_spacing_mm.is_finite() ||
+            !(-100.0..=100.0).contains(&self.letter_spacing_mm) ||
+            !self.line_height.is_finite() ||
+            !(0.7..=4.0).contains(&self.line_height) {
+            return Err("Invalid text letter spacing or line height".into());
+        }
+        Ok(())
+    }
+}
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Object {
     pub id: u64,
@@ -127,6 +173,17 @@ pub struct Object {
     pub style: Style,
     #[serde(default="default_layer_id")]
     pub layer_id: u64,
+    #[serde(default)]
+    pub text_format:TextFormat,
+}
+impl Object{
+    pub fn bounds(&self)->Bounds{
+        if let Shape::Text{x,y,value,size_mm}=&self.shape{
+            let line_count=value.split('\n').count().max(1);
+            let h=*size_mm*(1.0+(line_count.saturating_sub(1) as f32)*self.text_format.line_height);
+            Bounds{x:*x,y:*y,w:self.text_format.line_width_mm(value,*size_mm),h}
+        }else{self.shape.bounds()}
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -158,7 +215,7 @@ impl Document {
             total=total.saturating_add(std::mem::size_of::<Layer>()+layer.name.len());
         }
         for obj in &self.objects{
-            let shape_bytes=match &obj.shape{
+            let shape_bytes=obj.text_format.family.len()+match &obj.shape{
                 Shape::Text{value,..}=>value.len(),
                 Shape::Polyline{points,..}=>points.len()*std::mem::size_of::<Point>(),
                 Shape::Bezier{segments,..}=>segments.len()*std::mem::size_of::<CubicSegment>(),
@@ -178,7 +235,8 @@ impl Document {
         let layer_id=if self.layers.iter().any(|l|l.id==layer_id){layer_id}else{1};
         let id=self.next_id;
         self.next_id+=1;
-        self.objects.push(Object{id,shape,style,layer_id});
+        self.objects.push(Object{id,shape,style,layer_id,
+            text_format:TextFormat::default()});
         id
     }
     pub fn add_layer(&mut self,name:String)->u64{
@@ -208,7 +266,7 @@ impl Document {
             .filter(|l|l.visible&&!l.locked).map(|l|l.id).collect();
         let objects:Vec<_>=self.objects.iter().filter(|o|
             wanted.contains(&o.id)&&editable.contains(&o.layer_id))
-            .map(|o|(o.id,o.shape.bounds())).collect();
+            .map(|o|(o.id,o.bounds())).collect();
         if objects.len()<2{return 0;}
         let left=objects.iter().map(|(_,b)|b.x).fold(f32::INFINITY,f32::min);
         let right=objects.iter().map(|(_,b)|b.x+b.w).fold(f32::NEG_INFINITY,f32::max);
@@ -236,7 +294,7 @@ impl Document {
         let mut positions:Vec<(u64,f32)>=self.objects.iter().filter(|o|
             wanted.contains(&o.id)&&editable.contains(&o.layer_id))
             .map(|o|{
-                let b=o.shape.bounds();
+                let b=o.bounds();
                 (o.id,match direction{
                     Distribution::HorizontalCenters=>b.x+b.w*0.5,
                     Distribution::VerticalCenters=>b.y+b.h*0.5,
@@ -261,7 +319,7 @@ impl Document {
         let editable:HashSet<u64>=self.layers.iter()
             .filter(|layer|layer.visible&&!layer.locked).map(|layer|layer.id).collect();
         self.objects.iter().rev().find(|o|
-            editable.contains(&o.layer_id) && o.shape.bounds().contains(p,tolerance)
+            editable.contains(&o.layer_id) && o.bounds().contains(p,tolerance)
         ).map(|o|o.id)
     }
     pub fn validate(&self)->Result<(),String>{
@@ -295,7 +353,8 @@ impl Document {
                 || !(0.0..=1000.0).contains(&o.style.stroke_width_mm) {
                 return Err("Invalid style".into());
             }
-            let b=o.shape.bounds();
+            o.text_format.validate()?;
+            let b=o.bounds();
             if ![b.x,b.y,b.w,b.h].iter().all(|v|v.is_finite()) || b.w<0.0 || b.h<0.0 {
                 return Err("Invalid shape geometry".into());
             }
@@ -384,8 +443,32 @@ impl Document {
                 Shape::Rectangle{x,y,w,h} => format!("<rect x=\"{x}\" y=\"{y}\" width=\"{w}\" height=\"{h}\" {common}/>"),
                 Shape::Ellipse{x,y,w,h} => format!("<ellipse cx=\"{}\" cy=\"{}\" rx=\"{}\" ry=\"{}\" {common}/>",
                     x+w/2.0,y+h/2.0,w/2.0,h/2.0),
-                Shape::Text{x,y,value,size_mm} => format!("<text x=\"{x}\" y=\"{}\" font-size=\"{size_mm}\" fill=\"{}\">{}</text>",
-                    y+size_mm,s.fill,xml_escape(value)),
+                Shape::Text{x,y,value,size_mm} => {
+                    let fmt=&obj.text_format;
+                    let width=fmt.line_width_mm(value,*size_mm);
+                    let (anchor,xbase)=match fmt.alignment{
+                        TextAlign::Left=>("start",*x),
+                        TextAlign::Center=>("middle",*x+width*0.5),
+                        TextAlign::Right=>("end",*x+width),
+                    };
+                    let style=if fmt.italic{"italic"}else{"normal"};
+                    let head=format!(
+                        "<text x=\"{xbase}\" y=\"{}\" font-size=\"{size_mm}\" font-family=\"{}\" font-weight=\"{}\" font-style=\"{style}\" text-anchor=\"{anchor}\" letter-spacing=\"{}\" fill=\"{}\" xml:space=\"preserve\">",
+                        y+size_mm,xml_escape(&fmt.family),fmt.weight,
+                        fmt.letter_spacing_mm,s.fill);
+                    if !value.contains('\n'){
+                        format!("{head}{}</text>",xml_escape(value))
+                    }else{
+                        let mut body=head;
+                        for (i,line) in value.split('\n').enumerate(){
+                            let dy=if i==0{0.0}else{fmt.line_height* *size_mm};
+                            body.push_str(&format!("<tspan x=\"{xbase}\" dy=\"{dy}\">{}</tspan>",
+                                xml_escape(line)));
+                        }
+                        body.push_str("</text>");
+                        body
+                    }
+                },
                 Shape::Bezier{start,segments,closed}=>{
                     let mut d=format!("M {} {}",start.x,start.y);
                     for seg in segments{
@@ -562,6 +645,36 @@ mod tests{
         doc.add(Shape::EmbeddedSvg{x:0.0,y:0.0,w:10.0,h:10.0,
             source_format:"SVG".into(),svg:"a".repeat(5000)},Style::default());
         assert!(doc.estimated_size_bytes()>before+5000);
+    }
+    #[test] fn multiline_cyrillic_text_exports_preserving_layout(){
+        let mut doc=Document::default();
+        let id=doc.add(Shape::Text{x:10.0,y:20.0,
+            value:"КАРТА И РЕКЛАМА\nВторая строка".into(),size_mm:8.0},
+            Style::default());
+        let obj=doc.get_mut(id).unwrap();
+        obj.text_format=TextFormat{family:"Arial".into(),weight:700,
+            italic:true,alignment:TextAlign::Center,letter_spacing_mm:0.25,line_height:1.5};
+        doc.validate().unwrap();
+        let svg=doc.to_svg();
+        assert!(svg.contains("font-weight=\"700\""));
+        assert!(svg.contains("text-anchor=\"middle\""));
+        assert!(svg.contains("dy=\"12\""));
+        assert!(svg.contains("КАРТА И РЕКЛАМА"));
+        assert!(svg.contains("Вторая строка"));
+        let copy:Document=serde_json::from_str(&serde_json::to_string(&doc).unwrap()).unwrap();
+        assert_eq!(copy,doc);
+        assert!(copy.objects[0].bounds().h>8.0);
+    }
+    #[test] fn legacy_objects_deserialize_default_text_format(){
+        let json=r##"{"id":7,"shape":{"type":"text","x":1,"y":2,"value":"Hi","size_mm":4},"style":{"fill":"#000000","stroke":"none","stroke_width_mm":0},"layer_id":1}"##;
+        let object:Object=serde_json::from_str(json).unwrap();
+        assert_eq!(object.text_format,TextFormat::default());
+    }
+    #[test] fn malicious_text_format_values_rejected(){
+        let mut doc=Document::default();
+        let id=doc.add(Shape::Text{x:1.0,y:1.0,value:"Hello".into(),size_mm:5.0},Style::default());
+        doc.get_mut(id).unwrap().text_format.family="\u{0000}".into();
+        assert!(doc.validate().is_err());
     }
     #[test] fn document_roundtrip(){
         let mut a=Document::default();

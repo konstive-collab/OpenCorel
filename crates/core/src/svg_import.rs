@@ -1,5 +1,5 @@
 //! Restricted SVG importer: independent subset; explicitly rejects unsupported constructs.
-use crate::{CubicSegment,Document,Point,Shape,Style,valid_paint};
+use crate::{CubicSegment,Document,Point,Shape,Style,TextFormat,TextAlign,valid_paint};
 use roxmltree::{Node,ParsingOptions};
 use svgtypes::{PathParser,PathSegment,PointsParser};
 
@@ -71,6 +71,56 @@ fn style_for(n:Node<'_,'_>,view:ViewBox)->Result<Style,String>{
     let width=if stroke=="none"{0.0}else{stroke_width*(view.sx.abs()+view.sy.abs())/2.0};
     if !width.is_finite()||width<0.0{return Err("Invalid SVG stroke width".into());}
     Ok(Style{fill,stroke,stroke_width_mm:width})
+}
+fn font_style_for(node:Node<'_,'_>,view:ViewBox)->Result<TextFormat,String>{
+    let mut format=TextFormat::default();
+    if let Some(family)=style_field(node,"font-family"){
+        format.family=family.trim_matches(|c|c=='\''||c=='"').to_string();
+    }
+    if let Some(weight)=style_field(node,"font-weight"){
+        format.weight=match weight.as_str(){
+            "normal"=>400,"bold"=>700,
+            _=>weight.parse::<u16>().map_err(|_|"Unsupported SVG font weight")?,
+        };
+    }
+    if let Some(style)=style_field(node,"font-style"){
+        format.italic=match style.as_str(){
+            "normal"=>false,"italic"|"oblique"=>true,
+            _=>return Err("Unsupported SVG font style".into())
+        };
+    }
+    if let Some(anchor)=style_field(node,"text-anchor"){
+        format.alignment=match anchor.as_str(){
+            "start"=>TextAlign::Left,"middle"=>TextAlign::Center,
+            "end"=>TextAlign::Right,_=>return Err("Unsupported SVG text anchor".into())
+        };
+    }
+    if let Some(spacing)=style_field(node,"letter-spacing"){
+        format.letter_spacing_mm=spacing.parse::<f32>()
+            .map_err(|_|"Unsupported SVG letter spacing")?*view.sx;
+    }
+    if let Some(span)=node.children().find(|c|
+        c.is_element()&&c.tag_name().name()=="tspan"&&c.attribute("dy").is_some()){
+        // First line's dy=0; later tspan carries the baseline increment.
+        let dy=span.attribute("dy").unwrap_or("0").parse::<f32>()
+            .map_err(|_|"Unsupported SVG line spacing")?;
+        if dy>0.0{
+            let size=style_field(node,"font-size").unwrap_or_else(||"12".into())
+                .parse::<f32>().map_err(|_|"Invalid SVG font size")?;
+            format.line_height=dy/size;
+        }
+    }
+    if let Some(span)=node.children().filter(|c|c.is_element()&&
+        c.tag_name().name()=="tspan").skip(1).next(){
+        if let Some(dy)=span.attribute("dy"){
+            let size=style_field(node,"font-size").unwrap_or_else(||"12".into())
+                .parse::<f32>().map_err(|_|"Invalid SVG font size")?;
+            if size>0.0{format.line_height=dy.parse::<f32>()
+                .map_err(|_|"Invalid tspan dy")?/size;}
+        }
+    }
+    format.validate()?;
+    Ok(format)
 }
 fn line_segment(a:Point,b:Point)->CubicSegment{
     CubicSegment{
@@ -230,6 +280,11 @@ pub fn parse_svg(xml:&str)->Result<Document,String>{
         let mut shapes=Vec::new();
         match name {
             "svg"|"g"|"title"|"desc"|"metadata"=>{},
+            "tspan"=>{
+                if node.parent_element().map(|n|n.tag_name().name())!=Some("text"){
+                    return Err("Nested or detached SVG tspan is not supported".into());
+                }
+            },
             "rect"=>{
                 if node.attribute("rx").is_some() || node.attribute("ry").is_some(){
                     return Err("SVG rounded rectangles are not supported yet".into());
@@ -260,13 +315,36 @@ pub fn parse_svg(xml:&str)->Result<Document,String>{
                 shapes.push(Shape::Polyline{points,closed:name=="polygon"});
             }
             "text"=>{
-                if node.children().any(|c|c.is_element()){return Err("SVG tspan is not supported".into());}
                 let size=style_field(node,"font-size").unwrap_or_else(||"12".into())
                     .parse::<f32>().map_err(|_|"Unsupported SVG font size".to_string())?;
                 let x=number_or(node,"x",0.0)?;let y=number_or(node,"y",0.0)?;
                 let p=vb.point(Point{x,y});
-                shapes.push(Shape::Text{x:p.x,y:p.y-size*vb.sy,
-                    value:node.text().unwrap_or("").to_string(),size_mm:size*vb.sy});
+                let mut value=String::new();
+                let tspans:Vec<_>=node.children().filter(|c|c.is_element()).collect();
+                if tspans.is_empty(){
+                    value=node.text().unwrap_or("").to_string();
+                }else{
+                    if node.children().any(|c|c.is_text()&&!c.text().unwrap_or("").trim().is_empty()){
+                        return Err("Mixed SVG text and tspan segments are not supported".into());
+                    }
+                    for (i,span) in tspans.iter().enumerate(){
+                        if span.tag_name().name()!="tspan"
+                            || span.children().any(|c|c.is_element())
+                            || span.attributes().any(|a|a.name()!="x"&&a.name()!="dy"){
+                            return Err("Unsupported SVG tspan structure".into());
+                        }
+                        if i>0 {value.push('\n');}
+                        value.push_str(span.text().unwrap_or(""));
+                    }
+                }
+                let fmt=font_style_for(node,vb)?;
+                let offset=match fmt.alignment{
+                    TextAlign::Left=>0.0,
+                    TextAlign::Center=>fmt.line_width_mm(&value,size*vb.sy)*0.5,
+                    TextAlign::Right=>fmt.line_width_mm(&value,size*vb.sy),
+                };
+                shapes.push(Shape::Text{x:p.x-offset,y:p.y-size*vb.sy,
+                    value,size_mm:size*vb.sy});
             }
             "path"=>{
                 if styles.as_ref().map(|s|s.fill.as_str())!=Some("none"){
@@ -276,7 +354,12 @@ pub fn parse_svg(xml:&str)->Result<Document,String>{
             }
             other=>return Err(format!("Unsupported SVG element: <{other}>")),
         }
-        for shape in shapes {doc.add(shape,styles.clone().unwrap_or_default());}
+        for shape in shapes {
+            let id=doc.add(shape,styles.clone().unwrap_or_default());
+            if name=="text"{
+                doc.get_mut(id).unwrap().text_format=font_style_for(node,vb)?;
+            }
+        }
     }
     doc.validate()?;
     Ok(doc)
@@ -284,6 +367,22 @@ pub fn parse_svg(xml:&str)->Result<Document,String>{
 #[cfg(test)]
 mod tests{
     use super::*;
+    #[test] fn typography_svg_roundtrip_multiline(){
+        let mut doc=Document::default();
+        let id=doc.add(Shape::Text{x:30.0,y:40.0,value:"ПЛАКАТ\nСобытие".into(),
+            size_mm:10.0},Style::default());
+        doc.get_mut(id).unwrap().text_format=TextFormat{
+            family:"Arial".into(),weight:700,italic:true,
+            alignment:TextAlign::Center,letter_spacing_mm:0.4,line_height:1.4
+        };
+        let loaded=parse_svg(&doc.to_svg()).unwrap();
+        assert_eq!(loaded.objects.len(),1);
+        let obj=&loaded.objects[0];
+        if let Shape::Text{value,..}=&obj.shape{
+            assert_eq!(value,"ПЛАКАТ\nСобытие");
+        }else{panic!("Expected text");}
+        assert_eq!(obj.text_format,doc.objects[0].text_format);
+    }
     #[test] fn import_shapes_from_export(){
         let mut source=Document::default();
         source.add(Shape::Rectangle{x:10.0,y:10.0,w:20.0,h:30.0},Style::default());
