@@ -39,3 +39,11 @@ Existing KDR/OCD files without the `text_format` field load with defaults. No KD
 `shape.type = "compound_path"` stores a `contours` array of `start`, `segments` and `closed`. Each segment stores cubic `control1`, `control2`, and `end` in millimetres. Even-odd filling keeps holes of letters (O, B, Р) without rasterization.
 
 The compound is one selectable object; node positions can be adjusted in the inspector (visible controls are capped to avoid huge GUI lists). Text-to-curves is intentionally destructive to text editability; retain a separate document with live text. Resulting contours no longer depend on installed fonts. Font binary data is neither embedded nor distributed.
+
+## v0.8 object organization metadata
+
+Each object may contain:
+- `name`: optional short label (default empty; limited to 256 bytes, valid printable characters)
+- `group_id`: optional numeric flat group identifier. Members share the same group ID. Groups do not contain nested groups.
+
+These fields are optional in old projects; the document JSON schema remains backward-readable. KDR internal geometry, layer order and IDs are unchanged. Copy/paste and duplication allocate fresh group IDs so copies do not remain connected to originals. Exports to SVG/PDF are visual representations; do not expect all KDR grouping metadata to round-trip through them.

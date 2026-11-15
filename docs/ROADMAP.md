@@ -10,6 +10,7 @@ Goal: fast, legally independent vector graphics editor for advertising, posters 
 - **v0.5**: text formatting & multiline SVG, layout preflight checks, safe-area overlay and large-format presets
 - **v0.6**: system-font Unicode text to true editable compound paths, cubic contours with holes, SVG round-trip
 - **v0.7**: labelled and explained toolbox, onboarding, sample job, line/hexagon, corner resizing, internal clipboard, correct style duplication, nudging, safe quarter-rotation/mirroring
+- **v0.8**: unified dark/light theme, named objects and filtered list, persistent flat groups, atomic group actions, accurate property geometry, page centering and configurable grid
 
 ## Next milestones — highest priority
 1. Real Windows 7/10 and Linux performance benchmarking (2/4/8GB RAM, 1k–100k objects)
