@@ -10,6 +10,7 @@ mod node_interaction;
 mod boolean_commands;
 mod clip_commands;
 mod masked_canvas;
+mod appearance_commands;
 use masked_canvas::MaskedCanvasCache;
 mod vector_preview;
 mod raster_preview;
@@ -101,6 +102,14 @@ struct Editor{
     skew_y_degrees:f32,
     scale_x_percent:f32,
     scale_y_percent:f32,
+    appearance_opacity:f32,
+    appearance_gradient_mode:u8,
+    appearance_gradient_start:String,
+    appearance_gradient_end:String,
+    appearance_gradient_angle:f32,
+    appearance_dash_mm:f32,
+    appearance_cap:u8,
+    appearance_join:u8,
     custom_pivot:bool,
     pivot_x:f32,
     pivot_y:f32,
@@ -142,6 +151,11 @@ impl Default for Editor{
             masked_canvas:MaskedCanvasCache::default(),
             rotation_degrees:30.0,skew_x_degrees:15.0,skew_y_degrees:0.0,
             scale_x_percent:100.0,scale_y_percent:100.0,
+            appearance_opacity:1.0,appearance_gradient_mode:0,
+            appearance_gradient_start:"#447BD4".into(),
+            appearance_gradient_end:"#FFFFFF".into(),
+            appearance_gradient_angle:0.0,appearance_dash_mm:0.0,
+            appearance_cap:0,appearance_join:0,
             custom_pivot:false,pivot_x:0.0,pivot_y:0.0,
             text_outliner:TextOutliner::new(),proof_dpi:96,
             keep_bitmap_ratio:true,
