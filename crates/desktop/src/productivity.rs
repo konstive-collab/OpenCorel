@@ -193,6 +193,54 @@ impl Editor{
         }
         b
     }
+    /// Move every selected member together; never partially move a locked group.
+    pub(super) fn set_selection_position(&mut self,new_x:f32,new_y:f32){
+        if !new_x.is_finite()||!new_y.is_finite()||
+            new_x.abs()>100_000.0||new_y.abs()>100_000.0{return;}
+        let Some(bounds)=self.selection_bounds() else{return;};
+        let ids:HashSet<u64>=self.selection_ids().into_iter().collect();
+        let layers:HashSet<u64>=self.doc.layers.iter()
+            .filter(|layer|layer.visible&&!layer.locked).map(|l|l.id).collect();
+        if self.doc.objects.iter().any(|o|ids.contains(&o.id)&&!layers.contains(&o.layer_id)){
+            self.status="Выделение включает заблокированный слой".into();return;
+        }
+        let dx=new_x-bounds.x;
+        let dy=new_y-bounds.y;
+        if dx.abs()<0.00001 && dy.abs()<0.00001{return;}
+        self.checkpoint();
+        for o in &mut self.doc.objects{
+            if ids.contains(&o.id){o.shape.translate(dx,dy);}
+        }
+        self.fill_cache.entries.clear();
+        self.compound_cache.clear();
+    }
+    pub(super) fn resize_single(&mut self,width:f32,height:f32){
+        if !self.multi_selected.is_empty(){
+            self.status="Изменять ширину/высоту можно у одного объекта".into();return;
+        }
+        let Some(id)=self.selected else{return;};
+        let Some(index)=self.doc.objects.iter().position(|o|o.id==id) else{return;};
+        let obj=&self.doc.objects[index];
+        if !self.doc.layer(obj.layer_id).map(|layer|layer.visible&&!layer.locked)
+            .unwrap_or(false){
+            self.status="Слой заблокирован".into();return;
+        }
+        if !transform::resizable(&obj.shape){
+            self.status="Для текста измените размер шрифта во вкладке свойств".into();return;
+        }
+        let b=obj.bounds();
+        if (b.w-width).abs()<0.00001&&(b.h-height).abs()<0.00001{return;}
+        let mut resized=obj.shape.clone();
+        match transform::resize_shape(&mut resized,
+            Bounds{x:b.x,y:b.y,w:width,h:height}){
+            Ok(())=>{
+                self.checkpoint();
+                self.doc.objects[index].shape=resized;
+                self.fill_cache.entries.clear();self.compound_cache.clear();
+            }
+            Err(e)=>self.status=e,
+        }
+    }
     pub(super) fn rotate_selection(&mut self,turn:QuarterTurn){
         self.transform_selection(|s,c|transform::rotate_90(s,c,turn),"Поворот на 90°");
     }
@@ -364,6 +412,18 @@ impl Editor{
 #[cfg(test)]
 mod tests{
     use super::*;
+    #[test]
+    fn exact_move_and_resize_preserve_geometry(){
+        let mut e=Editor::default();
+        let id=e.doc.objects[0].id;
+        e.select_object(Some(id),false);
+        e.set_selection_position(20.0,30.0);
+        assert!((e.doc.objects[0].bounds().x-20.0).abs()<0.01);
+        e.resize_single(100.0,200.0);
+        assert!((e.doc.objects[0].bounds().w-100.0).abs()<0.01);
+        e.undo();
+        assert!((e.doc.objects[0].bounds().w-700.0).abs()<0.01);
+    }
     #[test]
     fn group_duplicate_creates_independent_linked_copies(){
         let mut e=Editor::default();
