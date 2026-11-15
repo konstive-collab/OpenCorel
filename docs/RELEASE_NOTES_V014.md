@@ -18,6 +18,13 @@
 - New tests cover cache keys, large text and empty-text fallback.
 - Known caveats: no rich text runs, interactive caret or guaranteed cross-platform visual parity; shape bounds and selection boxes still use approximate text metrics.
 
+## Additional text editing tools
+- The selected editable text object now offers literal find and replace in the inspector.
+- Replacement is Unicode-safe, case-sensitive and bounded to 256 KiB output.
+- The operation respects existing layer locks, document checkpoint/undo, and keeps text editable.
+- New tests cover Cyrillic, emoji, special characters, empty search, no-match cases and size overflow.
+- This is object-local find and replace, not a document-wide search or rich-text editor.
+
 ## Verification
 GitHub Actions Windows and Linux runs must complete against the latest PR head before merge. Early runs for the initial system-font picker passed, but do not imply later additions have passed.
 
