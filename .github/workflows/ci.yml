@@ -43,6 +43,15 @@ jobs:
           grep -q '<svg' ci-smoke.svg
           cargo run --release -p opencorel-cli -- import-svg ci-smoke.svg ci-smoke-import.kdr
           cargo run --release -p opencorel-cli -- inspect ci-smoke-import.kdr
+          printf 'damaged file' > ci-invalid.kdr
+          if cargo run --release -p opencorel-cli -- inspect ci-invalid.kdr; then
+            echo 'Damaged native project was incorrectly accepted' >&2
+            exit 1
+          fi
+          if cargo run --release -p opencorel-cli -- inspect ci-does-not-exist.kdr; then
+            echo 'Missing file was incorrectly accepted' >&2
+            exit 1
+          fi
       - name: Upload executable
         uses: actions/upload-artifact@v4
         with:
