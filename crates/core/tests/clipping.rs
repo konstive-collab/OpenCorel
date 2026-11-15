@@ -110,3 +110,16 @@ fn nested_compound_hole_not_clickable(){
     assert_eq!(doc.hit_test(p(10.0,10.0),0.0),Some(target));
     assert_eq!(doc.hit_test(p(50.0,50.0),0.0),None);
 }
+
+#[test]
+fn attaching_mask_to_existing_mask_source_is_rejected_atomically(){
+    let mut doc=Document::default();
+    let a=doc.add(rect(0.0,0.0,10.0,10.0),Style::default());
+    let b=doc.add(rect(0.0,0.0,10.0,10.0),Style::default());
+    let c=doc.add(rect(0.0,0.0,10.0,10.0),Style::default());
+    doc.set_clip(b,c).unwrap();
+    let before=doc.clone();
+    assert!(doc.set_clip(a,b).is_err());
+    assert_eq!(doc,before);
+    doc.validate().unwrap();
+}
