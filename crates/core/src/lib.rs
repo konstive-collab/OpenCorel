@@ -2,7 +2,7 @@
 //! Experimental schema v1; not a CorelDRAW CDR implementation.
 use serde::{Deserialize, Serialize};
 use base64::Engine;
-use std::{collections::HashSet, fs, io::{self, Write}, path::Path};
+use std::{collections::{HashSet,BTreeMap}, fs, io::{self, Write}, path::Path};
 
 pub mod svg_import;
 pub mod kdr;
@@ -10,6 +10,8 @@ pub mod preflight;
 pub mod transform;
 pub mod node_edit;
 pub mod boolean_ops;
+pub mod appearance;
+use appearance::Appearance;
 
 pub const SCHEMA_VERSION: u32 = 1;
 
@@ -246,12 +248,14 @@ pub struct Document {
     pub next_layer_id: u64,
     #[serde(default, skip_serializing_if="Vec::is_empty")]
     pub clip_links: Vec<ClipLink>,
+    #[serde(default,skip_serializing_if="BTreeMap::is_empty")]
+    pub appearances:BTreeMap<u64,Appearance>,
 }
 impl Default for Document {
     fn default() -> Self {
         Self { schema_version:SCHEMA_VERSION, name:"Новый макет".into(),
             page:Page {width_mm:841.0,height_mm:594.0},objects:Vec::new(),next_id:1,
-            layers:default_layers(),next_layer_id:default_next_layer_id(),clip_links:Vec::new() }
+            layers:default_layers(),next_layer_id:default_next_layer_id(),clip_links:Vec::new(),appearances:BTreeMap::new() }
     }
 }
 
@@ -280,6 +284,12 @@ impl Document {
                 +obj.style.fill.len()+obj.style.stroke.len()+obj.name.len()+shape_bytes);
         }
         total.saturating_add(self.clip_links.len()*std::mem::size_of::<ClipLink>())
+            .saturating_add(self.appearances.iter().map(|(_,a)|
+                std::mem::size_of::<Appearance>()+
+                a.dash_array.len()*std::mem::size_of::<f32>()+
+                a.gradient.as_ref().map(|g|
+                    g.stops.iter().map(|s|s.color.len()+std::mem::size_of::<appearance::GradientStop>())
+                        .sum::<usize>()).unwrap_or_default()).sum::<usize>())
     }
     /// Apply a closed vector object as a reusable clipping shape.
     /// No geometry or styling is destroyed; source remains editable.
@@ -320,6 +330,20 @@ impl Document {
         let n=self.clip_links.len();
         self.clip_links.retain(|c|c.target_id!=target_id);
         self.clip_links.len()!=n
+    }
+    pub fn set_appearance(&mut self,id:u64,appearance:Appearance)->Result<(),String>{
+        appearance.validate()?;
+        let obj=self.objects.iter().find(|o|o.id==id)
+            .ok_or("Appearance target not found")?;
+        if !self.layer(obj.layer_id).is_some_and(|l|l.visible&&!l.locked){
+            return Err("Cannot style an object on a hidden or locked layer".into());
+        }
+        if appearance.is_default(){self.appearances.remove(&id);}
+        else {self.appearances.insert(id,appearance);}
+        Ok(())
+    }
+    pub fn clear_appearance(&mut self,id:u64)->bool{
+        self.appearances.remove(&id).is_some()
     }
     pub fn add(&mut self, shape:Shape, style:Style) -> u64 {
         self.add_to_layer(shape,style,1)
@@ -398,6 +422,7 @@ impl Document {
         let n=self.objects.len(); self.objects.retain(|o|o.id!=id);
         if self.objects.len()!=n {
             self.clip_links.retain(|c|c.source_id!=id&&c.target_id!=id);
+            self.appearances.remove(&id);
             true
         }else{false}
     }
@@ -485,6 +510,16 @@ impl Document {
             return Err("Invalid page dimensions".into());
         }
         if self.objects.len()>100_000{return Err("Object limit exceeded".into());}
+        let all_ids:HashSet<u64>=self.objects.iter().map(|o|o.id).collect();
+        if self.appearances.len()>self.objects.len(){
+            return Err("Appearance count exceeds object count".into());
+        }
+        for (id,appearance) in &self.appearances{
+            if !all_ids.contains(id){
+                return Err("Orphaned appearance reference".into());
+            }
+            appearance.validate()?;
+        }
         if self.clip_links.len()>10000{return Err("Clipping link limit exceeded".into());}
         let mut targets=HashSet::new();
         for link in &self.clip_links{
@@ -521,7 +556,6 @@ impl Document {
         if !layer_ids.contains(&1){return Err("Primary layer missing".into());}
         // Reserve every object ID before validating group references. The old
         // single-pass check could accept a group ID colliding with a later object.
-        let all_ids:HashSet<u64>=self.objects.iter().map(|o|o.id).collect();
         let mut ids=HashSet::new();
         for o in &self.objects {
             if o.id==0 || o.id>=self.next_id || !ids.insert(o.id) {return Err("Invalid object ID".into());}
@@ -633,6 +667,13 @@ impl Document {
             "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{}mm\" height=\"{}mm\" viewBox=\"0 0 {} {}\">\n<title>{}</title>\n",
             self.page.width_mm,self.page.height_mm,self.page.width_mm,self.page.height_mm,
             xml_escape(&self.name));
+        for (&id,style) in &self.appearances{
+            if let Some(gradient)=&style.gradient{
+                out.push_str("<defs>");
+                out.push_str(&gradient.svg_definition(id));
+                out.push_str("</defs>\n");
+            }
+        }
         let clip_sources:HashSet<u64>=self.clip_links.iter().map(|c|c.source_id).collect();
         for link in &self.clip_links{
             if let Some(source)=self.objects.iter().find(|o|o.id==link.source_id){
@@ -644,8 +685,13 @@ impl Document {
         for obj in self.visible_objects() {
             if clip_sources.contains(&obj.id){continue;}
             let s=&obj.style;
+            let fill=if self.appearances.get(&obj.id).is_some_and(|a|a.gradient.is_some()){
+                format!("url(#appearance-{})",obj.id)
+            }else{s.fill.clone()};
+            let appearance_attrs=self.appearances.get(&obj.id)
+                .map(|a|a.svg_attributes()).unwrap_or_default();
             let common=format!("fill=\"{}\" stroke=\"{}\" stroke-width=\"{}\"",
-                s.fill,s.stroke,s.stroke_width_mm);
+                fill,s.stroke,s.stroke_width_mm);
             let element=match &obj.shape {
                 Shape::Rectangle{x,y,w,h} => format!("<rect x=\"{x}\" y=\"{y}\" width=\"{w}\" height=\"{h}\" {common}/>"),
                 Shape::Ellipse{x,y,w,h} => format!("<ellipse cx=\"{}\" cy=\"{}\" rx=\"{}\" ry=\"{}\" {common}/>",
@@ -662,7 +708,7 @@ impl Document {
                     let head=format!(
                         "<text x=\"{xbase}\" y=\"{}\" font-size=\"{size_mm}\" font-family=\"{}\" font-weight=\"{}\" font-style=\"{style}\" text-anchor=\"{anchor}\" letter-spacing=\"{}\" fill=\"{}\" xml:space=\"preserve\">",
                         y+size_mm,xml_escape(&fmt.family),fmt.weight,
-                        fmt.letter_spacing_mm,s.fill);
+                        fmt.letter_spacing_mm,fill);
                     if !value.contains('\n'){
                         format!("{head}{}</text>",xml_escape(value))
                     }else{
@@ -716,9 +762,9 @@ impl Document {
                 }
             };
             if self.clip_links.iter().any(|c|c.target_id==obj.id) {
-                out.push_str(&format!("<g id=\"object-{}\" clip-path=\"url(#clip-target-{})\">{element}</g>\n",obj.id,obj.id));
+                out.push_str(&format!("<g id=\"object-{}\"{appearance_attrs} clip-path=\"url(#clip-target-{})\">{element}</g>\n",obj.id,obj.id));
             }else{
-                out.push_str(&format!("<g id=\"object-{}\">{element}</g>\n",obj.id));
+                out.push_str(&format!("<g id=\"object-{}\"{appearance_attrs}>{element}</g>\n",obj.id));
             }
         }
         out.push_str("</svg>\n");out

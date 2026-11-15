@@ -71,6 +71,24 @@ pub fn export_raster(doc:&Document,path:impl AsRef<Path>,dpi:u32)->Result<(),Str
 mod tests{
     use super::*;
     use opencorel_core::{Shape,Style};
+    #[test] fn gradient_preview_preserves_color_across_page(){
+        use opencorel_core::appearance::{Appearance,Gradient,GradientKind,GradientStop};
+        let mut d=Document::default();
+        d.page.width_mm=25.4;d.page.height_mm=12.7;
+        let id=d.add(Shape::Rectangle{x:0.0,y:0.0,w:25.4,h:12.7},
+            Style{fill:"#FFFFFF".into(),stroke:"none".into(),stroke_width_mm:0.0});
+        let gradient=Gradient{kind:GradientKind::Linear,angle_degrees:0.0,stops:vec![
+            GradientStop{offset:0.0,color:"#FF0000".into()},
+            GradientStop{offset:1.0,color:"#0000FF".into()},
+        ]};
+        d.set_appearance(id,Appearance{gradient:Some(gradient),..Appearance::default()}).unwrap();
+        let bytes=raster_bytes(&d,96,ImageFormat::Png).unwrap();
+        let rgba=image::load_from_memory(&bytes).unwrap().to_rgba8();
+        let left=rgba.get_pixel(10,24).0;
+        let right=rgba.get_pixel(85,24).0;
+        assert!(left[0]>left[2],"left edge should be red-dominant");
+        assert!(right[2]>right[0],"right edge should be blue-dominant");
+    }
     #[test] fn jpeg_png_proofs_have_expected_dimensions(){
         let mut d=Document::default();
         d.page.width_mm=25.4;d.page.height_mm=12.7;
