@@ -16,6 +16,8 @@ Goal: fast, legally independent vector graphics editor for advertising, posters 
 
 - **v0.10 (I02)**: closed-shape boolean union, subtract, intersection, XOR with native editable compound paths, hole preservation, guarded operation failures (Windows/Linux CI passed; manual/production QA pending)
 
+- **Tool-dock usability refresh**: narrow optional-expanded icon rail, figures as flyout, image and preflight shortcuts, context-sensitive text/node inspector, discoverability via hover and F1 (new CI acceptance pending)
+
 ## Long-term milestone plan
 
 See **[the 20-iteration development plan](ROADMAP_20_ITERATIONS.md)** for the ordered backlog I01–I20, acceptance requirements and version targets.
