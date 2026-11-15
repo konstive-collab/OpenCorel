@@ -109,6 +109,9 @@ impl Editor {
                 });
                 ui.menu_button("Объект",|ui|{
                     ui.label(RichText::new("ГРУППЫ").strong());
+                    if ui.button("Центрировать по листу").clicked(){
+                        self.center_selection_on_page();ui.close_menu();
+                    }
                     if ui.button("Группировать       Ctrl+G").clicked(){
                         self.group_selection();ui.close_menu();
                     }
@@ -200,6 +203,9 @@ impl Editor {
                     ui.label(format!("X {:.1}  Y {:.1}  Ш {:.1}  В {:.1} мм",
                         bounds.x,bounds.y,bounds.w,bounds.h));
                     ui.separator();
+                    if ui.small_button("Центр листа").on_hover_text("Поместить выбранные объекты по центру страницы").clicked(){
+                        self.center_selection_on_page();
+                    }
                     if ui.small_button("Копия").on_hover_text("Ctrl+D").clicked(){
                         self.duplicate_preserving_styles();
                     }
@@ -881,7 +887,12 @@ impl Editor {
         });
         ui.separator();
         ui.checkbox(&mut self.show_grid,"Показать сетку");
-        ui.checkbox(&mut self.snap_grid,"Привязка к сетке 10 мм");
+        ui.checkbox(&mut self.snap_grid,"Привязка к сетке");
+        ui.horizontal(|ui|{
+            ui.label("Шаг сетки, мм");
+            ui.add(egui::DragValue::new(&mut self.grid_mm)
+                .speed(0.5).range(0.5..=1000.0));
+        });
         ui.checkbox(&mut self.show_rulers,"Показать линейки");
         ui.checkbox(&mut self.show_safe_area,"Показать безопасную область");
         ui.horizontal(|ui|{
