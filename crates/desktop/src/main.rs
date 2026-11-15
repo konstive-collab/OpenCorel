@@ -86,6 +86,7 @@ struct Editor{
     undo:Vec<Document>,
     redo:Vec<Document>,
     inspector_tab:InspectorTab,
+    show_inspector:bool,
     show_grid:bool,
     snap_grid:bool,
     grid_mm:f32,
@@ -135,7 +136,8 @@ impl Default for Editor{
             zoom:1.0,drag_start:None,creation_start:None,
             curve_start:None,curve_draft:None,active_layer:1,pan:Vec2::ZERO,
             undo:Vec::new(),redo:Vec::new(),
-            inspector_tab:InspectorTab::Objects,show_grid:false,snap_grid:false,
+            inspector_tab:InspectorTab::Objects,show_inspector:true,
+            show_grid:false,snap_grid:false,
             grid_mm:10.0,
             show_rulers:true,light_theme:false,cursor_mm:None,
             fill_cache:FillCache::default(),vector_cache:VectorCache::default(),
@@ -1036,6 +1038,10 @@ impl eframe::App for Editor{
             }
         }
         if ctx.input(|i|i.key_pressed(egui::Key::F1)){self.show_welcome=true;}
+        if !ctx.wants_keyboard_input() &&
+            ctx.input(|i|i.key_pressed(egui::Key::F9)){
+            self.show_inspector=!self.show_inspector;
+        }
         if !ctx.wants_keyboard_input() && ctx.input(|i|i.key_pressed(egui::Key::Delete)){
             if self.tool==Tool::Nodes {self.remove_active_node();}
             else{self.delete_selection();}
@@ -1068,7 +1074,7 @@ impl eframe::App for Editor{
         self.top_workspace(ctx);
         self.tool_sidebar(ctx);
         self.color_palette(ctx);
-        self.inspector(ctx);
+        if self.show_inspector{self.inspector(ctx);}
         self.workspace_footer(ctx);
         self.canvas(ctx);
         self.welcome_window(ctx);
