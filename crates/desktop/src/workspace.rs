@@ -48,7 +48,11 @@ impl Editor {
     pub(super) fn top_workspace(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::top("main_menubar").exact_height(28.0).show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
-                ui.label(RichText::new("OpenCorel").strong().size(15.0));
+                ui.label(RichText::new("◈ OpenCorel").strong().size(17.0)
+                    .color(Color32::from_rgb(32,201,170)));
+                ui.label(RichText::new("v0.8  •  EDITOR").small()
+                    .color(Color32::from_rgb(129,144,162)));
+
                 ui.separator();
                 ui.menu_button("Файл",|ui|{
                     if ui.button("Новый лист A4").clicked(){self.blank_page(210.0,297.0);ui.close_menu();}
@@ -104,6 +108,14 @@ impl Editor {
                     if ui.button("Баннер 6×3 м (SVG)").clicked(){self.page_size(6000.0,3000.0);ui.close_menu();}
                 });
                 ui.menu_button("Объект",|ui|{
+                    ui.label(RichText::new("ГРУППЫ").strong());
+                    if ui.button("Группировать       Ctrl+G").clicked(){
+                        self.group_selection();ui.close_menu();
+                    }
+                    if ui.button("Разгруппировать    Ctrl+Shift+G").clicked(){
+                        self.ungroup_selection();ui.close_menu();
+                    }
+                    ui.separator();
                     if ui.button("На передний план").clicked(){self.reorder_selection(true);ui.close_menu();}
                     if ui.button("На задний план").clicked(){self.reorder_selection(false);ui.close_menu();}
                     if ui.button("Дублировать").clicked(){self.duplicate_preserving_styles();ui.close_menu();}
@@ -206,11 +218,12 @@ impl Editor {
 
     pub(super) fn tool_sidebar(&mut self,ctx:&egui::Context){
         egui::SidePanel::left("vertical_toolbox")
-            .default_width(174.0).width_range(154.0..=238.0)
+            .default_width(184.0).width_range(160.0..=248.0)
             .resizable(true).show(ctx,|ui|{
                 egui::ScrollArea::vertical().show(ui,|ui|{
                     ui.add_space(6.0);
-                    ui.label(RichText::new("ИНСТРУМЕНТЫ").strong().size(13.0));
+                    ui.label(RichText::new("ИНСТРУМЕНТЫ").strong().size(13.0)
+                        .color(Color32::from_rgb(38,200,172)));
                     ui.add_space(3.0);
                     for (tool,symbol,shortcut) in [
                         (Tool::Select,"↖","V"),
@@ -223,9 +236,8 @@ impl Editor {
                     ]{
                         let selected=self.tool==tool;
                         let label=format!("{}  {}",symbol,productivity::tool_label(tool));
-                        let response=ui.add_sized(
-                            [ui.available_width()-4.0,34.0],
-                            egui::Button::new(label).selected(selected));
+                        let button=egui::Button::new(label).selected(selected);
+                        let response=ui.add_sized([ui.available_width()-4.0,35.0],button);
                         if response.on_hover_text(format!(
                             "{} — {}\n{}",
                             productivity::tool_label(tool),shortcut,
@@ -282,6 +294,8 @@ impl Editor {
     pub(super) fn inspector(&mut self,ctx:&egui::Context){
         egui::SidePanel::right("inspector_docker").default_width(272.0)
             .width_range(220.0..=450.0).resizable(true).show(ctx,|ui|{
+            ui.label(RichText::new("ПАНЕЛЬ УПРАВЛЕНИЯ").strong().size(11.0)
+                .color(Color32::from_rgb(35,183,159)));
             ui.horizontal(|ui|{
                 ui.selectable_value(&mut self.inspector_tab,InspectorTab::Objects,"Объекты");
                 ui.selectable_value(&mut self.inspector_tab,InspectorTab::Properties,"Свойства");
@@ -418,6 +432,63 @@ impl Editor {
         let Some(index)=self.doc.objects.iter().position(|o|o.id==id) else{
             self.selected=None;return;
         };
+        ui.collapsing("Название и группа",|ui|{
+            let mut label=self.doc.objects[index].name.clone();
+            ui.label("Название объекта в панели слоёв:");
+            if ui.add(egui::TextEdit::singleline(&mut label)
+                .hint_text("Например: логотип, заголовок, фон...")).changed(){
+                if label.len()<=256 && !label.chars().any(|c|c.is_control()){
+                    self.checkpoint();
+                    self.doc.objects[index].name=label;
+                }else{
+                    self.status="Название: максимум 256 байт, без управляющих символов".into();
+                }
+            }
+            if let Some(group)=self.doc.objects[index].group_id{
+                ui.label(format!("Группа #{group}: {} элементов",
+                    self.doc.group_members(id).len()));
+                if ui.button("Разгруппировать    Ctrl+Shift+G").clicked(){
+                    self.ungroup_selection();
+                }
+            }else if self.selection_ids().len()>=2{
+                if ui.button("Сгруппировать выделенное    Ctrl+G").clicked(){
+                    self.group_selection();
+                }
+            }
+        });
+        ui.collapsing("Точное положение и размер (мм)",|ui|{
+            if let Some(bounds)=self.selection_bounds(){
+                let (mut x,mut y)=(bounds.x,bounds.y);
+                let mut pos_change=false;
+                ui.horizontal(|ui|{
+                    ui.label("X");
+                    pos_change|=ui.add(egui::DragValue::new(&mut x)
+                        .speed(0.5).range(-100_000.0..=100_000.0)).changed();
+                    ui.label("Y");
+                    pos_change|=ui.add(egui::DragValue::new(&mut y)
+                        .speed(0.5).range(-100_000.0..=100_000.0)).changed();
+                });
+                if pos_change{self.set_selection_position(x,y);}
+                if self.multi_selected.is_empty() &&
+                    opencorel_core::transform::resizable(&self.doc.objects[index].shape){
+                    let (mut w,mut h)=(bounds.w,bounds.h);
+                    let mut size_change=false;
+                    ui.horizontal(|ui|{
+                        ui.label("Ш");
+                        size_change|=ui.add(egui::DragValue::new(&mut w)
+                            .speed(1.0).range(0.1..=100_000.0)).changed();
+                        ui.label("В");
+                        size_change|=ui.add(egui::DragValue::new(&mut h)
+                            .speed(1.0).range(0.1..=100_000.0)).changed();
+                    });
+                    if size_change{self.resize_single(w,h);}
+                }else{
+                    ui.label(RichText::new("Размер группы меняется через отдельные элементы.")
+                        .small().color(Color32::GRAY));
+                }
+            }
+        });
+        ui.separator();
         // Images may contain tens of megabytes of Base64. Never clone the
         // whole object per GUI frame just to show a few numeric fields.
         let asset=match &self.doc.objects[index].shape{
@@ -833,7 +904,9 @@ impl Editor {
     pub(super) fn workspace_footer(&mut self,ctx:&egui::Context){
         egui::TopBottomPanel::bottom("statusbar").exact_height(26.0).show(ctx,|ui|{
             ui.horizontal(|ui|{
-                ui.label(&self.status);
+                ui.label(RichText::new(&self.status).color(
+                    if self.status.starts_with("Ошибка"){Color32::from_rgb(242,115,115)}
+                    else{Color32::from_rgb(171,202,206)}));
                 ui.separator();
                 let pos=if let Some(p)=self.cursor_mm{
                     format!("X: {:.1} мм   Y: {:.1} мм",p.x,p.y)
@@ -852,7 +925,7 @@ impl Editor {
                 ui.label(RichText::new("Страница 1 из 1").strong())
                     .on_hover_text("Многостраничные проекты пока не реализованы.");
                 ui.separator();
-                ui.label("Цветовая палитра документа");
+                ui.label(RichText::new("ЦВЕТА").strong().small());
                 for swatch in SWATCHES.iter().take(14){
                     let res=ui.add_sized([16.0,16.0],egui::Button::new("").fill(color(swatch)))
                         .on_hover_text(format!("{swatch} — заливка"));
