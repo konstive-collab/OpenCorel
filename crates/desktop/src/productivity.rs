@@ -3,7 +3,7 @@ use super::{Editor,Tool};
 use eframe::egui::{self,RichText};
 use opencorel_core::{Bounds,Document,Object,Point,Shape,Style};
 use opencorel_core::transform::{self,QuarterTurn};
-use std::collections::HashSet;
+use std::collections::{HashSet,HashMap};
 
 const CLIPBOARD_LIMIT:usize=24*1024*1024;
 pub(super) fn tool_label(tool:Tool)->&'static str{
@@ -41,6 +41,20 @@ fn object_bytes(object:&Object)->usize{
             .map(|c|std::mem::size_of::<opencorel_core::Contour>()+
                 c.segments.len()*std::mem::size_of::<opencorel_core::CubicSegment>()).sum(),
         _=>0,
+    }
+}
+fn remap_groups(doc:&mut Document,sources:&[Object],new_ids:&[u64]){
+    let mut grouped:HashMap<u64,Vec<u64>>=HashMap::new();
+    for (original,id) in sources.iter().zip(new_ids.iter()){
+        if let Some(group)=original.group_id{
+            grouped.entry(group).or_default().push(*id);
+        }
+    }
+    for members in grouped.values(){
+        if members.len()>=2{
+            // New IDs point only at copied objects; never reuse source group IDs.
+            let _=doc.group_objects(members);
+        }
     }
 }
 fn plain(fill:&str)->Style{
@@ -98,6 +112,7 @@ impl Editor{
         self.checkpoint();
         let ids:Vec<u64>=copied.iter()
             .map(|obj|self.doc.copy_object(obj,self.active_layer,offset,offset)).collect();
+        remap_groups(&mut self.doc,&copied,&ids);
         self.selected=ids.first().copied();
         self.multi_selected=ids.into_iter().skip(1).collect();
         self.paste_number=self.paste_number.saturating_add(1);
@@ -118,9 +133,48 @@ impl Editor{
         }
         self.checkpoint();
         let new_ids:Vec<_>=copies.iter().map(|o|self.doc.copy_object(o,o.layer_id,10.0,10.0)).collect();
+        remap_groups(&mut self.doc,&copies,&new_ids);
         self.selected=new_ids.first().copied();
         self.multi_selected=new_ids.into_iter().skip(1).collect();
         self.status=format!("Создано копий: {}",self.selection_ids().len());
+    }
+    pub(super) fn group_selection(&mut self){
+        let ids=self.selection_ids();
+        if ids.len()<2{
+            self.status="Для группировки выделите минимум два объекта с Shift".into();return;
+        }
+        let selected:HashSet<u64>=ids.iter().copied().collect();
+        let editable:HashSet<u64>=self.doc.layers.iter()
+            .filter(|layer|layer.visible&&!layer.locked).map(|layer|layer.id).collect();
+        if self.doc.objects.iter().filter(|o|selected.contains(&o.id)).count()!=selected.len()
+            || self.doc.objects.iter().filter(|o|selected.contains(&o.id))
+            .any(|o|o.group_id.is_some()||!editable.contains(&o.layer_id)){
+            self.status="Сначала разгруппируйте прежние группы и разблокируйте слои".into();
+            return;
+        }
+        self.checkpoint();
+        match self.doc.group_objects(&ids){
+            Ok(group)=>self.status=format!("Группа #{group} создана ({} объектов). Ctrl+Shift+G — разгруппировать",ids.len()),
+            Err(e)=>self.status=e,
+        }
+    }
+    pub(super) fn ungroup_selection(&mut self){
+        let ids=self.selection_ids();
+        let groups:HashSet<u64>=self.doc.objects.iter()
+            .filter(|obj|ids.contains(&obj.id)).filter_map(|obj|obj.group_id).collect();
+        if groups.is_empty(){self.status="В выделении нет групп".into();return;}
+        let editable:HashSet<u64>=self.doc.layers.iter()
+            .filter(|l|l.visible&&!l.locked).map(|l|l.id).collect();
+        if self.doc.objects.iter().any(|o|o.group_id
+            .map(|g|groups.contains(&g)).unwrap_or(false)
+            && !editable.contains(&o.layer_id)){
+            self.status="Группа содержит объект из заблокированного слоя".into();return;
+        }
+        self.checkpoint();
+        match self.doc.ungroup_objects(&ids){
+            Ok(count)=>self.status=format!("Разгруппировано объектов: {count}"),
+            Err(e)=>self.status=e,
+        }
     }
     pub(super) fn selection_bounds(&self)->Option<Bounds>{
         let ids:HashSet<u64>=self.selection_ids().into_iter().collect();
@@ -310,6 +364,25 @@ impl Editor{
 #[cfg(test)]
 mod tests{
     use super::*;
+    #[test]
+    fn group_duplicate_creates_independent_linked_copies(){
+        let mut e=Editor::default();
+        e.select_all();
+        e.group_selection();
+        assert!(e.doc.objects[0].group_id.is_some());
+        e.duplicate_preserving_styles();
+        assert_eq!(e.doc.objects.len(),4);
+        let original=e.doc.objects[0].group_id;
+        let duplicate=e.doc.objects[2].group_id;
+        assert_ne!(original,duplicate);
+        assert_eq!(duplicate,e.doc.objects[3].group_id);
+        e.select_object(Some(e.doc.objects[3].id),false);
+        assert_eq!(e.selection_ids().len(),2);
+        e.ungroup_selection();
+        assert!(e.doc.objects[2].group_id.is_none());
+        assert!(e.doc.objects[0].group_id.is_some());
+        e.doc.validate().unwrap();
+    }
     #[test]
     fn clipboard_retains_text_format_and_undo(){
         let mut editor=Editor::default();
