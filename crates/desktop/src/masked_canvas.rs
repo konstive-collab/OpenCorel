@@ -93,6 +93,20 @@ fn document_fingerprint(doc:&Document,width:u32,height:u32)->u64{
     for clip in &doc.clip_links{
         clip.source_id.hash(&mut h);clip.target_id.hash(&mut h);
     }
+    for (id,appearance) in &doc.appearances{
+        id.hash(&mut h);
+        hash_float(appearance.opacity,&mut h);
+        format!("{:?}",appearance.cap).hash(&mut h);
+        format!("{:?}",appearance.join).hash(&mut h);
+        for value in &appearance.dash_array{hash_float(*value,&mut h);}
+        if let Some(gradient)=&appearance.gradient{
+            format!("{:?}",gradient.kind).hash(&mut h);
+            hash_float(gradient.angle_degrees,&mut h);
+            for stop in &gradient.stops{
+                hash_float(stop.offset,&mut h);stop.color.hash(&mut h);
+            }
+        }
+    }
     for obj in &doc.objects{
         obj.id.hash(&mut h);obj.layer_id.hash(&mut h);obj.group_id.hash(&mut h);
         obj.style.fill.hash(&mut h);obj.style.stroke.hash(&mut h);
