@@ -1,14 +1,16 @@
-# OpenCorel file compatibility — v0.3 development
+# OpenCorel file compatibility — v0.4 development
 
 **Legend**: Native = full editability within OpenCorel's currently implemented primitives; Editable subset = supported shapes/curves converted to native objects; Placed artwork = visible as a single moveable/scalable vector object, internal curves/text not editable; Adapter = a separately installed converter is needed.
 
 | Extension | Open/import | Save/export | Dependencies / caveats |
 |---|---|---|---|
-| **KDR** | Native | Native | Kodi Draw v1 ZIP, JSON document, SVG preview, SHA-256 integrity |
+| **KDR** | Native | Native | Kodi Draw v1 ZIP, embedded photos and vector objects, optional SVG preview, SHA-256 integrity |
 | **OCD** | Native (legacy) | Native (legacy) | Older JSON document file |
 | **SVG** | Editable subset; otherwise placed artwork | Basic SVG | SVG gradients/transforms/masks/complex paths not broken into editable shapes |
 | **SVGZ** | Editable subset; otherwise placed artwork | Basic SVGZ | Gzip compressed SVG |
 | **PDF** | Placed artwork (first page) | RGB vector preview | Requires `pdftocairo`; no PDF/X, not CMYK |
+| **PNG, JPEG** | Placed editable page object | RGB proof export (96 DPI default) | Photos retained inside KDR, resizable, not vectorized |
+| **WebP, GIF, BMP, TIFF** | Imported, converted to PNG | No native same-format export | Animated/multipage inputs use only the first frame/page; original metadata may be lost |
 | **CDR** | Adapter, experimental | **No** | LibreOffice Draw import to PDF, then `pdftocairo`; compatibility depends on CDR version & filters |
 | **CMX** | Adapter, experimental | No | LibreOffice Draw |
 | **AI** | Adapter, experimental | No | PDF-compatible AI or LibreOffice Draw |

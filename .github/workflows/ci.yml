@@ -27,6 +27,8 @@ jobs:
         run: cargo test --workspace
       - name: Build desktop
         run: cargo build --release -p opencorel-desktop
+      - name: Build CLI
+        run: cargo build --release -p opencorel-cli
       - name: Upload executable
         uses: actions/upload-artifact@v4
         with:
@@ -34,4 +36,6 @@ jobs:
           path: |
             target/release/opencorel-desktop
             target/release/opencorel-desktop.exe
+            target/release/opencorel-cli
+            target/release/opencorel-cli.exe
           if-no-files-found: error
