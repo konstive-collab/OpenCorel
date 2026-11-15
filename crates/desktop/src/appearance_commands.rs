@@ -147,6 +147,9 @@ mod tests{
         e.selected=Some(a);e.multi_selected=vec![b];
         e.copy_appearance_between_selected();
         assert_eq!(e.doc.appearances.get(&a),e.doc.appearances.get(&b));
-        assert_eq!(e.doc.get_mut(a).unwrap().style,e.doc.get_mut(b).unwrap().style);
+        assert_eq!(
+            e.doc.objects.iter().find(|o|o.id==a).unwrap().style,
+            e.doc.objects.iter().find(|o|o.id==b).unwrap().style
+        );
     }
 }
