@@ -510,11 +510,12 @@ impl Document {
             return Err("Invalid page dimensions".into());
         }
         if self.objects.len()>100_000{return Err("Object limit exceeded".into());}
+        let all_ids:HashSet<u64>=self.objects.iter().map(|o|o.id).collect();
         if self.appearances.len()>self.objects.len(){
             return Err("Appearance count exceeds object count".into());
         }
         for (id,appearance) in &self.appearances{
-            if !self.objects.iter().any(|o|o.id==*id){
+            if !all_ids.contains(id){
                 return Err("Orphaned appearance reference".into());
             }
             appearance.validate()?;
@@ -555,7 +556,6 @@ impl Document {
         if !layer_ids.contains(&1){return Err("Primary layer missing".into());}
         // Reserve every object ID before validating group references. The old
         // single-pass check could accept a group ID colliding with a later object.
-        let all_ids:HashSet<u64>=self.objects.iter().map(|o|o.id).collect();
         let mut ids=HashSet::new();
         for o in &self.objects {
             if o.id==0 || o.id>=self.next_id || !ids.insert(o.id) {return Err("Invalid object ID".into());}
