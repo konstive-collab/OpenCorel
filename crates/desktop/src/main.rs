@@ -1,6 +1,6 @@
 use eframe::egui::{self,Align2,Color32,FontId,Pos2,Rect,Sense,Stroke,Vec2};
-use opencorel_core::{Bounds,CubicSegment,Document,Object,Point,Shape,Style,valid_color,valid_paint};
-use std::{f32::consts::TAU,collections::HashMap,hash::{Hash,Hasher},collections::hash_map::DefaultHasher};
+use opencorel_core::{Bounds,CubicSegment,Document,Object,Point,Shape,Style,valid_color,valid_paint,Alignment,Distribution};
+use std::{f32::consts::TAU,collections::{HashMap,HashSet},hash::{Hash,Hasher},collections::hash_map::DefaultHasher};
 mod workspace;
 mod vector_preview;
 mod raster_preview;
@@ -44,6 +44,7 @@ impl FillCache {
 struct Editor{
     doc:Document,
     selected:Option<u64>,
+    multi_selected:Vec<u64>,
     tool:Tool,
     file:String,
     text:String,
@@ -79,7 +80,7 @@ impl Default for Editor{
             Style{fill:"#244A87".into(),stroke:"#244A87".into(),stroke_width_mm:0.0});
         doc.add(Shape::Text{x:120.0,y:200.0,value:"ВАША РЕКЛАМА".into(),size_mm:42.0},
             Style{fill:"#FFFFFF".into(),stroke:"#FFFFFF".into(),stroke_width_mm:0.0});
-        Self{doc,selected:None,tool:Tool::Select,file:"project.kdr".into(),
+        Self{doc,selected:None,multi_selected:Vec::new(),tool:Tool::Select,file:"project.kdr".into(),
             text:"Новый текст".into(),status:"Экспериментальный прототип".into(),
             zoom:1.0,drag_start:None,creation_start:None,
             curve_start:None,curve_draft:None,active_layer:1,pan:Vec2::ZERO,
@@ -209,6 +210,53 @@ fn trim_history(history:&mut Vec<Document>) {
     }
 }
 impl Editor{
+    fn selection_ids(&self)->Vec<u64>{
+        let mut ids=Vec::with_capacity(self.multi_selected.len()+1);
+        if let Some(id)=self.selected{ids.push(id);}
+        ids.extend(self.multi_selected.iter().copied());
+        ids
+    }
+    fn is_selected(&self,id:u64)->bool{
+        self.selected==Some(id)||self.multi_selected.contains(&id)
+    }
+    fn select_object(&mut self,id:Option<u64>,additive:bool){
+        if !additive{
+            self.selected=id;self.multi_selected.clear();return;
+        }
+        let Some(id)=id else{return;};
+        if self.selected==Some(id){
+            self.selected=self.multi_selected.pop();
+        }else if let Some(i)=self.multi_selected.iter().position(|v|*v==id){
+            self.multi_selected.remove(i);
+        }else if self.selected.is_none(){
+            self.selected=Some(id);
+        }else{
+            self.multi_selected.push(id);
+        }
+    }
+    fn select_all(&mut self){
+        let editable:HashSet<u64>=self.doc.layers.iter().filter(|l|l.visible&&!l.locked)
+            .map(|l|l.id).collect();
+        let ids:Vec<u64>=self.doc.objects.iter()
+            .filter(|o|editable.contains(&o.layer_id)).map(|o|o.id).collect();
+        self.selected=ids.first().copied();
+        self.multi_selected=ids.into_iter().skip(1).collect();
+        self.status=format!("Выбрано объектов: {}",self.selection_ids().len());
+    }
+    fn align_selection(&mut self,mode:Alignment){
+        let ids=self.selection_ids();
+        if ids.len()<2{self.status="Выберите минимум два объекта с Shift".into();return;}
+        self.checkpoint();
+        let count=self.doc.align_objects(&ids,mode);
+        self.status=format!("Выровнено объектов: {count}");
+    }
+    fn distribute_selection(&mut self,mode:Distribution){
+        let ids=self.selection_ids();
+        if ids.len()<3{self.status="Для распределения нужны три объекта".into();return;}
+        self.checkpoint();
+        let count=self.doc.distribute_objects(&ids,mode);
+        self.status=format!("Распределено объектов: {count}");
+    }
     fn checkpoint(&mut self){
         self.undo.push(self.doc.clone());
         trim_history(&mut self.undo);
@@ -221,7 +269,8 @@ impl Editor{
             self.fill_cache.entries.clear();
             self.vector_cache.clear();
             self.raster_cache.clear();
-            self.selected=None;self.curve_draft=None;self.curve_start=None;
+            self.selected=None;self.multi_selected.clear();
+            self.curve_draft=None;self.curve_start=None;
             self.status="Отменено".into();
         }
     }
@@ -232,7 +281,8 @@ impl Editor{
             self.fill_cache.entries.clear();
             self.vector_cache.clear();
             self.raster_cache.clear();
-            self.selected=None;self.curve_draft=None;self.curve_start=None;
+            self.selected=None;self.multi_selected.clear();
+            self.curve_draft=None;self.curve_start=None;
             self.status="Повторено".into();
         }
     }
@@ -247,6 +297,7 @@ impl Editor{
         self.checkpoint();
         let id=self.doc.add_to_layer(shape,style,self.active_layer);
         self.selected=Some(id);
+        self.multi_selected.clear();
         Some(id)
     }
     fn curve_click(&mut self,p:Point){
@@ -350,7 +401,7 @@ impl Editor{
             Ok(result)=>{
                 self.checkpoint();
                 self.doc=result.document;
-                self.selected=None;self.active_layer=1;
+                self.selected=None;self.multi_selected.clear();self.active_layer=1;
                 self.fill_cache.entries.clear();self.vector_cache.clear();
                 self.raster_cache.clear();
                 self.curve_start=None;self.curve_draft=None;
@@ -486,11 +537,10 @@ impl Editor{
                         &mut self.vector_cache,&mut self.raster_cache,ctx);
                 }
             }
-            if let Some(id)=self.selected{
-                if let Some(o)=self.doc.objects.iter().find(|o|o.id==id){
-                    if self.doc.layer(o.layer_id).map(|l|l.visible).unwrap_or(false){
-                        outline(&page_painter,v.bounds(o.shape.bounds()).expand(3.0),Color32::BLUE,2.0);
-                    }
+            let selected:HashSet<u64>=self.selection_ids().into_iter().collect();
+            for o in self.doc.objects.iter().filter(|o|selected.contains(&o.id)){
+                if self.doc.layer(o.layer_id).map(|l|l.visible).unwrap_or(false){
+                    outline(&page_painter,v.bounds(o.shape.bounds()).expand(3.0),Color32::BLUE,2.0);
                 }
             }
             if response.drag_started_by(egui::PointerButton::Primary){
@@ -499,15 +549,14 @@ impl Editor{
                         let p=self.snapped(v.mm(pos));
                         match self.tool{
                             Tool::Select=>{
-                                self.selected=self.doc.hit_test(p,2.0);
-                                if let Some(id)=self.selected{
-                                    if let Some(o)=self.doc.objects.iter().find(|o|o.id==id){
-                                        // The drag checkpoint is created once, even for large
-                                        // embedded photographs and complex source documents.
-                                        let _=o;
+                                // Shift-click toggles selection, without starting a drag.
+                                if !ctx.input(|i|i.modifiers.shift){
+                                    let hit=self.doc.hit_test(p,2.0);
+                                    if let Some(id)=hit{
+                                        if !self.is_selected(id){self.select_object(Some(id),false);}
                                         self.checkpoint();
                                         self.drag_start=Some((p,id));
-                                    }
+                                    }else{self.select_object(None,false);}
                                 }
                             }
                             Tool::Rect|Tool::Ellipse=>{
@@ -541,11 +590,16 @@ impl Editor{
                                 _=>{}
                             }
                         }
-                    }else if let Some((previous,id))=self.drag_start {
-                        if let Some(o)=self.doc.get_mut(id){
-                            o.shape.translate(now.x-previous.x,now.y-previous.y);
+                    }else if let Some((previous,_id))=self.drag_start {
+                        let selected:HashSet<u64>=self.selection_ids().into_iter().collect();
+                        let editable:HashSet<u64>=self.doc.layers.iter()
+                            .filter(|l|l.visible&&!l.locked).map(|l|l.id).collect();
+                        for object in self.doc.objects.iter_mut(){
+                            if selected.contains(&object.id)&&editable.contains(&object.layer_id){
+                                object.shape.translate(now.x-previous.x,now.y-previous.y);
+                            }
                         }
-                        self.drag_start=Some((now,id));
+                        self.drag_start=Some((now,_id));
                     }
                 }
             }
@@ -563,7 +617,15 @@ impl Editor{
                     if v.rect.contains(pos){
                         let p=self.snapped(v.mm(pos));
                         let shape=match self.tool{
-                            Tool::Select=>{self.selected=self.doc.hit_test(p,2.0);return;},
+                            Tool::Select=>{
+                                let id=self.doc.hit_test(p,2.0);
+                                let shift=ctx.input(|i|i.modifiers.shift);
+                                if shift{self.select_object(id,true);}
+                                else if !id.map(|id|self.is_selected(id)).unwrap_or(false){
+                                    self.select_object(id,false);
+                                }
+                                return;
+                            },
                             Tool::Curve=>{self.curve_click(p);return;},
                             Tool::Rect=>Shape::Rectangle{x:p.x,y:p.y,w:60.0,h:40.0},
                             Tool::Ellipse=>Shape::Ellipse{x:p.x,y:p.y,w:60.0,h:40.0},
@@ -623,6 +685,7 @@ impl eframe::App for Editor{
             ctx.set_visuals(if self.light_theme{egui::Visuals::light()}else{egui::Visuals::dark()});
         }
         if !ctx.wants_keyboard_input(){
+            if ctx.input(|i|i.modifiers.command&&i.key_pressed(egui::Key::A)){self.select_all();}
             if ctx.input(|i|i.modifiers.command&&i.key_pressed(egui::Key::N)){self.new_document();}
             if ctx.input(|i|i.modifiers.command&&i.key_pressed(egui::Key::D)){self.duplicate_selection();}
             if ctx.input(|i|i.key_pressed(egui::Key::F4)){self.fit_page();}
@@ -641,6 +704,19 @@ impl eframe::App for Editor{
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn additive_selection_toggles_objects(){
+        let mut editor=Editor::default();
+        let first=editor.doc.objects[0].id;
+        let second=editor.doc.objects[1].id;
+        editor.select_object(Some(first),false);
+        editor.select_object(Some(second),true);
+        assert_eq!(editor.selection_ids().len(),2);
+        editor.select_object(Some(second),true);
+        assert_eq!(editor.selection_ids(),vec![first]);
+        editor.select_all();
+        assert_eq!(editor.selection_ids().len(),2);
+    }
     #[test]
     fn grid_snapping_uses_millimetres(){
         let mut editor=Editor::default();
