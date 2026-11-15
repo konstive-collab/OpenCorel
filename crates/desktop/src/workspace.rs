@@ -298,60 +298,110 @@ impl Editor {
 
     fn inspector_objects(&mut self,ui:&mut egui::Ui){
         ui.horizontal(|ui|{
-            ui.heading("Слои");
-            if ui.small_button("+").on_hover_text("Создать слой").clicked(){
+            ui.heading("СЛОИ");
+            if ui.small_button("+ Слой").on_hover_text("Создать новый слой").clicked(){
                 self.checkpoint();
                 let name=format!("Слой {}",self.doc.layers.len()+1);
                 self.active_layer=self.doc.add_layer(name);
             }
         });
-        let layers:Vec<_>=self.doc.layers.iter().map(|l|(l.id,l.name.clone(),l.visible,l.locked)).collect();
+        let layers:Vec<_>=self.doc.layers.iter()
+            .map(|layer|(layer.id,layer.name.clone(),layer.visible,layer.locked)).collect();
         for (id,name,mut visible,mut locked) in layers{
             ui.horizontal(|ui|{
-                if ui.selectable_label(self.active_layer==id,format!("{} {}",if visible{"◉"}else{"○"},name)).clicked(){
+                if ui.selectable_label(self.active_layer==id,
+                    format!("{} {}",if visible{"●"}else{"○"},name)).clicked(){
                     self.active_layer=id;
                 }
-                if ui.checkbox(&mut visible,"").on_hover_text("Видимость слоя").changed(){
+                if ui.checkbox(&mut visible,"").on_hover_text("Видимость").changed(){
                     self.checkpoint();
-                    if let Some(layer)=self.doc.layers.iter_mut().find(|l|l.id==id){layer.visible=visible;}
+                    if let Some(layer)=self.doc.layers.iter_mut().find(|l|l.id==id){
+                        layer.visible=visible;
+                    }
                 }
-                if ui.checkbox(&mut locked,"🔒").on_hover_text("Блокировать слой").changed(){
+                if ui.checkbox(&mut locked,"").on_hover_text("Блокировка").changed(){
                     self.checkpoint();
-                    if let Some(layer)=self.doc.layers.iter_mut().find(|l|l.id==id){layer.locked=locked;}
+                    if let Some(layer)=self.doc.layers.iter_mut().find(|l|l.id==id){
+                        layer.locked=locked;
+                    }
                 }
             });
         }
         ui.separator();
-        ui.label(RichText::new("Объекты").strong());
-        let count=self.doc.objects.len();
-        // Virtualized rows: remain responsive when designs contain thousands of objects.
-        egui::ScrollArea::vertical().id_salt("objects_list").show_rows(ui,23.0,count,|ui,rows|{
-            for row in rows{
-                let index=count-1-row;
-                let obj=&self.doc.objects[index];
-                let id=obj.id;
-                let layer_id=obj.layer_id;
-                let name=match &obj.shape{
-                    Shape::Rectangle{..}=>"▭  Прямоугольник".to_string(),
-                    Shape::Ellipse{..}=>"◯  Эллипс".into(),
-                    Shape::Text{value,..}=>format!("T  {}",value.chars().take(24).collect::<String>()),
-                    Shape::Bezier{..}=>"⌁  Кривая Безье".into(),
-                    Shape::CompoundPath{contours}=>format!("✒  Контуры ({})",contours.len()),
-                    Shape::Polyline{..}=>"⌁  Линия".into(),
-                    Shape::EmbeddedSvg{source_format,..}=>format!("▧  Вектор {source_format}"),
-                    Shape::Raster{pixel_width,pixel_height,..}=>format!("▧  Фото {pixel_width}×{pixel_height}"),
-                };
-                let visible=self.doc.layer(layer_id).map(|l|l.visible).unwrap_or(false);
-                if ui.add_enabled(visible,egui::Button::new(name)
-                    .selected(self.is_selected(id)).min_size(Vec2::new(ui.available_width(),20.0)))
-                    .clicked(){
-                    let shift=ui.input(|i|i.modifiers.shift);
-                    self.select_object(Some(id),shift);
-                    self.active_layer=layer_id;
-                    self.inspector_tab=InspectorTab::Properties;
-                }
+        ui.horizontal(|ui|{
+            ui.heading("ОБЪЕКТЫ");
+            ui.label(RichText::new(format!("{}",self.doc.objects.len()))
+                .color(Color32::from_rgb(33,187,161)));
+        });
+        ui.add(egui::TextEdit::singleline(&mut self.object_filter)
+            .hint_text("Поиск объекта или названия..."));
+        ui.horizontal(|ui|{
+            if ui.add_enabled(self.selection_ids().len()>=2,
+                egui::Button::new("Группа  Ctrl+G")).clicked(){
+                self.group_selection();
+            }
+            if ui.button("Разгрупп.").on_hover_text("Ctrl+Shift+G").clicked(){
+                self.ungroup_selection();
             }
         });
+        let query=self.object_filter.trim().to_lowercase();
+        let filtered:Option<Vec<usize>>=if query.is_empty(){None}else{
+            Some(self.doc.objects.iter().enumerate().filter_map(|(index,obj)|{
+                let label=if !obj.name.is_empty(){obj.name.to_lowercase()}else{
+                    match &obj.shape{
+                        Shape::Text{value,..}=>value.to_lowercase(),
+                        Shape::Rectangle{..}=>"прямоугольник".into(),
+                        Shape::Ellipse{..}=>"эллипс".into(),
+                        Shape::Raster{..}=>"фото изображение".into(),
+                        Shape::EmbeddedSvg{..}=>"вектор".into(),
+                        Shape::CompoundPath{..}=>"контуры".into(),
+                        Shape::Bezier{..}=>"кривая".into(),
+                        Shape::Polyline{..}=>"линия".into(),
+                    }
+                };
+                if label.contains(&query)||obj.id.to_string().contains(&query){
+                    Some(index)
+                }else{None}
+            }).collect())
+        };
+        let count=filtered.as_ref().map_or(self.doc.objects.len(),Vec::len);
+        ui.label(RichText::new(format!("Показано: {count}. Shift — множественное выделение."))
+            .small().color(Color32::GRAY));
+        egui::ScrollArea::vertical().id_salt("objects_list")
+            .show_rows(ui,26.0,count,|ui,rows|{
+                for row in rows{
+                    let index=if let Some(ref filtered)=filtered{
+                        filtered[count-1-row]
+                    }else{count-1-row};
+                    let obj=&self.doc.objects[index];
+                    let id=obj.id;let layer_id=obj.layer_id;
+                    let display=if obj.name.is_empty(){
+                        match &obj.shape{
+                            Shape::Rectangle{..}=>"▭ Прямоугольник".to_string(),
+                            Shape::Ellipse{..}=>"◯ Эллипс".into(),
+                            Shape::Text{value,..}=>format!("T {}",value.chars().take(20).collect::<String>()),
+                            Shape::Bezier{..}=>"⌁ Безье".into(),
+                            Shape::CompoundPath{contours}=>format!("✒ Контуры ({})",contours.len()),
+                            Shape::Polyline{..}=>"╱ Линия".into(),
+                            Shape::EmbeddedSvg{source_format,..}=>format!("▧ Вектор {source_format}"),
+                            Shape::Raster{pixel_width,pixel_height,..}=>format!("▧ Фото {pixel_width}×{pixel_height}"),
+                        }
+                    }else{obj.name.clone()};
+                    let name=if let Some(group)=obj.group_id{
+                        format!("▣ {}  · G{}",display,group)
+                    }else{display};
+                    let visible=self.doc.layer(layer_id).map(|l|l.visible).unwrap_or(false);
+                    let button=egui::Button::new(name)
+                        .selected(self.is_selected(id))
+                        .min_size(Vec2::new(ui.available_width(),23.0));
+                    if ui.add_enabled(visible,button).clicked(){
+                        let shift=ui.input(|i|i.modifiers.shift);
+                        self.select_object(Some(id),shift);
+                        self.active_layer=layer_id;
+                        self.inspector_tab=InspectorTab::Properties;
+                    }
+                }
+            });
     }
 
     fn inspector_properties(&mut self,ui:&mut egui::Ui){
