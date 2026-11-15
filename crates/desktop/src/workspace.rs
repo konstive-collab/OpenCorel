@@ -81,10 +81,13 @@ impl Editor {
                     ui.checkbox(&mut self.light_theme,"Светлая тема");
                 });
                 ui.menu_button("Макет",|ui|{
+                    if ui.button("A0 — 841×1189 мм").clicked(){self.page_size(841.0,1189.0);ui.close_menu();}
+                    if ui.button("A2 — 420×594 мм").clicked(){self.page_size(420.0,594.0);ui.close_menu();}
                     if ui.button("A4 — 210×297 мм").clicked(){self.page_size(210.0,297.0);ui.close_menu();}
                     if ui.button("A3 — 297×420 мм").clicked(){self.page_size(297.0,420.0);ui.close_menu();}
                     if ui.button("A1 — 594×841 мм").clicked(){self.page_size(594.0,841.0);ui.close_menu();}
                     if ui.button("Баннер 3×2 м").clicked(){self.page_size(3000.0,2000.0);ui.close_menu();}
+                    if ui.button("Баннер 6×3 м (SVG)").clicked(){self.page_size(6000.0,3000.0);ui.close_menu();}
                 });
                 ui.menu_button("Объект",|ui|{
                     if ui.button("На передний план").clicked(){self.reorder_selection(true);ui.close_menu();}
@@ -562,6 +565,8 @@ impl Editor {
         let height=ui.add(egui::DragValue::new(&mut h).speed(1.0).range(1.0..=100_000.0)).changed();
         if width || height{self.page_size(w,h);}
         ui.horizontal_wrapped(|ui|{
+            if ui.small_button("A0").clicked(){self.page_size(841.0,1189.0);}
+            if ui.small_button("A2").clicked(){self.page_size(420.0,594.0);}
             if ui.small_button("A4").clicked(){self.page_size(210.0,297.0);}
             if ui.small_button("A3").clicked(){self.page_size(297.0,420.0);}
             if ui.small_button("A1").clicked(){self.page_size(594.0,841.0);}
@@ -571,6 +576,13 @@ impl Editor {
         ui.checkbox(&mut self.show_grid,"Показать сетку");
         ui.checkbox(&mut self.snap_grid,"Привязка к сетке 10 мм");
         ui.checkbox(&mut self.show_rulers,"Показать линейки");
+        ui.checkbox(&mut self.show_safe_area,"Показать безопасную область");
+        ui.horizontal(|ui|{
+            ui.label("Отступ от края, мм");
+            ui.add(egui::DragValue::new(&mut self.safe_margin_mm)
+                .speed(0.5).range(0.0..=100.0));
+        });
+        ui.label("Оранжевая рамка — только экранная подсказка, в файл не выводится.");
         ui.separator();
         ui.heading("Предпечатная проверка");
         ui.horizontal(|ui|{

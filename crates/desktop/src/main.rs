@@ -74,6 +74,8 @@ struct Editor{
     show_preflight:bool,
     preflight_lines:Vec<String>,
     minimum_image_dpi:f32,
+    show_safe_area:bool,
+    safe_margin_mm:f32,
 }
 impl Default for Editor{
     fn default()->Self{
@@ -94,7 +96,8 @@ impl Default for Editor{
             raster_cache:RasterCache::default(),proof_dpi:96,
             keep_bitmap_ratio:true,
             show_preflight:false,preflight_lines:Vec::new(),
-            minimum_image_dpi:150.0}
+            minimum_image_dpi:150.0,
+            show_safe_area:false,safe_margin_mm:5.0}
     }
 }
 #[derive(Clone,Copy)]
@@ -238,7 +241,7 @@ impl Editor{
         let issues=opencorel_core::preflight::check(&self.doc,
             opencorel_core::preflight::PreflightOptions{
                 minimum_image_dpi:self.minimum_image_dpi,
-                safe_margin_mm:5.0,
+                safe_margin_mm:self.safe_margin_mm,
             });
         let warning_count=issues.iter().filter(|i|
             i.severity!=opencorel_core::preflight::Severity::Notice).count();
@@ -577,6 +580,16 @@ impl Editor{
                 if v.bounds(obj.bounds()).intersects(v.rect.intersect(response.rect)){
                     paint(&page_painter,obj,v,&mut self.fill_cache,
                         &mut self.vector_cache,&mut self.raster_cache,ctx);
+                }
+            }
+            if self.show_safe_area {
+                let margin=self.safe_margin_mm;
+                if margin>0.0 && self.doc.page.width_mm>2.0*margin &&
+                    self.doc.page.height_mm>2.0*margin {
+                    let r=v.bounds(Bounds{x:margin,y:margin,
+                        w:self.doc.page.width_mm-2.0*margin,
+                        h:self.doc.page.height_mm-2.0*margin});
+                    outline(&page_painter,r,Color32::from_rgb(222,129,48),1.0);
                 }
             }
             let selected:HashSet<u64>=self.selection_ids().into_iter().collect();
