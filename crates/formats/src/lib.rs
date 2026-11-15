@@ -36,7 +36,7 @@ pub const IMPORT_EXTENSIONS:&[&str]=&[
     "odg","fodg","dxf","wmf","emf","wpg","vsd","vsdx","sxd",
     "png","jpg","jpeg","webp","gif","bmp","tif","tiff"
 ];
-pub const EXPORT_EXTENSIONS:&[&str]=&["kdr","ocd","svg","svgz","pdf"];
+pub const EXPORT_EXTENSIONS:&[&str]=&["kdr","ocd","svg","svgz","pdf","png","jpg","jpeg"];
 
 /// Raster import applies limits BEFORE decoding, to avoid huge allocations from
 /// malformed image dimensions. PNG/JPEG keep compressed originals; other supported
@@ -85,8 +85,8 @@ fn load_raster(path:&Path)->Result<OpenResult,String>{
     let mut document=Document::default();
     document.name=path.file_stem().and_then(|s|s.to_str())
         .unwrap_or("Imported photo").to_string();
-    document.page.width_mm=bounds.w;
-    document.page.height_mm=bounds.h;
+    document.page.width_mm=bounds.w.max(1.0);
+    document.page.height_mm=bounds.h.max(1.0);
     document.add(shape,Style{fill:"none".into(),stroke:"none".into(),
         stroke_width_mm:0.0});
     document.validate()?;
@@ -312,6 +312,7 @@ pub fn save_document(doc:&Document,path:impl AsRef<Path>)->Result<(),String>{
             Ok(())
         },
         "pdf"=>opencorel_export::export_pdf(doc,path),
+        "png"|"jpg"|"jpeg"=>opencorel_export::raster_export::export_raster(doc,path,96),
         "cdr"=>Err("CDR export is not implemented. Save as .kdr or export SVG/PDF; do not rename files.".into()),
         other=>Err(format!("Saving .{other} is unsupported. Supported: {}",EXPORT_EXTENSIONS.join(", ")))
     }
@@ -333,6 +334,15 @@ mod tests{
         let restored=open_any(&kdr_path).unwrap();
         assert_eq!(source.document,restored.document);
         assert!(restored.document.to_svg().contains("data:image/png;base64,"));
+    }
+    #[test] fn raster_png_customer_proof(){
+        let dir=tempfile::tempdir().unwrap();
+        let doc=Document::default();
+        let file=dir.path().join("proof.png");
+        save_document(&doc,&file).unwrap();
+        let loaded=image::open(&file).unwrap();
+        assert!(loaded.width()>1000);
+        assert!(loaded.height()>500);
     }
     #[test] fn raster_refuses_oversized_dimensions(){
         let dir=tempfile::tempdir().unwrap();
