@@ -194,6 +194,17 @@ impl Editor{
         b
     }
     /// Move every selected member together; never partially move a locked group.
+    pub(super) fn center_selection_on_page(&mut self){
+        if let Some(bounds)=self.selection_bounds(){
+            self.set_selection_position(
+                (self.doc.page.width_mm-bounds.w)*0.5,
+                (self.doc.page.height_mm-bounds.h)*0.5,
+            );
+            self.status="Выделение центрировано относительно листа".into();
+        }else{
+            self.status="Сначала выделите объекты для центрирования".into();
+        }
+    }
     pub(super) fn set_selection_position(&mut self,new_x:f32,new_y:f32){
         if !new_x.is_finite()||!new_y.is_finite()||
             new_x.abs()>100_000.0||new_y.abs()>100_000.0{return;}
@@ -280,12 +291,15 @@ impl Editor{
         let ids:HashSet<u64>=self.selection_ids().into_iter().collect();
         let editable:HashSet<u64>=self.doc.layers.iter()
             .filter(|l|l.visible&&!l.locked).map(|l|l.id).collect();
-        if !self.doc.objects.iter().any(|o|ids.contains(&o.id)&&editable.contains(&o.layer_id)){
+        if self.doc.objects.iter().any(|o|
+            ids.contains(&o.id)&&!editable.contains(&o.layer_id)){
+            self.status="Сдвиг отменён: в выделении есть заблокированный объект".into();
             return;
         }
+        if !self.doc.objects.iter().any(|o|ids.contains(&o.id)){return;}
         self.checkpoint();
         for o in self.doc.objects.iter_mut().filter(|o|
-            ids.contains(&o.id)&&editable.contains(&o.layer_id)){
+            ids.contains(&o.id)){
             o.shape.translate(dx,dy);
         }
         self.fill_cache.entries.clear();
@@ -412,6 +426,15 @@ impl Editor{
 #[cfg(test)]
 mod tests{
     use super::*;
+    #[test]
+    fn centered_group_preserves_relative_geometry(){
+        let mut e=Editor::default();
+        e.select_all();
+        let before=e.doc.objects[1].bounds().x-e.doc.objects[0].bounds().x;
+        e.center_selection_on_page();
+        let after=e.doc.objects[1].bounds().x-e.doc.objects[0].bounds().x;
+        assert!((before-after).abs()<1e-4);
+    }
     #[test]
     fn exact_move_and_resize_preserve_geometry(){
         let mut e=Editor::default();
