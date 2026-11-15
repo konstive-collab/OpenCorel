@@ -1099,6 +1099,49 @@ mod tests {
         assert!(editor.status.contains("Группу"));
     }
     #[test]
+    fn numeric_rotation_around_pivot_is_undoable(){
+        let mut e=Editor::default();
+        let id=e.doc.objects[0].id;
+        let original=e.doc.clone();
+        e.select_object(Some(id),false);
+        e.rotation_degrees=45.0;
+        e.custom_pivot=true;e.pivot_x=0.0;e.pivot_y=0.0;
+        e.rotate_arbitrary();
+        assert_ne!(e.doc,original);
+        assert_eq!(e.undo.len(),1);
+        assert!(matches!(&e.doc.objects[0].shape,Shape::Polyline{closed:true,..}));
+        e.undo();
+        assert_eq!(e.doc,original);
+    }
+    #[test]
+    fn partial_group_transform_rejects_atomically(){
+        let mut e=Editor::default();
+        let a=e.doc.objects[0].id;
+        let b=e.doc.add(Shape::Rectangle{x:10.0,y:10.0,w:20.0,h:20.0},Style::default());
+        e.doc.group_objects(&[a,b]).unwrap();
+        let before=e.doc.clone();
+        e.selected=Some(a);e.multi_selected.clear();
+        e.rotation_degrees=32.0;
+        e.rotate_arbitrary();
+        assert_eq!(e.doc,before);
+        assert!(e.undo.is_empty());
+        assert!(e.status.contains("часть группы"));
+    }
+    #[test]
+    fn group_rotation_transforms_both_members(){
+        let mut e=Editor::default();
+        let a=e.doc.objects[0].id;
+        let b=e.doc.add(Shape::Rectangle{x:5.0,y:5.0,w:20.0,h:20.0},Style::default());
+        e.doc.group_objects(&[a,b]).unwrap();
+        let before=e.doc.clone();
+        e.select_object(Some(a),false);
+        e.rotation_degrees=30.0;
+        e.rotate_arbitrary();
+        assert_ne!(e.doc.objects[0].shape,before.objects[0].shape);
+        assert_ne!(e.doc.objects.last().unwrap().shape,before.objects.last().unwrap().shape);
+        e.doc.validate().unwrap();
+    }
+    #[test]
     fn polygon_has_six_vertices(){
         let points=hexagon(Bounds{x:0.0,y:0.0,w:60.0,h:40.0});
         assert_eq!(points.len(),6);
