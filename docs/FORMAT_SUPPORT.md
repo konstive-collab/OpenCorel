@@ -1,4 +1,4 @@
-# OpenCorel file compatibility — v0.5 development
+# OpenCorel file compatibility — v0.6 development
 
 **Legend**: Native = full editability within OpenCorel's currently implemented primitives; Editable subset = supported shapes/curves converted to native objects; Placed artwork = visible as a single moveable/scalable vector object, internal curves/text not editable; Adapter = a separately installed converter is needed.
 
@@ -6,7 +6,7 @@
 |---|---|---|---|
 | **KDR** | Native | Native | Kodi Draw v1 ZIP, embedded photos and vector objects, optional SVG preview, SHA-256 integrity |
 | **OCD** | Native (legacy) | Native (legacy) | Older JSON document file |
-| **SVG** | Editable subset; otherwise placed artwork | Basic SVG with styled text | Text objects support family/weight/italic/alignment and simple multiline tspans; unsupported SVG structure remains placed artwork |
+| **SVG** | Editable subset incl. even-odd compound paths, otherwise placed artwork | Styled text and editable cubic outlines | Outlined glyph holes and path contours survive an SVG round-trip; unknown SVG effects remain placed artwork |
 | **SVGZ** | Editable subset; otherwise placed artwork | Basic SVGZ | Gzip compressed SVG |
 | **PDF** | Placed artwork (first page) | RGB vector preview | Requires `pdftocairo`; no PDF/X, not CMYK |
 | **PNG, JPEG** | Placed editable page object | RGB proof export (96 DPI default) | Photos retained inside KDR, resizable, not vectorized |
