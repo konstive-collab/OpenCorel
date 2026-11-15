@@ -145,6 +145,27 @@ impl Default for Document {
 }
 
 impl Document {
+    /// Approximate owned memory size, used to cap undo history on low-RAM PCs.
+    /// Does not include allocator overhead or GPU textures.
+    pub fn estimated_size_bytes(&self)->usize {
+        let mut total=std::mem::size_of::<Document>()+self.name.len();
+        for layer in &self.layers{
+            total=total.saturating_add(std::mem::size_of::<Layer>()+layer.name.len());
+        }
+        for obj in &self.objects{
+            let shape_bytes=match &obj.shape{
+                Shape::Text{value,..}=>value.len(),
+                Shape::Polyline{points,..}=>points.len()*std::mem::size_of::<Point>(),
+                Shape::Bezier{segments,..}=>segments.len()*std::mem::size_of::<CubicSegment>(),
+                Shape::EmbeddedSvg{svg,..}=>svg.len(),
+                Shape::Raster{data_base64,..}=>data_base64.len(),
+                _=>0,
+            };
+            total=total.saturating_add(std::mem::size_of::<Object>()
+                +obj.style.fill.len()+obj.style.stroke.len()+shape_bytes);
+        }
+        total
+    }
     pub fn add(&mut self, shape:Shape, style:Style) -> u64 {
         self.add_to_layer(shape,style,1)
     }
@@ -450,6 +471,13 @@ mod tests{
             *data_base64=base64::engine::general_purpose::STANDARD.encode(b"\x89PNG\r\n\x1a\n");
         }
         assert!(doc.validate().is_err());
+    }
+    #[test] fn memory_estimate_accounts_for_assets(){
+        let mut doc=Document::default();
+        let before=doc.estimated_size_bytes();
+        doc.add(Shape::EmbeddedSvg{x:0.0,y:0.0,w:10.0,h:10.0,
+            source_format:"SVG".into(),svg:"a".repeat(5000)},Style::default());
+        assert!(doc.estimated_size_bytes()>before+5000);
     }
     #[test] fn document_roundtrip(){
         let mut a=Document::default();
