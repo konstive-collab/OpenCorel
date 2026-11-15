@@ -17,6 +17,7 @@ mod vector_preview;
 mod raster_preview;
 mod compound_render;
 mod text_preview;
+mod text_edit_ops;
 use compound_render::CompoundCache;
 use text_preview::TextPreview;
 use opencorel_typography::TextOutliner;
@@ -120,6 +121,8 @@ struct Editor{
     text_outliner:TextOutliner,
     text_preview:TextPreview,
     font_search:String,
+    text_find:String,
+    text_replacement:String,
     proof_dpi:u32,
     keep_bitmap_ratio:bool,
     show_preflight:bool,
@@ -165,7 +168,7 @@ impl Default for Editor{
             appearance_gradient_angle:0.0,appearance_dash_mm:0.0,
             appearance_cap:0,appearance_join:0,
             custom_pivot:false,pivot_x:0.0,pivot_y:0.0,
-            text_outliner:TextOutliner::new(),text_preview:TextPreview::default(),font_search:String::new(),proof_dpi:96,
+            text_outliner:TextOutliner::new(),text_preview:TextPreview::default(),font_search:String::new(),text_find:String::new(),text_replacement:String::new(),proof_dpi:96,
             keep_bitmap_ratio:true,
             show_preflight:false,preflight_lines:Vec::new(),
             minimum_image_dpi:150.0,
