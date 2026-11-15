@@ -904,7 +904,7 @@ impl Editor {
                         ui.add(egui::TextEdit::singleline(&mut self.text_replacement)
                             .hint_text("Заменить на..."));
                         let count=if self.text_find.is_empty(){0}else{
-                            value.matches(&self.text_find).count()
+                            value.matches(self.text_find.as_str()).count()
                         };
                         ui.label(format!("Совпадений: {count} · Поиск с учётом регистра"));
                         if ui.add_enabled(count>0,egui::Button::new("Заменить все")).clicked(){
