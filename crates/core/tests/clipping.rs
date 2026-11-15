@@ -76,3 +76,37 @@ fn raster_can_be_clipped_but_not_used_as_source(){
     doc.set_clip(mask,bitmap).unwrap();
     assert!(doc.to_svg().contains("clip-path=\"url(#clip-target-2)\""));
 }
+
+#[test]
+fn masked_hit_test_obeys_visible_region(){
+    let mut doc=Document::default();
+    let mask=doc.add(rect(10.0,10.0,20.0,20.0),Style::default());
+    let target=doc.add(rect(0.0,0.0,100.0,100.0),Style::default());
+    doc.set_clip(mask,target).unwrap();
+    assert_eq!(doc.hit_test(opencorel_core::Point{x:20.0,y:20.0},0.0),Some(target));
+    assert_eq!(doc.hit_test(opencorel_core::Point{x:70.0,y:70.0},0.0),None);
+    assert_eq!(doc.hit_test(opencorel_core::Point{x:5.0,y:5.0},0.0),None);
+}
+#[test]
+fn nested_compound_hole_not_clickable(){
+    use opencorel_core::{Point,CubicSegment,Contour};
+    fn p(x:f32,y:f32)->Point{Point{x,y}}
+    fn square(x:f32,y:f32,w:f32)->Contour{
+        let start=p(x,y);
+        let pts=[p(x+w,y),p(x+w,y+w),p(x,y+w),start];
+        let mut prev=start;
+        let segments=pts.iter().map(|end|{
+            let seg=CubicSegment{control1:prev,control2:*end,end:*end};
+            prev=*end;
+            seg
+        }).collect();
+        Contour{start,segments,closed:true}
+    }
+    let shape=Shape::CompoundPath{contours:vec![square(0.0,0.0,100.0),square(25.0,25.0,50.0)]};
+    let mut doc=Document::default();
+    let mask=doc.add(shape,Style::default());
+    let target=doc.add(rect(0.0,0.0,100.0,100.0),Style::default());
+    doc.set_clip(mask,target).unwrap();
+    assert_eq!(doc.hit_test(p(10.0,10.0),0.0),Some(target));
+    assert_eq!(doc.hit_test(p(50.0,50.0),0.0),None);
+}
