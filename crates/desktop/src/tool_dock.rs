@@ -96,8 +96,14 @@ fn paint_icon(ui:&egui::Ui,rect:Rect,glyph:Glyph,expanded:bool,active:bool){
 impl Editor{
     fn rail_button(&mut self,ui:&mut egui::Ui,tool:Tool,width:f32,expanded:bool){
         let is_active=self.tool==tool;
+        let dark=ui.visuals().dark_mode;
+        let fill=if is_active{Color32::from_rgb(25,119,109)}
+            else if dark{Color32::from_rgb(30,35,43)}
+            else{Color32::from_rgb(235,241,247)};
         let response=ui.add_sized([width,43.0],
-            egui::Button::new("").selected(is_active))
+            egui::Button::new("").selected(is_active).fill(fill)
+                .stroke(if is_active{Stroke::new(1.0,Color32::from_rgb(39,202,174))}
+                    else{Stroke::NONE}))
             .on_hover_text(format!("{} ({})\n{}",
                 productivity::tool_label(tool),shortcut(tool),productivity::tool_hint(tool)));
         let glyph=match tool{
@@ -105,6 +111,12 @@ impl Editor{
             Tool::Text=>Glyph::Text,Tool::Curve=>Glyph::Curve,
             _=>Glyph::Shapes,
         };
+        if is_active{
+            ui.painter().rect_filled(
+                Rect::from_min_size(response.rect.left_top()+Vec2::new(1.0,4.0),
+                    Vec2::new(2.5,(response.rect.height()-8.0).max(0.0))),
+                1.0,Color32::from_rgb(51,236,199));
+        }
         paint_icon(ui,response.rect,glyph,expanded,is_active);
         if expanded{
             ui.painter().text(response.rect.left_center()+Vec2::new(38.0,0.0),
@@ -118,7 +130,11 @@ impl Editor{
     }
     fn rail_action(&mut self,ui:&mut egui::Ui,glyph:Glyph,label:&str,
         tooltip:&str,width:f32,expanded:bool)->bool{
-        let response=ui.add_sized([width,39.0],egui::Button::new(""))
+        let neutral=if ui.visuals().dark_mode{
+            Color32::from_rgb(30,35,43)
+        }else{Color32::from_rgb(235,241,247)};
+        let response=ui.add_sized([width,39.0],
+            egui::Button::new("").fill(neutral).stroke(Stroke::NONE))
             .on_hover_text(tooltip);
         paint_icon(ui,response.rect,glyph,expanded,false);
         if expanded{
