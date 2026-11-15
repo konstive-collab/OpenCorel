@@ -884,6 +884,20 @@ impl Editor {
                 Shape::Text{x,y,value,size_mm}=>{
                     ui.label("Текст:");
                     changed|=ui.text_edit_multiline(value).changed();
+                    ui.horizontal(|ui|{
+                        if ui.small_button("АБВ → верхний регистр")
+                            .on_hover_text("Unicode-преобразование, включая кириллицу")
+                            .clicked(){
+                            let converted=value.to_uppercase();
+                            if *value!=converted{*value=converted;changed=true;}
+                        }
+                        if ui.small_button("абв → нижний регистр").clicked(){
+                            let converted=value.to_lowercase();
+                            if *value!=converted{*value=converted;changed=true;}
+                        }
+                    });
+                    ui.label(format!("Символов: {} · Строк: {}",
+                        value.chars().count(),value.lines().count().max(1)));
                     for (label,num) in [("X мм",x),("Y мм",y),("Размер мм",size_mm)]{
                         ui.horizontal(|ui|{
                             ui.label(label);
