@@ -44,4 +44,4 @@ Remaining architecture issues: GUI hit-testing uses bounding boxes; drag undo st
 
 The initial Windows stress suite identified a test-harness mistake (attempting to overwrite a still-open NamedTempFile); corrected to write a new path and rerun successfully. This is not evidence of a product save-file bug.
 
-The next iteration I02 v0.10 is being developed separately on branch feat/boolean-ops-v010. Production GUI, color, CDR and legacy OS validation remains explicitly pending.
+Iteration I02 v0.10 is now implemented in source and merged through PR #17 after all Windows/Linux CI stages passed. Production GUI, color, CDR and legacy OS validation remains explicitly pending.

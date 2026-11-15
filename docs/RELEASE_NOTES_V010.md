@@ -22,3 +22,7 @@
 ## QA
 
 The release is gated on Windows and Linux debug/release tests, static analysis and artifact publication. Manual GUI interaction, real CDR and press output tests remain required.
+
+## Verified automated acceptance
+
+[Windows + Linux full CI run 43736421574](https://github.com/konstive-collab/OpenCorel/actions/runs/43736421574) passed on both platforms: debug tests, release-mode tests, Clippy, release desktop/CLI builds and artifact uploads. Merged with PR #17 as commit 4feef2f. This does not certify GUI behavior on production PCs or actual print workflows.

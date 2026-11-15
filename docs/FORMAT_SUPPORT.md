@@ -1,4 +1,4 @@
-# OpenCorel file compatibility — v0.6 development
+# OpenCorel file compatibility — v0.10 development
 
 **Legend**: Native = full editability within OpenCorel's currently implemented primitives; Editable subset = supported shapes/curves converted to native objects; Placed artwork = visible as a single moveable/scalable vector object, internal curves/text not editable; Adapter = a separately installed converter is needed.
 

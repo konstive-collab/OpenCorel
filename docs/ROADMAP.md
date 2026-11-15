@@ -14,7 +14,7 @@ Goal: fast, legally independent vector graphics editor for advertising, posters 
 
 - **v0.9**: editable curve nodes on the canvas (anchor and control handle move, segment split, guarded deletion, undo) — Windows/Linux CI passed; manual production acceptance pending
 
-- **v0.10 (I02)**: closed-shape boolean union, subtract, intersection, XOR with native editable compound paths, hole preservation, guarded operation failures (CI/production QA pending)
+- **v0.10 (I02)**: closed-shape boolean union, subtract, intersection, XOR with native editable compound paths, hole preservation, guarded operation failures (Windows/Linux CI passed; manual/production QA pending)
 
 ## Long-term milestone plan
 
