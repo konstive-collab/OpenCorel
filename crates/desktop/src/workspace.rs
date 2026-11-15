@@ -292,6 +292,84 @@ impl Editor {
         let Some(index)=self.doc.objects.iter().position(|o|o.id==id) else{
             self.selected=None;return;
         };
+        // Images may contain tens of megabytes of Base64. Never clone the
+        // whole object per GUI frame just to show a few numeric fields.
+        let asset=match &self.doc.objects[index].shape{
+            Shape::Raster{x,y,w,h,pixel_width,pixel_height,..}=>
+                Some((true,*x,*y,*w,*h,*pixel_width,*pixel_height,String::new())),
+            Shape::EmbeddedSvg{x,y,w,h,source_format,..}=>
+                Some((false,*x,*y,*w,*h,0,0,source_format.clone())),
+            _=>None
+        };
+        if let Some((raster,mut x,mut y,mut width,mut height,pw,ph,source))=asset{
+            let allowed=self.doc.layer(self.doc.objects[index].layer_id)
+                .map(|l|l.visible&&!l.locked).unwrap_or(false);
+            ui.heading(format!("Объект #{id}"));
+            if self.multi_selected.len()>0{
+                ui.label(format!("Выбрано {} объектов",self.selection_ids().len()));
+            }
+            if !allowed{ui.colored_label(Color32::RED,"Слой заблокирован");}
+            let mut changed=false;
+            ui.add_enabled_ui(allowed,|ui|{
+                if raster{
+                    ui.label(format!("Фотография {} × {} пикселей",pw,ph));
+                    if width>0.0 {ui.label(format!("Фактическое разрешение: {:.0} DPI",
+                        pw as f32*25.4/width));}
+                    ui.checkbox(&mut self.keep_bitmap_ratio,"Сохранять пропорции");
+                }else{
+                    ui.label(format!("Векторный макет: {source}"));
+                    ui.label("Контуры внутри импортированного объекта пока не редактируются");
+                }
+                for (name,num) in [("X мм",&mut x),("Y мм",&mut y)]{
+                    ui.horizontal(|ui|{
+                        ui.label(name);
+                        changed|=ui.add(egui::DragValue::new(num).speed(1.0)).changed();
+                    });
+                }
+                ui.horizontal(|ui|{
+                    ui.label("Ширина, мм");
+                    if ui.add(egui::DragValue::new(&mut width).speed(1.0)).changed(){
+                        width=width.max(0.1);
+                        if raster && self.keep_bitmap_ratio{
+                            height=width*ph as f32/pw as f32;
+                        }
+                        changed=true;
+                    }
+                });
+                ui.horizontal(|ui|{
+                    ui.label("Высота, мм");
+                    if ui.add(egui::DragValue::new(&mut height).speed(1.0)).changed(){
+                        height=height.max(0.1);
+                        if raster && self.keep_bitmap_ratio{
+                            width=height*pw as f32/ph as f32;
+                        }
+                        changed=true;
+                    }
+                });
+            });
+            if changed{
+                self.checkpoint();
+                match &mut self.doc.objects[index].shape{
+                    Shape::Raster{x:xx,y:yy,w:ww,h:hh,..} |
+                    Shape::EmbeddedSvg{x:xx,y:yy,w:ww,h:hh,..}=>{
+                        *xx=x;*yy=y;*ww=width;*hh=height;
+                    }
+                    _=>{}
+                }
+            }
+            ui.separator();
+            ui.add_enabled_ui(allowed,|ui|{
+                ui.horizontal(|ui|{
+                    if ui.button("Дублировать").clicked(){self.duplicate_selection();}
+                    if ui.button("Удалить").clicked(){self.delete_selection();}
+                });
+                ui.horizontal(|ui|{
+                    if ui.small_button("На передний план").clicked(){self.reorder_selection(true);}
+                    if ui.small_button("На задний план").clicked(){self.reorder_selection(false);}
+                });
+            });
+            return;
+        }
         let mut object=self.doc.objects[index].clone();
         let editing_allowed=self.doc.layer(object.layer_id).map(|l|l.visible&&!l.locked).unwrap_or(false);
         ui.heading(format!("Объект #{id}"));

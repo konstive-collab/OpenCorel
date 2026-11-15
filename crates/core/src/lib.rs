@@ -247,7 +247,7 @@ impl Document {
         let step=(positions.last().unwrap().1-positions[0].1)/(positions.len()-1) as f32;
         let first=positions[0].1;
         for (index,(id,center)) in positions.iter().enumerate().skip(1).take(positions.len()-2){
-            let delta=first+index as f32*step-center;
+            let delta=first+index as f32*step-*center;
             if let Some(obj)=self.get_mut(*id){
                 match direction{
                     Distribution::HorizontalCenters=>obj.shape.translate(delta,0.0),

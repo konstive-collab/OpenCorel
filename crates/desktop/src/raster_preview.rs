@@ -4,8 +4,8 @@ use base64::Engine;
 use eframe::egui::{self,Color32,Pos2,Rect,TextureHandle};
 use std::{collections::HashMap,hash::{Hash,Hasher},collections::hash_map::DefaultHasher};
 
-const PREVIEW_SIDE:u32=1400;
-const MAX_CACHED_IMAGES:usize=12;
+const PREVIEW_SIDE:u32=1024;
+const MAX_CACHED_IMAGES:usize=6;
 #[derive(Default)]
 pub(super) struct RasterCache {
     entries:HashMap<u64,(u64,TextureHandle)>,
