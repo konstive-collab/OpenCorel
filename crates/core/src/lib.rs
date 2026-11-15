@@ -354,8 +354,14 @@ impl Document {
         let wanted:HashSet<u64>=ids.iter().copied().collect();
         let editable:HashSet<u64>=self.layers.iter()
             .filter(|l|l.visible&&!l.locked).map(|l|l.id).collect();
+        // Never align only part of a locked or grouped selection. Individual
+        // group members must not be rearranged, breaking the group geometry.
+        if self.objects.iter().any(|o|wanted.contains(&o.id)
+            && (!editable.contains(&o.layer_id)||o.group_id.is_some())){
+            return 0;
+        }
         let objects:Vec<_>=self.objects.iter().filter(|o|
-            wanted.contains(&o.id)&&editable.contains(&o.layer_id))
+            wanted.contains(&o.id))
             .map(|o|(o.id,o.bounds())).collect();
         if objects.len()<2{return 0;}
         let left=objects.iter().map(|(_,b)|b.x).fold(f32::INFINITY,f32::min);
@@ -381,8 +387,12 @@ impl Document {
         let wanted:HashSet<u64>=ids.iter().copied().collect();
         let editable:HashSet<u64>=self.layers.iter()
             .filter(|l|l.visible&&!l.locked).map(|l|l.id).collect();
+        if self.objects.iter().any(|o|wanted.contains(&o.id)
+            && (!editable.contains(&o.layer_id)||o.group_id.is_some())){
+            return 0;
+        }
         let mut positions:Vec<(u64,f32)>=self.objects.iter().filter(|o|
-            wanted.contains(&o.id)&&editable.contains(&o.layer_id))
+            wanted.contains(&o.id))
             .map(|o|{
                 let b=o.bounds();
                 (o.id,match direction{
@@ -434,6 +444,9 @@ impl Document {
             }
         }
         if !layer_ids.contains(&1){return Err("Primary layer missing".into());}
+        // Reserve every object ID before validating group references. The old
+        // single-pass check could accept a group ID colliding with a later object.
+        let all_ids:HashSet<u64>=self.objects.iter().map(|o|o.id).collect();
         let mut ids=HashSet::new();
         for o in &self.objects {
             if o.id==0 || o.id>=self.next_id || !ids.insert(o.id) {return Err("Invalid object ID".into());}
@@ -442,7 +455,7 @@ impl Document {
                 return Err("Invalid object label".into());
             }
             if let Some(group)=o.group_id{
-                if group==0 || group>=self.next_id || ids.contains(&group){
+                if group==0 || group>=self.next_id || all_ids.contains(&group){
                     return Err("Invalid object group reference".into());
                 }
             }
@@ -851,6 +864,27 @@ mod tests{
         assert!(doc.group_objects(&[a,b]).is_err());
         doc.layers[1].locked=true;
         assert!(doc.ungroup_objects(&[a]).is_err());
+    }
+    #[test] fn rejects_group_id_that_collides_with_later_object(){
+        let mut doc=Document::default();
+        let first=doc.add(Shape::Rectangle{x:0.,y:0.,w:10.,h:10.},Style::default());
+        let second=doc.add(Shape::Rectangle{x:15.,y:0.,w:10.,h:10.},Style::default());
+        doc.get_mut(first).unwrap().group_id=Some(second);
+        assert!(doc.validate().unwrap_err().contains("group"));
+    }
+    #[test] fn group_alignment_and_distribution_are_atomic(){
+        let mut doc=Document::default();
+        let a=doc.add(Shape::Rectangle{x:0.,y:0.,w:5.,h:5.},Style::default());
+        let b=doc.add(Shape::Rectangle{x:20.,y:10.,w:5.,h:5.},Style::default());
+        let c=doc.add(Shape::Rectangle{x:40.,y:0.,w:5.,h:5.},Style::default());
+        let group=doc.group_objects(&[a,b]).unwrap();
+        assert!(group>c);
+        let prior=doc.objects.clone();
+        assert_eq!(doc.align_objects(&[a,b],Alignment::Left),0);
+        assert_eq!(doc.distribute_objects(&[a,b,c],Distribution::HorizontalCenters),0);
+        assert_eq!(doc.objects,prior);
+        doc.ungroup_objects(&[a]).unwrap();
+        assert_eq!(doc.align_objects(&[a,b],Alignment::Top),2);
     }
     #[test] fn old_files_default_to_unlabelled_ungrouped_objects(){
         let mut doc=Document::default();

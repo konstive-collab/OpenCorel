@@ -426,6 +426,7 @@ impl Editor{
     fn align_selection(&mut self,mode:Alignment){
         let ids=self.selection_ids();
         if ids.len()<2{self.status="Выберите минимум два объекта с Shift".into();return;}
+        if !self.layout_selection_available(&ids){return;}
         self.checkpoint();
         let count=self.doc.align_objects(&ids,mode);
         self.status=format!("Выровнено объектов: {count}");
@@ -433,9 +434,21 @@ impl Editor{
     fn distribute_selection(&mut self,mode:Distribution){
         let ids=self.selection_ids();
         if ids.len()<3{self.status="Для распределения нужны три объекта".into();return;}
+        if !self.layout_selection_available(&ids){return;}
         self.checkpoint();
         let count=self.doc.distribute_objects(&ids,mode);
         self.status=format!("Распределено объектов: {count}");
+    }
+    fn layout_selection_available(&mut self,ids:&[u64])->bool{
+        let ids:HashSet<u64>=ids.iter().copied().collect();
+        let editable:HashSet<u64>=self.doc.layers.iter()
+            .filter(|l|l.visible&&!l.locked).map(|l|l.id).collect();
+        if self.doc.objects.iter().any(|o|ids.contains(&o.id)
+            && (!editable.contains(&o.layer_id)||o.group_id.is_some())){
+            self.status="Выровнять можно только отдельные незаблокированные объекты. Группу сначала разгруппируйте.".into();
+            return false;
+        }
+        true
     }
     fn checkpoint(&mut self){
         self.undo.push(self.doc.clone());
@@ -1054,6 +1067,18 @@ impl eframe::App for Editor{
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn align_does_not_corrupt_group_or_add_undo_entry(){
+        let mut editor=Editor::default();
+        editor.select_all();
+        editor.group_selection();
+        let before=editor.doc.clone();
+        let history=editor.undo.len();
+        editor.align_selection(Alignment::Left);
+        assert_eq!(editor.doc,before);
+        assert_eq!(editor.undo.len(),history);
+        assert!(editor.status.contains("Группу"));
+    }
     #[test]
     fn polygon_has_six_vertices(){
         let points=hexagon(Bounds{x:0.0,y:0.0,w:60.0,h:40.0});
