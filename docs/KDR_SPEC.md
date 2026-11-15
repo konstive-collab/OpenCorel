@@ -33,3 +33,9 @@ Each object can now carry an optional `text_format` property in the editable `do
 Existing KDR/OCD files without the `text_format` field load with defaults. No KDR container version bump is needed, because the document schema still accepts older objects.
 
 **Not a font embedding guarantee.** `font-family` is a lookup request to whichever fonts are installed on the receiving computer. Exact text shape and line breaks can differ from CorelDRAW and between operating systems. Retain customer source files and proof exports.
+
+## v0.6 compound vector paths
+
+`shape.type = "compound_path"` stores a `contours` array of `start`, `segments` and `closed`. Each segment stores cubic `control1`, `control2`, and `end` in millimetres. Even-odd filling keeps holes of letters (O, B, Р) without rasterization.
+
+The compound is one selectable object; node positions can be adjusted in the inspector (visible controls are capped to avoid huge GUI lists). Text-to-curves is intentionally destructive to text editability; retain a separate document with live text. Resulting contours no longer depend on installed fonts. Font binary data is neither embedded nor distributed.

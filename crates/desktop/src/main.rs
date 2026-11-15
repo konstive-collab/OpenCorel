@@ -4,6 +4,9 @@ use std::{f32::consts::TAU,collections::{HashMap,HashSet},hash::{Hash,Hasher},co
 mod workspace;
 mod vector_preview;
 mod raster_preview;
+mod compound_render;
+use compound_render::CompoundCache;
+use opencorel_typography::TextOutliner;
 use vector_preview::VectorCache;
 use raster_preview::RasterCache;
 use workspace::InspectorTab;
@@ -69,6 +72,8 @@ struct Editor{
     fill_cache:FillCache,
     vector_cache:VectorCache,
     raster_cache:RasterCache,
+    compound_cache:CompoundCache,
+    text_outliner:TextOutliner,
     proof_dpi:u32,
     keep_bitmap_ratio:bool,
     show_preflight:bool,
@@ -93,7 +98,9 @@ impl Default for Editor{
             inspector_tab:InspectorTab::Objects,show_grid:false,snap_grid:false,
             show_rulers:true,light_theme:true,cursor_mm:None,
             fill_cache:FillCache::default(),vector_cache:VectorCache::default(),
-            raster_cache:RasterCache::default(),proof_dpi:96,
+            raster_cache:RasterCache::default(),
+            compound_cache:CompoundCache::default(),
+            text_outliner:TextOutliner::new(),proof_dpi:96,
             keep_bitmap_ratio:true,
             show_preflight:false,preflight_lines:Vec::new(),
             minimum_image_dpi:150.0,
@@ -142,7 +149,8 @@ fn cubic(p0:Point,p1:Point,p2:Point,p3:Point,t:f32)->Point {
     Point{x:a*p0.x+b*p1.x+c*p2.x+d*p3.x,y:a*p0.y+b*p1.y+c*p2.y+d*p3.y}
 }
 fn paint(p:&egui::Painter,obj:&Object,v:View,cache:&mut FillCache,
-    vectors:&mut VectorCache,rasters:&mut RasterCache,ctx:&egui::Context){
+    vectors:&mut VectorCache,rasters:&mut RasterCache,
+    compounds:&mut CompoundCache,ctx:&egui::Context){
     let fill=color(&obj.style.fill);
     let stroke=if obj.style.stroke=="none" {
         Stroke::new(0.0,Color32::TRANSPARENT)
@@ -186,6 +194,9 @@ fn paint(p:&egui::Painter,obj:&Object,v:View,cache:&mut FillCache,
                         y:*y+i as f32*fmt.line_height* *size_mm}),
                     Align2::LEFT_TOP,line,font.clone(),fill);
             }
+        }
+        Shape::CompoundPath{contours}=>{
+            compounds.paint(p,obj.id,contours,v,fill,stroke);
         }
         Shape::Bezier{start,segments,closed}=>{
             let mut contour=vec![*start];
@@ -255,6 +266,43 @@ impl Editor{
             warning_count,issues.len()-warning_count);
         self.show_preflight=true;
     }
+    fn text_to_curves(&mut self){
+        let ids=self.selection_ids();
+        if ids.is_empty(){
+            self.status="Выделите один или несколько текстовых объектов".into();
+            return;
+        }
+        let editable:HashSet<u64>=self.doc.layers.iter()
+            .filter(|l|l.visible&&!l.locked).map(|l|l.id).collect();
+        let mut converted=Vec::new();
+        // Atomic batch: an unavailable font or glyph must not convert only half
+        // of a customer document.
+        for id in ids{
+            let Some(obj)=self.doc.objects.iter().find(|o|o.id==id) else{continue;};
+            if !editable.contains(&obj.layer_id){continue;}
+            if !matches!(obj.shape,Shape::Text{..}){continue;}
+            match self.text_outliner.convert_object(obj){
+                Ok(shape)=>converted.push((id,shape)),
+                Err(e)=>{
+                    self.status=format!("Не удалось преобразовать текст #{id}: {e}");
+                    return;
+                }
+            }
+        }
+        if converted.is_empty(){
+            self.status="Выделение не содержит доступного для преобразования текста".into();
+            return;
+        }
+        self.checkpoint();
+        let count=converted.len();
+        for (id,shape) in converted{
+            if let Some(obj)=self.doc.get_mut(id){
+                obj.shape=shape;
+            }
+        }
+        self.compound_cache.clear();
+        self.status=format!("{} текстовых объектов преобразовано в кривые. Ctrl+Z вернёт текст.",count);
+    }
     fn selection_ids(&self)->Vec<u64>{
         let mut ids=Vec::with_capacity(self.multi_selected.len()+1);
         if let Some(id)=self.selected{ids.push(id);}
@@ -313,6 +361,8 @@ impl Editor{
             trim_history(&mut self.redo);
             self.fill_cache.entries.clear();
             self.vector_cache.clear();
+            self.compound_cache.clear();
+            self.compound_cache.clear();
             self.raster_cache.clear();
             self.selected=None;self.multi_selected.clear();
             self.curve_draft=None;self.curve_start=None;
@@ -448,6 +498,7 @@ impl Editor{
                 self.doc=result.document;
                 self.selected=None;self.multi_selected.clear();self.active_layer=1;
                 self.fill_cache.entries.clear();self.vector_cache.clear();
+                self.compound_cache.clear();
                 self.raster_cache.clear();
                 self.curve_start=None;self.curve_draft=None;
                 let source=opencorel_formats::extension(std::path::Path::new(&self.file));
@@ -579,7 +630,8 @@ impl Editor{
             for obj in self.doc.visible_objects(){
                 if v.bounds(obj.bounds()).intersects(v.rect.intersect(response.rect)){
                     paint(&page_painter,obj,v,&mut self.fill_cache,
-                        &mut self.vector_cache,&mut self.raster_cache,ctx);
+                        &mut self.vector_cache,&mut self.raster_cache,
+                        &mut self.compound_cache,ctx);
                 }
             }
             if self.show_safe_area {
@@ -801,6 +853,13 @@ mod tests {
         }
         trim_history(&mut history);
         assert!(history.len()<=50);
+    }
+    #[test]
+    fn no_text_selection_fails_without_history_change(){
+        let mut editor=Editor::default();
+        editor.select_object(Some(editor.doc.objects[0].id),false);
+        editor.text_to_curves();
+        assert!(editor.undo.is_empty());
     }
     #[test]
     fn grid_snapping_uses_millimetres(){

@@ -33,6 +33,13 @@ pub struct CubicSegment {
     pub control2: Point,
     pub end: Point,
 }
+/// A closed or open subpath; multiple contours form glyphs with counters/holes.
+#[derive(Clone,Debug,PartialEq,Serialize,Deserialize)]
+pub struct Contour {
+    pub start:Point,
+    pub segments:Vec<CubicSegment>,
+    pub closed:bool,
+}
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Layer {
     pub id: u64,
@@ -66,6 +73,8 @@ pub enum Shape {
     Text { x: f32, y: f32, value: String, size_mm: f32 },
     Polyline { points: Vec<Point>, closed: bool },
     Bezier { start: Point, segments: Vec<CubicSegment>, closed: bool },
+    /// Multiple editable cubic contours with even-odd filling (font glyph counters).
+    CompoundPath { contours:Vec<Contour> },
     // Imported vector artwork preserved as one repositionable/scalable object.
     // Its inner text/paths are NOT independently editable yet.
     EmbeddedSvg { x:f32,y:f32,w:f32,h:f32, svg:String, source_format:String },
@@ -87,6 +96,20 @@ impl Shape {
                 Bounds{x:*x,y:*y,w:*size_mm*widest as f32*0.6,
                     h:*size_mm*(1.0+(lines-1) as f32*1.2)}
             },
+            Self::CompoundPath{contours}=>{
+                let (mut x1,mut y1,mut x2,mut y2)=
+                    (f32::INFINITY,f32::INFINITY,f32::NEG_INFINITY,f32::NEG_INFINITY);
+                for contour in contours {
+                    for p in std::iter::once(&contour.start)
+                        .chain(contour.segments.iter().flat_map(|seg|
+                            [&seg.control1,&seg.control2,&seg.end])) {
+                        x1=x1.min(p.x);y1=y1.min(p.y);
+                        x2=x2.max(p.x);y2=y2.max(p.y);
+                    }
+                }
+                if contours.is_empty(){Bounds{x:0.0,y:0.0,w:0.0,h:0.0}}
+                else{Bounds{x:x1,y:y1,w:x2-x1,h:y2-y1}}
+            }
             Self::Bezier {start,segments,..} => {
                 let (mut x1,mut y1,mut x2,mut y2)=(start.x,start.y,start.x,start.y);
                 for seg in segments {
@@ -111,6 +134,16 @@ impl Shape {
             Self::Text {x,y,..} | Self::EmbeddedSvg {x,y,..} |
             Self::Raster {x,y,..} => {*x+=dx;*y+=dy;},
             Self::Polyline {points,..} => for p in points {p.x+=dx;p.y+=dy;},
+            Self::CompoundPath{contours}=>{
+                for contour in contours{
+                    contour.start.x+=dx;contour.start.y+=dy;
+                    for seg in &mut contour.segments{
+                        for p in [&mut seg.control1,&mut seg.control2,&mut seg.end]{
+                            p.x+=dx;p.y+=dy;
+                        }
+                    }
+                }
+            },
             Self::Bezier {start,segments,..} => {
                 start.x+=dx;start.y+=dy;
                 for seg in segments {
@@ -219,6 +252,10 @@ impl Document {
                 Shape::Text{value,..}=>value.len(),
                 Shape::Polyline{points,..}=>points.len()*std::mem::size_of::<Point>(),
                 Shape::Bezier{segments,..}=>segments.len()*std::mem::size_of::<CubicSegment>(),
+                Shape::CompoundPath{contours}=>contours.iter()
+                    .map(|c|std::mem::size_of::<Contour>()+
+                        c.segments.len()*std::mem::size_of::<CubicSegment>())
+                    .sum(),
                 Shape::EmbeddedSvg{svg,..}=>svg.len(),
                 Shape::Raster{data_base64,..}=>data_base64.len(),
                 _=>0,
@@ -359,6 +396,18 @@ impl Document {
                 return Err("Invalid shape geometry".into());
             }
             match &o.shape{
+                Shape::CompoundPath{contours}=>{
+                    if contours.is_empty() || contours.len()>10000 ||
+                        contours.iter().any(|c|c.segments.is_empty() ||
+                            !finite_point(c.start) ||
+                            c.segments.iter().any(|s|
+                                !finite_point(s.control1) ||
+                                !finite_point(s.control2) ||
+                                !finite_point(s.end))) ||
+                        contours.iter().map(|c|c.segments.len()).sum::<usize>()>60000 {
+                        return Err("Invalid compound vector path".into());
+                    }
+                }
                 Shape::Bezier{start,segments,..}=>{
                     if segments.is_empty() || segments.len()>10000 {
                         return Err("Invalid Bezier segment count".into());
@@ -469,6 +518,22 @@ impl Document {
                         body
                     }
                 },
+                Shape::CompoundPath{contours}=>{
+                    let mut d=String::new();
+                    for contour in contours{
+                        d.push_str(&format!("M {} {}",
+                            contour.start.x,contour.start.y));
+                        for seg in &contour.segments {
+                            d.push_str(&format!(" C {} {}, {} {}, {} {}",
+                                seg.control1.x,seg.control1.y,
+                                seg.control2.x,seg.control2.y,
+                                seg.end.x,seg.end.y));
+                        }
+                        if contour.closed{d.push_str(" Z");}
+                        d.push(' ');
+                    }
+                    format!("<path d=\"{d}\" fill-rule=\"evenodd\" {common}/>")
+                }
                 Shape::Bezier{start,segments,closed}=>{
                     let mut d=format!("M {} {}",start.x,start.y);
                     for seg in segments{
@@ -675,6 +740,28 @@ mod tests{
         let id=doc.add(Shape::Text{x:1.0,y:1.0,value:"Hello".into(),size_mm:5.0},Style::default());
         doc.get_mut(id).unwrap().text_format.family="\u{0000}".into();
         assert!(doc.validate().is_err());
+    }
+    #[test] fn compound_path_supports_holes_and_json_roundtrip(){
+        let make=|x:f32,y:f32,w:f32,h:f32|Contour{
+            start:Point{x,y},
+            segments:vec![
+                CubicSegment{control1:Point{x,y},control2:Point{x:x+w,y},end:Point{x:x+w,y}},
+                CubicSegment{control1:Point{x:x+w,y},control2:Point{x:x+w,y:y+h},end:Point{x:x+w,y:y+h}},
+                CubicSegment{control1:Point{x:x+w,y:y+h},control2:Point{x,y:y+h},end:Point{x,y:y+h}},
+                CubicSegment{control1:Point{x,y:y+h},control2:Point{x,y},end:Point{x,y}},
+            ],closed:true
+        };
+        let mut doc=Document::default();
+        doc.add(Shape::CompoundPath{contours:vec![
+            make(10.0,10.0,40.0,40.0),make(20.0,20.0,20.0,20.0)
+        ]},Style::default());
+        doc.validate().unwrap();
+        let svg=doc.to_svg();
+        assert!(svg.contains("fill-rule=\"evenodd\""));
+        assert!(svg.contains("M 20 20"));
+        let copied:Document=serde_json::from_str(&serde_json::to_string(&doc).unwrap()).unwrap();
+        assert_eq!(doc,copied);
+        assert_eq!(doc.objects[0].bounds().w,40.0);
     }
     #[test] fn document_roundtrip(){
         let mut a=Document::default();

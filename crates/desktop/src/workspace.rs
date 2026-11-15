@@ -93,6 +93,9 @@ impl Editor {
                     if ui.button("На передний план").clicked(){self.reorder_selection(true);ui.close_menu();}
                     if ui.button("На задний план").clicked(){self.reorder_selection(false);ui.close_menu();}
                     if ui.button("Дублировать").clicked(){self.duplicate_selection();ui.close_menu();}
+                    if ui.button("Преобразовать текст в кривые").clicked(){
+                        self.text_to_curves();ui.close_menu();
+                    }
                     ui.separator();
                     ui.label("Выравнивание объектов (Shift для выделения):");
                     for (label,mode) in [
@@ -267,6 +270,7 @@ impl Editor {
                     Shape::Ellipse{..}=>"◯  Эллипс".into(),
                     Shape::Text{value,..}=>format!("T  {}",value.chars().take(24).collect::<String>()),
                     Shape::Bezier{..}=>"⌁  Кривая Безье".into(),
+                    Shape::CompoundPath{contours}=>format!("✒  Контуры ({})",contours.len()),
                     Shape::Polyline{..}=>"⌁  Линия".into(),
                     Shape::EmbeddedSvg{source_format,..}=>format!("▧  Вектор {source_format}"),
                     Shape::Raster{pixel_width,pixel_height,..}=>format!("▧  Фото {pixel_width}×{pixel_height}"),
@@ -375,6 +379,91 @@ impl Editor {
             });
             return;
         }
+        if matches!(self.doc.objects[index].shape,Shape::Text{..}){
+            if ui.button("Преобразовать в кривые").on_hover_text(
+                "Создаёт настоящий составной контур, отверстия букв сохраняются. Ctrl+Z — отмена."
+            ).clicked(){
+                self.text_to_curves();
+                return;
+            }
+        }
+        // A long outlined headline can contain thousands of path segments.
+        // Clone only the visible inspector subset, never the full vector object
+        // on every GUI frame.
+        if let Shape::CompoundPath{contours}=&self.doc.objects[index].shape {
+            let total=contours.len();
+            let segments=contours.iter().map(|c|c.segments.len()).sum::<usize>();
+            let mut sample:Vec<opencorel_core::Contour>=contours.iter()
+                .take(24).map(|c|opencorel_core::Contour{
+                    start:c.start,closed:c.closed,
+                    segments:c.segments.iter().take(20).copied().collect()
+                }).collect();
+            let mut style=self.doc.objects[index].style.clone();
+            let allowed=self.doc.layer(self.doc.objects[index].layer_id)
+                .map(|layer|layer.visible&&!layer.locked).unwrap_or(false);
+            ui.heading(format!("Составной векторный объект #{id}"));
+            ui.label(format!("Контуров: {total}, сегментов: {segments}"));
+            ui.label("Отверстия букв сохраняются (even-odd).");
+            if !allowed {ui.colored_label(Color32::RED,"Слой заблокирован");}
+            let mut changed=false;
+            ui.add_enabled_ui(allowed,|ui|{
+                ui.collapsing("Изменить координаты контуров",|ui|{
+                    ui.label("Показаны первые 24 контура и до 20 сегментов каждого.");
+                    for (i,c) in sample.iter_mut().enumerate(){
+                        ui.collapsing(format!("Контур {}",i+1),|ui|{
+                            changed|=ui.add(egui::DragValue::new(&mut c.start.x)
+                                .prefix("Начало X: ")).changed();
+                            changed|=ui.add(egui::DragValue::new(&mut c.start.y)
+                                .prefix("Начало Y: ")).changed();
+                            for (j,segment) in c.segments.iter_mut().enumerate(){
+                                ui.collapsing(format!("Сегмент {}",j+1),|ui|{
+                                    for (name,p) in [
+                                        ("Рычаг 1",&mut segment.control1),
+                                        ("Рычаг 2",&mut segment.control2),
+                                        ("Узел",&mut segment.end)
+                                    ]{
+                                        ui.label(name);
+                                        changed|=ui.add(egui::DragValue::new(&mut p.x)
+                                            .prefix("X: ")).changed();
+                                        changed|=ui.add(egui::DragValue::new(&mut p.y)
+                                            .prefix("Y: ")).changed();
+                                    }
+                                });
+                            }
+                        });
+                    }
+                });
+                ui.separator();
+                ui.label("Заливка:");
+                changed|=ui.text_edit_singleline(&mut style.fill).changed();
+                ui.label("Обводка:");
+                changed|=ui.text_edit_singleline(&mut style.stroke).changed();
+                changed|=ui.add(egui::DragValue::new(&mut style.stroke_width_mm)
+                    .speed(0.1).range(0.0..=1000.0).prefix("Контур, мм: ")).changed();
+            });
+            if changed{
+                if valid_paint(&style.fill)&&valid_paint(&style.stroke){
+                    self.checkpoint();
+                    if let Shape::CompoundPath{contours}=&mut self.doc.objects[index].shape{
+                        for (original,edited) in contours.iter_mut().zip(sample.iter()){
+                            original.start=edited.start;
+                            for (dst,src) in original.segments.iter_mut()
+                                .zip(edited.segments.iter()) {*dst=*src;}
+                        }
+                    }
+                    self.doc.objects[index].style=style;
+                    self.compound_cache.clear();
+                }else {
+                    self.status="Цвет задаётся в виде #RRGGBB или none".into();
+                }
+            }
+            ui.separator();
+            ui.horizontal(|ui|{
+                if ui.button("Дублировать").clicked(){self.duplicate_selection();}
+                if ui.button("Удалить").clicked(){self.delete_selection();}
+            });
+            return;
+        }
         let mut object=self.doc.objects[index].clone();
         let editing_allowed=self.doc.layer(object.layer_id).map(|l|l.visible&&!l.locked).unwrap_or(false);
         ui.heading(format!("Объект #{id}"));
@@ -456,6 +545,35 @@ impl Editor {
                     ui.label(format!("Узлов: {}",points.len()));
                     changed|=ui.checkbox(closed,"Замкнуто").changed();
                 }
+                Shape::CompoundPath{contours}=>{
+                    let segment_count:usize=contours.iter().map(|c|c.segments.len()).sum();
+                    ui.label(format!("Составной контур: {} частей, {} кубических сегментов",
+                        contours.len(),segment_count));
+                    ui.label("Внутренние отверстия сохраняются по правилу even-odd.");
+                    ui.label("Координаты ограничены первыми 24 контурами для быстродействия.");
+                    for (i,contour) in contours.iter_mut().take(24).enumerate(){
+                        ui.collapsing(format!("Контур {}",i+1),|ui|{
+                            changed|=ui.add(egui::DragValue::new(&mut contour.start.x)
+                                .prefix("X: ")).changed();
+                            changed|=ui.add(egui::DragValue::new(&mut contour.start.y)
+                                .prefix("Y: ")).changed();
+                            for (j,seg) in contour.segments.iter_mut().take(20).enumerate(){
+                                ui.collapsing(format!("Сегмент {}",j+1),|ui|{
+                                    for (label,p) in [
+                                        ("Рычаг 1",&mut seg.control1),
+                                        ("Рычаг 2",&mut seg.control2),
+                                        ("Узел",&mut seg.end)]{
+                                        ui.label(label);
+                                        changed|=ui.add(egui::DragValue::new(&mut p.x)
+                                            .prefix("X: ")).changed();
+                                        changed|=ui.add(egui::DragValue::new(&mut p.y)
+                                            .prefix("Y: ")).changed();
+                                    }
+                                });
+                            }
+                        });
+                    }
+                }
                 Shape::Bezier{start,segments,closed}=>{
                     ui.label(format!("Сегментов: {}",segments.len()));
                     changed|=ui.checkbox(closed,"Замкнуто").changed();
@@ -536,6 +654,7 @@ impl Editor {
                     && object.text_format.validate().is_ok(){
                     self.checkpoint();
                     self.doc.objects[index]=object.clone();
+                    self.compound_cache.clear();
                 }else{
                     self.status="Цвет задаётся в виде #RRGGBB или none".into();
                 }

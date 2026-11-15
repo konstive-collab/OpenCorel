@@ -2,6 +2,7 @@ use opencorel_core::{Document,Shape,Style};
 use std::{env,process::ExitCode,time::Instant};
 use opencorel_core::Point;
 use opencorel_formats::{open_any,save_document};
+use opencorel_typography::TextOutliner;
 
 fn main()->ExitCode{
     let args:Vec<_>=env::args().collect();
@@ -34,6 +35,34 @@ fn main()->ExitCode{
             dpi.and_then(|dpi|open_any(src)
                 .and_then(|r|opencorel_export::raster_export::export_raster(&r.document,dst,dpi)))
         },
+        [_,op,src,dst] if op=="outline-text" => {
+            if src==dst {
+                Err("Use different input and output paths to preserve original editable text".into())
+            }else{
+                open_any(src).and_then(|r|{
+                    let mut doc=r.document;
+                    let mut outliner=TextOutliner::new();
+                    let mut replacements=Vec::new();
+                    for object in &doc.objects{
+                        if matches!(object.shape,Shape::Text{..}){
+                            let shape=outliner.convert_object(object)
+                                .map_err(|e|format!("Text #{}: {e}",object.id))?;
+                            replacements.push((object.id,shape));
+                        }
+                    }
+                    if replacements.is_empty(){
+                        return Err("Document contains no editable text to outline".into());
+                    }
+                    let count=replacements.len();
+                    for (id,shape) in replacements{
+                        if let Some(object)=doc.get_mut(id){object.shape=shape;}
+                    }
+                    save_document(&doc,dst)?;
+                    println!("Outlined {count} text object(s) to true vector curves; source unchanged.");
+                    Ok(())
+                })
+            }
+        },
         [_,op,src,dst] if op=="convert" => open_any(src).and_then(|r|{
             if !r.warning.is_empty(){eprintln!("NOTE: {}",r.warning);}
             save_document(&r.document,dst)
@@ -44,7 +73,7 @@ fn main()->ExitCode{
             .and_then(|r|save_document(&r.document,dst)),
         [_,op,src,dst] if op=="export-svg" => open_any(src)
             .and_then(|r|save_document(&r.document,dst)),
-        _=>{eprintln!("Usage:\n  opencorel-cli benchmark COUNT\n  opencorel-cli new FILE.kdr\n  opencorel-cli inspect FILE.kdr\n  opencorel-cli preflight FILE.kdr\n  opencorel-cli convert INPUT OUTPUT\n  opencorel-cli export-bitmap FILE.kdr FILE.png DPI\n  opencorel-cli export-svg FILE.kdr FILE.svg\n  opencorel-cli export-pdf FILE.kdr FILE.pdf\n  opencorel-cli import-svg FILE.svg FILE.kdr");
+        _=>{eprintln!("Usage:\n  opencorel-cli benchmark COUNT\n  opencorel-cli new FILE.kdr\n  opencorel-cli inspect FILE.kdr\n  opencorel-cli preflight FILE.kdr\n  opencorel-cli convert INPUT OUTPUT\n  opencorel-cli outline-text INPUT.kdr OUTPUT.kdr\n  opencorel-cli export-bitmap FILE.kdr FILE.png DPI\n  opencorel-cli export-svg FILE.kdr FILE.svg\n  opencorel-cli export-pdf FILE.kdr FILE.pdf\n  opencorel-cli import-svg FILE.svg FILE.kdr");
             return ExitCode::FAILURE;}
     };
     match outcome{
