@@ -261,14 +261,45 @@ impl Editor{
         self.transform_selection(|s,c|transform::flip_shape(s,c,horizontal),
             if horizontal{"Зеркало по горизонтали"}else{"Зеркало по вертикали"});
     }
-    fn transform_selection<F>(&mut self,mut transform_shape:F,label:&str)
+    pub(super) fn rotate_arbitrary(&mut self){
+        let degrees=self.rotation_degrees;
+        let pivot=self.transform_pivot();
+        self.transform_selection_at(|shape,center|transform::rotate_shape(shape,center,degrees),
+            "Поворот на произвольный угол",pivot);
+    }
+    pub(super) fn skew_arbitrary(&mut self){
+        let (x,y)=(self.skew_x_degrees,self.skew_y_degrees);
+        let pivot=self.transform_pivot();
+        self.transform_selection_at(|shape,center|transform::skew_shape(shape,center,x,y),
+            "Наклон",pivot);
+    }
+    fn transform_pivot(&self)->Option<Point>{
+        self.custom_pivot.then_some(Point{x:self.pivot_x,y:self.pivot_y})
+    }
+    fn transform_selection<F>(&mut self,transform_shape:F,label:&str)
+    where F:FnMut(&mut Shape,Point)->Result<(),String>{
+        self.transform_selection_at(transform_shape,label,None);
+    }
+    fn transform_selection_at<F>(&mut self,mut transform_shape:F,label:&str,
+        pivot_override:Option<Point>)
     where F:FnMut(&mut Shape,Point)->Result<(),String>{
         let ids:HashSet<u64>=self.selection_ids().into_iter().collect();
         if ids.is_empty(){self.status="Сначала выберите объект".into();return;}
         let editable:HashSet<u64>=self.doc.layers.iter()
             .filter(|l|l.visible&&!l.locked).map(|l|l.id).collect();
         let Some(bounds)=self.selection_bounds() else{return;};
-        let center=Point{x:bounds.x+bounds.w*0.5,y:bounds.y+bounds.h*0.5};
+        let center=pivot_override.unwrap_or(Point{
+            x:bounds.x+bounds.w*0.5,y:bounds.y+bounds.h*0.5
+        });
+        // Never deform part of a persistent group, even if selected IDs were
+        // populated through a non-GUI route such as an automated action.
+        if self.doc.objects.iter().any(|o|ids.contains(&o.id) &&
+            o.group_id.is_some_and(|group|
+                self.doc.objects.iter().any(|member|
+                    member.group_id==Some(group)&&!ids.contains(&member.id)))){
+            self.status="Выделена только часть группы. Выберите группу целиком".into();
+            return;
+        }
         let mut converted=Vec::new();
         for o in self.doc.objects.iter().filter(|o|ids.contains(&o.id)){
             if !editable.contains(&o.layer_id){
