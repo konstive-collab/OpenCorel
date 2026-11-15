@@ -1,5 +1,5 @@
 //! Restricted SVG importer: independent subset; explicitly rejects unsupported constructs.
-use crate::{CubicSegment,Document,Point,Shape,Style,TextFormat,TextAlign,valid_paint};
+use crate::{Contour,CubicSegment,Document,Point,Shape,Style,TextFormat,TextAlign,valid_paint};
 use roxmltree::{Node,ParsingOptions};
 use svgtypes::{PathParser,PathSegment,PointsParser};
 
@@ -269,7 +269,9 @@ pub fn parse_svg(xml:&str)->Result<Document,String>{
             || style_field(node,"display").is_some()
             || style_field(node,"visibility").is_some()
             || style_field(node,"stroke-dasharray").is_some()
-            || style_field(node,"fill-rule").is_some(){
+            || (style_field(node,"fill-rule").is_some() &&
+                !(node.tag_name().name()=="path" &&
+                  style_field(node,"fill-rule").as_deref()==Some("evenodd"))){
             return Err(format!("Unsupported SVG effect on <{}>",node.tag_name().name()));
         }
         let name=node.tag_name().name();
@@ -347,10 +349,24 @@ pub fn parse_svg(xml:&str)->Result<Document,String>{
                     value,size_mm:size*vb.sy});
             }
             "path"=>{
-                if styles.as_ref().map(|s|s.fill.as_str())!=Some("none"){
-                    return Err("Filled SVG paths require a geometry fill renderer (not implemented)".into());
-                }
                 shapes=parse_path(node.attribute("d").ok_or("SVG path d missing")?,vb)?;
+                let fill=styles.as_ref().map(|s|s.fill.as_str()).unwrap_or("none");
+                if fill!="none" {
+                    if shapes.iter().any(|s|!matches!(s,Shape::Bezier{closed:true,..})){
+                        return Err("Open filled SVG paths require an unsupported fill layout".into());
+                    }
+                    if shapes.len()>1 {
+                        if style_field(node,"fill-rule").as_deref()!=Some("evenodd"){
+                            return Err("Compound SVG path requires fill-rule=evenodd for safe editing".into());
+                        }
+                        let contours=shapes.into_iter().filter_map(|shape|match shape{
+                            Shape::Bezier{start,segments,closed}=>
+                                Some(Contour{start,segments,closed}),
+                            _=>None,
+                        }).collect();
+                        shapes=vec![Shape::CompoundPath{contours}];
+                    }
+                }
             }
             other=>return Err(format!("Unsupported SVG element: <{other}>")),
         }
@@ -367,6 +383,26 @@ pub fn parse_svg(xml:&str)->Result<Document,String>{
 #[cfg(test)]
 mod tests{
     use super::*;
+    #[test] fn compound_glyph_svg_roundtrip_preserves_holes(){
+        let mut doc=Document::default();
+        let contour=|x:f32,y:f32|Contour{
+            start:Point{x,y},
+            segments:vec![
+                CubicSegment{control1:Point{x,y},
+                    control2:Point{x:x+10.0,y},end:Point{x:x+10.0,y}},
+                CubicSegment{control1:Point{x:x+10.0,y},
+                    control2:Point{x:x+10.0,y:y+10.0},end:Point{x:x+10.0,y:y+10.0}},
+                CubicSegment{control1:Point{x:x+10.0,y:y+10.0},
+                    control2:Point{x,y:y+10.0},end:Point{x,y:y+10.0}},
+            ],closed:true
+        };
+        doc.add(Shape::CompoundPath{contours:vec![
+            contour(5.0,5.0),contour(8.0,8.0)]},Style::default());
+        let loaded=parse_svg(&doc.to_svg()).unwrap();
+        if let Shape::CompoundPath{contours}=&loaded.objects[0].shape{
+            assert_eq!(contours.len(),2);
+        }else{panic!("Expected editable compound path");}
+    }
     #[test] fn typography_svg_roundtrip_multiline(){
         let mut doc=Document::default();
         let id=doc.add(Shape::Text{x:30.0,y:40.0,value:"ПЛАКАТ\nСобытие".into(),
