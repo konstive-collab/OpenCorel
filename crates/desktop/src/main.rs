@@ -157,8 +157,27 @@ fn paint(p:&egui::Painter,obj:&Object,v:View,cache:&mut FillCache,
             p.add(egui::Shape::convex_polygon(vertices,fill,stroke));
         }
         Shape::Text{x,y,value,size_mm}=>{
-            p.text(v.screen(Point{x:*x,y:*y}),Align2::LEFT_TOP,value,
-                FontId::proportional((size_mm*v.scale).clamp(1.0,400.0)),fill);
+            let fmt=&obj.text_format;
+            let family=fmt.family.to_ascii_lowercase();
+            let monospaced=["mono","consolas","courier","menlo","code"]
+                .iter().any(|needle|family.contains(needle));
+            let font=if monospaced {
+                FontId::monospace((size_mm*v.scale).clamp(1.0,400.0))
+            }else{
+                FontId::proportional((size_mm*v.scale).clamp(1.0,400.0))
+            };
+            let max_width=fmt.line_width_mm(value,*size_mm);
+            for (i,line) in value.split('\n').take(1000).enumerate(){
+                let line_width=fmt.line_width_mm(line,*size_mm);
+                let x_offset=match fmt.alignment{
+                    opencorel_core::TextAlign::Left=>0.0,
+                    opencorel_core::TextAlign::Center=>(max_width-line_width)*0.5,
+                    opencorel_core::TextAlign::Right=>max_width-line_width,
+                };
+                p.text(v.screen(Point{x:*x+x_offset,
+                        y:*y+i as f32*fmt.line_height* *size_mm}),
+                    Align2::LEFT_TOP,line,font.clone(),fill);
+            }
         }
         Shape::Bezier{start,segments,closed}=>{
             let mut contour=vec![*start];
@@ -532,7 +551,7 @@ impl Editor{
             let page_painter=painter.with_clip_rect(v.rect.intersect(working));
             self.draw_grid_rulers(&painter,&page_painter,v,response.rect);
             for obj in self.doc.visible_objects(){
-                if v.bounds(obj.shape.bounds()).intersects(v.rect.intersect(response.rect)){
+                if v.bounds(obj.bounds()).intersects(v.rect.intersect(response.rect)){
                     paint(&page_painter,obj,v,&mut self.fill_cache,
                         &mut self.vector_cache,&mut self.raster_cache,ctx);
                 }
@@ -540,7 +559,7 @@ impl Editor{
             let selected:HashSet<u64>=self.selection_ids().into_iter().collect();
             for o in self.doc.objects.iter().filter(|o|selected.contains(&o.id)){
                 if self.doc.layer(o.layer_id).map(|l|l.visible).unwrap_or(false){
-                    outline(&page_painter,v.bounds(o.shape.bounds()).expand(3.0),Color32::BLUE,2.0);
+                    outline(&page_painter,v.bounds(o.bounds()).expand(3.0),Color32::BLUE,2.0);
                 }
             }
             if response.drag_started_by(egui::PointerButton::Primary){
