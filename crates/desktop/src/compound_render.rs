@@ -1,9 +1,9 @@
 //! Tessellate true closed compound paths with even-odd filling.
 //! Retains counters/holes of characters like O, B and Р.
 use crate::View;
-use eframe::egui::{self,Color32,Pos2};
+use eframe::egui::{self,Color32};
 use lyon_tessellation::{FillTessellator,FillOptions,math::{Point as LyonPoint,point},
-    geometry_builder::{simple_builder,VertexBuffers},path::traits::*};
+    geometry_builder::{BuffersBuilder,VertexBuffers}};
 use opencorel_core::{Contour,Point};
 use std::{collections::HashMap,hash::{Hash,Hasher},collections::hash_map::DefaultHasher};
 
@@ -36,7 +36,8 @@ fn tessellate(contours:&[Contour])->Result<Geometry,String>{
     let mut tess=FillTessellator::new();
     let options=FillOptions::default().with_tolerance(0.15);
     {
-        let mut geometry=simple_builder(&mut buffer);
+        let mut geometry=BuffersBuilder::new(&mut buffer,
+            |vertex:lyon_tessellation::FillVertex<'_>|vertex.position());
         let mut builder=tess.builder(&options,&mut geometry);
         for contour in contours{
             if contour.segments.is_empty(){continue;}
