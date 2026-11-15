@@ -108,7 +108,7 @@ fn outline_font(bytes:&[u8],index:u32,x:f32,y:f32,value:&str,size:f32,
                         return Err("Text outlines exceed geometry safety limits".into());
                     }
                 }
-            }else if glyph.glyph_id!=3 {
+            }else{
                 // Whitespace glyphs typically have no outlines; a malformed or
                 // color-only glyph may also yield none. Fail instead of dropping it.
                 let char_index=glyph.cluster as usize;
