@@ -993,6 +993,21 @@ impl Editor {
                 ui.label(RichText::new("Типографика").strong());
                 ui.label("Название шрифта (системного):");
                 changed|=ui.text_edit_singleline(&mut object.text_format.family).changed();
+                ui.collapsing("Выбрать из установленных шрифтов",|ui|{
+                    let fonts=self.text_outliner.font_families();
+                    if fonts.is_empty(){
+                        ui.label("Системные шрифты не обнаружены");
+                    }else{
+                        ui.label(format!("Доступно семейств: {}",fonts.len()));
+                        egui::ScrollArea::vertical().max_height(180.0).show(ui,|ui|{
+                            for family in fonts {
+                                changed|=ui.selectable_value(
+                                    &mut object.text_format.family,family.clone(),family
+                                ).changed();
+                            }
+                        });
+                    }
+                });
                 if ui.button("Шрифт по умолчанию").clicked(){
                     object.text_format.family="sans-serif".into();changed=true;
                 }
