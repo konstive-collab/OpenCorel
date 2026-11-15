@@ -30,31 +30,33 @@ pub fn editable(shape:&Shape)->bool{
     matches!(shape,Shape::Polyline{..}|Shape::Bezier{..}|Shape::CompoundPath{..})
 }
 /// Limit visible handles for huge outlined text paths.
+fn push_handle(nodes:&mut Vec<(NodeAddress,Point)>,limit:usize,
+    address:NodeAddress,point:Point){
+    if nodes.len()<limit{nodes.push((address,point));}
+}
 pub fn handles(shape:&Shape,limit:usize)->Vec<(NodeAddress,Point)>{
     let mut nodes=Vec::new();
     if limit==0{return nodes;}
-    let mut push=|a,p|{
-        if nodes.len()<limit{nodes.push((a,p));}
-    };
+
     match shape{
         Shape::Polyline{points,..}=>{
-            for (i,p) in points.iter().enumerate().take(limit){push(NodeAddress::Polyline(i),*p);}
+            for (i,p) in points.iter().enumerate().take(limit){push_handle(&mut nodes,limit,NodeAddress::Polyline(i),*p);}
         }
         Shape::Bezier{start,segments,..}=>{
-            push(NodeAddress::BezierStart,*start);
+            push_handle(&mut nodes,limit,NodeAddress::BezierStart,*start);
             for (i,s) in segments.iter().enumerate().take(limit){
-                push(NodeAddress::BezierEnd(i),s.end);
-                push(NodeAddress::BezierControl1(i),s.control1);
-                push(NodeAddress::BezierControl2(i),s.control2);
+                push_handle(&mut nodes,limit,NodeAddress::BezierEnd(i),s.end);
+                push_handle(&mut nodes,limit,NodeAddress::BezierControl1(i),s.control1);
+                push_handle(&mut nodes,limit,NodeAddress::BezierControl2(i),s.control2);
             }
         }
         Shape::CompoundPath{contours}=>{
             for (j,c) in contours.iter().enumerate(){
-                push(NodeAddress::CompoundStart(j),c.start);
+                push_handle(&mut nodes,limit,NodeAddress::CompoundStart(j),c.start);
                 for (i,s) in c.segments.iter().enumerate(){
-                    push(NodeAddress::CompoundEnd(j,i),s.end);
-                    push(NodeAddress::CompoundControl1(j,i),s.control1);
-                    push(NodeAddress::CompoundControl2(j,i),s.control2);
+                    push_handle(&mut nodes,limit,NodeAddress::CompoundEnd(j,i),s.end);
+                    push_handle(&mut nodes,limit,NodeAddress::CompoundControl1(j,i),s.control1);
+                    push_handle(&mut nodes,limit,NodeAddress::CompoundControl2(j,i),s.control2);
                     if nodes.len()>=limit{break;}
                 }
                 if nodes.len()>=limit{break;}
@@ -216,6 +218,15 @@ fn remove_cubic_anchor(segments:&mut Vec<CubicSegment>,i:usize)->Result<(),Strin
     }
     Ok(())
 }
+fn examine_cubic(address:SegmentAddress,start:Point,segment:&CubicSegment,
+    target:Point,best:&mut f32,hit:&mut Option<(SegmentAddress,f32)>){
+    for sample in 1..=24{
+        let t=sample as f32/25.0;
+        let q=cubic(start,segment,t);
+        let d=(target.x-q.x).powi(2)+(target.y-q.y).powi(2);
+        if d<*best{*best=d;*hit=Some((address,t));}
+    }
+}
 /// Return nearest path segment and parameter for double-click insertion.
 /// Segment search is deliberately capped for heavy compound glyph outlines.
 pub fn nearest_segment(shape:&Shape,p:Point,tolerance:f32)
@@ -223,16 +234,6 @@ pub fn nearest_segment(shape:&Shape,p:Point,tolerance:f32)
     let mut result=None;
     let mut best=tolerance*tolerance;
     let mut tested=0usize;
-    let mut examine=|address,start:Point,segment:&CubicSegment|{
-        if tested>=4000{return;}
-        tested+=1;
-        for sample in 1..=24{
-            let t=sample as f32/25.0;
-            let q=cubic(start,segment,t);
-            let d=(p.x-q.x).powi(2)+(p.y-q.y).powi(2);
-            if d<best{best=d;result=Some((address,t));}
-        }
-    };
     match shape{
         Shape::Polyline{points,closed}=>{
             if points.len()<2{return None;}
@@ -252,7 +253,8 @@ pub fn nearest_segment(shape:&Shape,p:Point,tolerance:f32)
         Shape::Bezier{start,segments,..}=>{
             let mut prev=*start;
             for (i,s) in segments.iter().enumerate(){
-                examine(SegmentAddress::Bezier(i),prev,s);
+                examine_cubic(SegmentAddress::Bezier(i),prev,s,p,&mut best,&mut result);
+                tested+=1;
                 prev=s.end;
                 if tested>=4000{break;}
             }
@@ -261,7 +263,8 @@ pub fn nearest_segment(shape:&Shape,p:Point,tolerance:f32)
             'outer:for (j,c) in contours.iter().enumerate(){
                 let mut prev=c.start;
                 for (i,s) in c.segments.iter().enumerate(){
-                    examine(SegmentAddress::Compound(j,i),prev,s);
+                    examine_cubic(SegmentAddress::Compound(j,i),prev,s,p,&mut best,&mut result);
+                    tested+=1;
                     prev=s.end;
                     if tested>=4000{break 'outer;}
                 }
