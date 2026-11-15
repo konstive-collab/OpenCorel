@@ -493,12 +493,22 @@ impl Document {
         positions.len()
     }
     pub fn hit_test(&self,p:Point,tolerance:f32) -> Option<u64> {
+        self.hit_test_with_bounds(p,tolerance,|object|object.bounds())
+    }
+
+    /// Allows a viewport to supply measured bounds (for example, font glyph
+    /// outlines) without changing persisted object geometry or bypassing
+    /// visibility, lock and clipping semantics.
+    pub fn hit_test_with_bounds<F>(&self,p:Point,tolerance:f32,bounds:F)->Option<u64>
+    where F:Fn(&Object)->Bounds {
+        if !p.x.is_finite() || !p.y.is_finite() ||
+            !tolerance.is_finite() || tolerance<0.0{return None;}
         let editable:HashSet<u64>=self.layers.iter()
             .filter(|layer|layer.visible&&!layer.locked).map(|layer|layer.id).collect();
         let sources:HashSet<u64>=self.clip_links.iter().map(|c|c.source_id).collect();
         self.objects.iter().rev().find(|o|{
             if !editable.contains(&o.layer_id) || sources.contains(&o.id)
-                || !o.bounds().contains(p,tolerance){return false;}
+                || !bounds(o).contains(p,tolerance){return false;}
             self.clip_links.iter().find(|link|link.target_id==o.id)
                 .is_none_or(|link|self.objects.iter().find(|src|src.id==link.source_id)
                     .is_some_and(|src|clip_contains_point(&src.shape,p)))
