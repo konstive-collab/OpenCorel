@@ -10,6 +10,14 @@
 - Invalid text-format feedback now reports typography validation errors rather than misleading color warnings.
 - Regression tests for sorted unique fonts, cached result stability and installed-family availability.
 
+## Next slice: non-destructive font-faithful canvas preview
+- The canvas now attempts to outline up to 600 characters using the same system-font shaping/outlining engine used by explicit text-to-curves.
+- Outline geometry is kept in a bounded 24-object cache; original text objects remain editable in .kdr.
+- Shaping or font failures safely fall back to the existing lightweight text preview, rather than destroying or replacing the editable object.
+- Cache entries are invalidated by changes to text geometry or typography metadata.
+- New tests cover cache keys, large text and empty-text fallback.
+- Known caveats: no rich text runs, interactive caret or guaranteed cross-platform visual parity; shape bounds and selection boxes still use approximate text metrics.
+
 ## Verification
 GitHub Actions Windows and Linux runs must complete against the latest PR head before merge. Early runs for the initial system-font picker passed, but do not imply later additions have passed.
 
