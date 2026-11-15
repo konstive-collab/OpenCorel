@@ -278,6 +278,9 @@ impl Document{
         copy.name=original.name.clone();
         // A copied object starts ungrouped. The UI remaps whole copied groups.
         copy.group_id=None;
+        if let Some(appearance)=self.appearances.get(&original.id).cloned(){
+            self.appearances.insert(id,appearance);
+        }
         id
     }
 }
