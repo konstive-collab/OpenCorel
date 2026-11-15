@@ -394,7 +394,7 @@ impl Editor{
         let editable=self.doc.layer(o.layer_id)
             .map(|l|l.visible&&!l.locked).unwrap_or(false);
         if !editable||!transform::resizable(&o.shape){return None;}
-        let b=o.bounds();
+        let b=self.text_preview.ink_bounds(o).unwrap_or_else(||o.bounds());
         if b.w<0.1||b.h<0.1{return None;}
         for corner in [ResizeCorner::TopLeft,ResizeCorner::TopRight,
             ResizeCorner::BottomLeft,ResizeCorner::BottomRight]{
@@ -851,14 +851,15 @@ impl Editor{
             let selected:HashSet<u64>=self.selection_ids().into_iter().collect();
             for o in self.doc.objects.iter().filter(|o|selected.contains(&o.id)){
                 if self.doc.layer(o.layer_id).map(|l|l.visible).unwrap_or(false){
-                    outline(&page_painter,v.bounds(o.bounds()).expand(3.0),
+                    let bounds=self.text_preview.ink_bounds(o).unwrap_or_else(||o.bounds());
+                    outline(&page_painter,v.bounds(bounds).expand(3.0),
                         Color32::from_rgb(22,175,148),1.5);
                     if self.tool==Tool::Select && self.multi_selected.is_empty() &&
                         transform::resizable(&o.shape) &&
-                        o.bounds().w>0.1 && o.bounds().h>0.1 {
+                        bounds.w>0.1 && bounds.h>0.1 {
                         for corner in [ResizeCorner::TopLeft,ResizeCorner::TopRight,
                             ResizeCorner::BottomLeft,ResizeCorner::BottomRight]{
-                            let p=v.screen(corner.point(o.bounds()));
+                            let p=v.screen(corner.point(bounds));
                             let handle=Rect::from_center_size(p,Vec2::splat(9.0));
                             page_painter.rect_filled(handle,1.0,Color32::WHITE);
                             outline(&page_painter,handle,
