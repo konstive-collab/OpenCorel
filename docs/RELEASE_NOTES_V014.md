@@ -116,6 +116,11 @@ Bézier/compound-path anchor with both incoming and outgoing cubic handles:
 - **Smooth:** align tangent directions, keeping their original lengths.
 - **Symmetric:** align tangent directions and equalize handle lengths.
 
+If both handles were previously collapsed by Corner, Smooth/Symmetric
+reconstruct a usable tangent from the neighboring anchors using one-third
+segment-length defaults. Completely coincident neighboring anchors are
+rejected, leaving the shape untouched.
+
 The operations are computed and bounds-validated before changing a shape.
 Invalid addresses, terminal nodes, locked/grouped objects and non-finite handle
 coordinates are rejected without mutating the document. No-op commands
