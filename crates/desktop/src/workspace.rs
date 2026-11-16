@@ -105,6 +105,9 @@ impl Editor {
                     if ui.button("Экспорт SVG...").clicked(){self.export_dialog("svg");ui.close_menu();}
                     if ui.button("Экспорт SVGZ...").clicked(){self.export_dialog("svgz");ui.close_menu();}
                     if ui.button("Экспорт PDF (RGB)...").clicked(){self.export_dialog("pdf");ui.close_menu();}
+                    if ui.button("Печатный SVG с вылетами и метками реза...").clicked(){
+                        self.export_print_sheet_dialog();ui.close_menu();
+                    }
                     ui.separator();
                     ui.horizontal(|ui|{
                         ui.label("DPI");
@@ -1531,6 +1534,19 @@ impl Editor {
                 .speed(0.5).range(0.0..=100.0));
         });
         ui.label("Оранжевая рамка — только экранная подсказка, в файл не выводится.");
+        ui.separator();
+        ui.heading("Печатный лист SVG");
+        ui.horizontal(|ui|{
+            ui.label("Вылет, мм");
+            ui.add(egui::DragValue::new(&mut self.print_bleed_mm)
+                .speed(0.25).range(0.0..=25.0));
+        });
+        ui.checkbox(&mut self.print_crop_marks,"Печатать метки реза");
+        if ui.button("Экспортировать печатный SVG...").clicked(){
+            self.export_print_sheet_dialog();
+        }
+        ui.small("Вылеты показывают только рисунок, уже выходящий за границы листа; края автоматически не растягиваются.");
+        ui.small("Отдельный файл RGB SVG, без PDF/X и CMYK. Исходный .kdr не меняется.");
         ui.separator();
         ui.heading("Предпечатная проверка");
         ui.horizontal(|ui|{
