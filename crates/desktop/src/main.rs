@@ -622,8 +622,13 @@ impl Editor{
         Some(id)
     }
     fn curve_click(&mut self,p:Point){
-        if !self.active_layer_editable(){
-            self.status="Слой скрыт или заблокирован".into();return;
+        // Once drawing starts, the curve belongs to its original layer even
+        // if the user changes the active layer from the layer panel.
+        let layer_id=self.curve_draft
+            .and_then(|id|self.doc.objects.iter().find(|o|o.id==id))
+            .map(|o|o.layer_id).unwrap_or(self.active_layer);
+        if !self.doc.layer(layer_id).is_some_and(|layer|layer.visible&&!layer.locked){
+            self.status="Слой кривой скрыт или заблокирован".into();return;
         }
         let Some(start)=self.curve_start else {
             self.curve_start=Some(p);
@@ -1273,6 +1278,27 @@ mod tests {
         editor.redo();
         assert_eq!(editor.doc.objects.len(),original.objects.len()+1);
         editor.doc.validate().unwrap();
+    }
+    #[test]
+    fn bezier_draft_respects_its_original_layer_lock(){
+        let mut editor=Editor::default();
+        editor.change_tool(Tool::Curve);
+        editor.curve_click(Point{x:10.0,y:20.0});
+        editor.curve_click(Point{x:20.0,y:30.0});
+        let id=editor.curve_draft.unwrap();
+        let before=editor.doc.objects.iter().find(|o|o.id==id).unwrap().shape.clone();
+        editor.doc.layers[0].locked=true;
+        editor.curve_click(Point{x:30.0,y:40.0});
+        assert_eq!(editor.doc.objects.iter().find(|o|o.id==id).unwrap().shape,before);
+        assert_eq!(editor.undo.len(),1);
+        editor.doc.layers[0].locked=false;
+        editor.active_layer=editor.doc.add_layer("Другой слой".into());
+        editor.curve_click(Point{x:30.0,y:40.0});
+        let obj=editor.doc.objects.iter().find(|o|o.id==id).unwrap();
+        assert_eq!(obj.layer_id,1);
+        let Shape::Bezier{segments,..}=&obj.shape else{panic!("Bezier required")};
+        assert_eq!(segments.len(),2);
+        assert_eq!(editor.undo.len(),1);
     }
     #[test]
     fn bezier_before_second_anchor_does_not_create_empty_shape(){
