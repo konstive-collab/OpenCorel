@@ -1061,6 +1061,26 @@ impl Editor{
                         let p=self.snapped(v.mm(pos));
                         match self.tool{
                             Tool::Nodes=>self.begin_node_drag(v,pos),
+                            Tool::Curve=>{
+                                let press=ctx.input(|i|i.pointer.press_origin())
+                                    .unwrap_or(pos);
+                                if v.rect.contains(press){
+                                    let anchor=self.snapped(v.mm(press));
+                                    self.curve_click(anchor);
+                                    let valid_draft=self.curve_draft
+                                        .and_then(|id|self.doc.objects.iter().find(|o|o.id==id))
+                                        .is_some_and(|o|match &o.shape{
+                                            Shape::Bezier{segments,..}=>segments.last()
+                                                .is_some_and(|segment|segment.end==anchor),
+                                            _=>false,
+                                        });
+                                    if valid_draft ||
+                                        (self.curve_draft.is_none()
+                                         && self.curve_start==Some(anchor)){
+                                        self.curve_drag_anchor=Some(anchor);
+                                    }
+                                }
+                            },
                             Tool::Select=>{
                                 if let Some((id,corner))=self.corner_at(v,pos){
                                     self.checkpoint();
@@ -1099,7 +1119,9 @@ impl Editor{
             if response.dragged_by(egui::PointerButton::Primary){
                 if let Some(pos)=response.interact_pointer_pos(){
                     let now=self.snapped(v.mm(pos));
-                    if self.node_drag.is_some(){
+                    if self.tool==Tool::Curve && self.curve_drag_anchor.is_some(){
+                        self.curve_drag_to(now);
+                    }else if self.node_drag.is_some(){
                         self.drag_node_to(now);
                     }else if let Some((id,corner))=self.resize_drag{
                         self.resize_from_corner(id,corner,now,
@@ -1139,6 +1161,12 @@ impl Editor{
                 }
             }
             if response.drag_stopped_by(egui::PointerButton::Primary){
+                if self.tool==Tool::Curve && self.curve_drag_anchor.is_some(){
+                    if let Some(pos)=response.interact_pointer_pos(){
+                        self.curve_drag_to(self.snapped(v.mm(pos)));
+                    }
+                }
+                self.curve_drag_anchor=None;
                 self.drag_start=None;self.creation_start=None;
                 self.resize_drag=None;self.node_drag=None;
             }
@@ -1158,8 +1186,7 @@ impl Editor{
                     }
                 }
                 if self.tool==Tool::Curve{
-                    self.curve_start=None;self.curve_draft=None;
-                    self.tool=Tool::Select;self.status="Кривая завершена".into();
+                    self.curve_finish(false);
                 }
             }
             if response.clicked() && !response.double_clicked(){
@@ -1177,7 +1204,21 @@ impl Editor{
                                 }
                                 return;
                             },
-                            Tool::Curve=>{self.curve_click(p);return;},
+                            Tool::Curve=>{
+                                let closing=self.curve_start.is_some_and(|start|{
+                                    let segments=self.curve_draft
+                                        .and_then(|id|self.doc.objects.iter().find(|o|o.id==id))
+                                        .and_then(|obj|match &obj.shape{
+                                            Shape::Bezier{segments,..}=>Some(segments.len()),
+                                            _=>None,
+                                        }).unwrap_or(0);
+                                    segments>=2 &&
+                                        (v.screen(start)-pos).length_sq()<=100.0
+                                });
+                                if closing{self.curve_finish(true);}
+                                else{self.curve_click(p);}
+                                return;
+                            },
                             Tool::Rect=>Shape::Rectangle{x:p.x,y:p.y,w:60.0,h:40.0},
                             Tool::Ellipse=>Shape::Ellipse{x:p.x,y:p.y,w:60.0,h:40.0},
                             Tool::Line=>Shape::Polyline{
