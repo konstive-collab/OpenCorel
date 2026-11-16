@@ -1102,6 +1102,21 @@ impl Editor{
             }
         }
     }
+    /// Preserve the document position under the pointer while wheel-zooming.
+    /// Avoids the page-center zoom jump that made precision drawing difficult.
+    fn zoom_canvas_at(&mut self,working:Rect,cursor:Pos2,scroll:f32){
+        if !scroll.is_finite()||scroll.abs()<0.01||!working.contains(cursor){
+            return;
+        }
+        let before=View::new(working,&self.doc,self.zoom,self.pan);
+        let anchor=before.mm(cursor);
+        let factor=(1.0+scroll*0.002).clamp(0.8,1.25);
+        let next_zoom=(self.zoom*factor).clamp(0.2,8.0);
+        if next_zoom==self.zoom{return;}
+        self.zoom=next_zoom;
+        let after=View::new(working,&self.doc,self.zoom,self.pan);
+        self.pan+=cursor-after.screen(anchor);
+    }
     fn canvas(&mut self,ctx:&egui::Context){
         egui::CentralPanel::default().show(ctx,|ui|{
             let response=ui.allocate_response(ui.available_size(),Sense::click_and_drag());
@@ -1109,18 +1124,18 @@ impl Editor{
             painter.rect_filled(response.rect,0.0,
                 if self.light_theme{Color32::from_rgb(222,227,234)}
                 else{Color32::from_rgb(15,19,26)});
-            if response.hovered(){
-                let scroll=ctx.input(|i|i.smooth_scroll_delta.y);
-                if scroll.abs()>0.01 {
-                    self.zoom=(self.zoom*(1.0+scroll*0.002).clamp(0.8,1.25)).clamp(0.2,8.0);
-                }
-            }
-            if response.dragged_by(egui::PointerButton::Middle){
-                self.pan+=ctx.input(|i|i.pointer.delta());
-            }
             let working=if self.show_rulers{
                 Rect::from_min_max(response.rect.min+Vec2::new(25.0,24.0),response.rect.max)
             }else{response.rect};
+            if response.dragged_by(egui::PointerButton::Middle){
+                self.pan+=ctx.input(|i|i.pointer.delta());
+            }
+            if response.hovered(){
+                let scroll=ctx.input(|i|i.smooth_scroll_delta.y);
+                if let Some(cursor)=response.hover_pos(){
+                    self.zoom_canvas_at(working,cursor,scroll);
+                }
+            }
             let v=View::new(working,&self.doc,self.zoom,self.pan);
             self.cursor_mm=response.hover_pos().map(|p|v.mm(p));
             painter.rect_filled(v.rect,0.0,Color32::WHITE);
@@ -1611,6 +1626,24 @@ impl eframe::App for Editor{
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn wheel_zoom_preserves_document_coordinate_under_mouse(){
+        let mut e=Editor::default();
+        e.doc=Document::default();
+        let canvas=Rect::from_min_size(Pos2::ZERO,Vec2::new(1200.,800.));
+        let cursor=Pos2::new(335.,249.);
+        let before=View::new(canvas,&e.doc,e.zoom,e.pan).mm(cursor);
+        e.zoom_canvas_at(canvas,cursor,180.0);
+        assert!(e.zoom>1.0);
+        let after=View::new(canvas,&e.doc,e.zoom,e.pan).mm(cursor);
+        assert!((before.x-after.x).abs()<0.0001);
+        assert!((before.y-after.y).abs()<0.0001);
+        let unchanged=(e.zoom,e.pan);
+        e.zoom_canvas_at(canvas,cursor,f32::NAN);
+        assert_eq!((e.zoom,e.pan),unchanged);
+        e.zoom_canvas_at(canvas,Pos2::new(-10.,-10.),120.0);
+        assert_eq!((e.zoom,e.pan),unchanged);
+    }
     #[test]
     fn guide_intersection_snaps_both_axes_and_grid_fills_unsnapped_axis(){
         let mut e=Editor::default();
