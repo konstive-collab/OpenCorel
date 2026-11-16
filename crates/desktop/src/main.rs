@@ -22,6 +22,7 @@ mod bezier_preview;
 mod bezier_pen;
 mod snap_targets;
 mod freehand_interaction;
+mod selection_interaction;
 mod guide_offset;
 use opencorel_core::guides::{Guide,GuideAxis};
 use compound_render::CompoundCache;
@@ -104,6 +105,8 @@ struct Editor{
     // Keep only last pointer position and object ID; never clone megabytes of
     // embedded artwork for every frame during drag.
     drag_start:Option<(Point,u64)>,
+    selection_drag_checkpointed:bool,
+    marquee_drag:Option<selection_interaction::MarqueeDrag>,
     creation_start:Option<(Point,u64)>,
     curve_start:Option<Point>,
     curve_outgoing:Option<Point>,
@@ -194,7 +197,9 @@ impl Default for Editor{
             Style{fill:"#FFFFFF".into(),stroke:"#FFFFFF".into(),stroke_width_mm:0.0});
         Self{doc,selected:None,multi_selected:Vec::new(),tool:Tool::Select,file:"project.kdr".into(),
             text:"Новый текст".into(),status:"Экспериментальный прототип".into(),
-            zoom:1.0,drag_start:None,creation_start:None,
+            zoom:1.0,drag_start:None,
+            selection_drag_checkpointed:false,marquee_drag:None,
+            creation_start:None,
             curve_start:None,curve_draft:None,curve_outgoing:None,curve_drag_anchor:None,
             curve_resumed:false,
             freehand_samples:Vec::new(),freehand_overflow:false,
@@ -640,6 +645,8 @@ impl Editor{
             self.guide_drag=None;
             self.guide_numeric_session=None;
             self.resize_drag=None;self.node_drag=None;self.active_node=None;
+            self.drag_start=None;self.selection_drag_checkpointed=false;
+            self.marquee_drag=None;
             self.node_drag_checkpointed=false;
             self.status="Отменено".into();
         }
@@ -660,6 +667,8 @@ impl Editor{
             self.guide_drag=None;
             self.guide_numeric_session=None;
             self.resize_drag=None;self.node_drag=None;self.active_node=None;
+            self.drag_start=None;self.selection_drag_checkpointed=false;
+            self.marquee_drag=None;
             self.node_drag_checkpointed=false;
             self.status="Повторено".into();
         }
@@ -921,6 +930,8 @@ impl Editor{
                 self.doc=result.document;
                 self.selected=None;self.multi_selected.clear();self.active_layer=1;
                 self.resize_drag=None;self.node_drag=None;self.active_node=None;
+            self.drag_start=None;self.selection_drag_checkpointed=false;
+            self.marquee_drag=None;
             self.node_drag_checkpointed=false;
                 self.fill_cache.entries.clear();self.vector_cache.clear();
                 self.compound_cache.clear();
@@ -1140,6 +1151,9 @@ impl Editor{
                         FontId::proportional(11.0),Color32::from_rgb(39,209,177));
                 }
             }
+            if self.tool==Tool::Select{
+                self.paint_marquee(&page_painter,v);
+            }
             if self.tool==Tool::Nodes{
                 self.paint_node_handles(&page_painter,v);
             }
@@ -1252,16 +1266,23 @@ impl Editor{
                                 }
                             },
                             Tool::Select=>{
-                                if let Some((id,corner))=self.corner_at(v,pos){
+                                if let Some((id,corner))=self.corner_at(v,press){
                                     self.checkpoint();
                                     self.resize_drag=Some((id,corner));
-                                }else if !ctx.input(|i|i.modifiers.shift){
-                                    let hit=self.hit_test_at(v.mm(pos),2.0);
+                                }else{
+                                    let additive=ctx.input(|i|i.modifiers.shift);
+                                    let hit=self.hit_test_at(v.mm(press),2.0);
                                     if let Some(id)=hit{
-                                        if !self.is_selected(id){self.select_object(Some(id),false);}
-                                        self.checkpoint();
-                                        self.drag_start=Some((p,id));
-                                    }else{self.select_object(None,false);}
+                                        if !additive{
+                                            if !self.is_selected(id){
+                                                self.select_object(Some(id),false);
+                                            }
+                                            self.begin_move_selection(id,
+                                                self.snapped(v.mm(press)));
+                                        }
+                                    }else{
+                                        self.begin_marquee(v.mm(press),additive);
+                                    }
                                 }
                             }
                             Tool::Rect|Tool::Ellipse|Tool::Line|Tool::Polygon=>{
@@ -1299,6 +1320,8 @@ impl Editor{
                     }else{self.snapped(v.mm(pos))};
                     if self.guide_drag.is_some(){
                         self.update_guide_drag(v.mm(pos));
+                    }else if self.marquee_drag.is_some(){
+                        self.update_marquee(v.mm(pos));
                     }else if self.tool==Tool::Freehand {
                         self.freehand_extend(v.mm(pos),v.scale);
                     }else if self.tool==Tool::Curve && self.curve_drag_anchor.is_some(){
@@ -1329,20 +1352,13 @@ impl Editor{
                                 _=>{}
                             }
                         }
-                    }else if let Some((previous,_id))=self.drag_start {
-                        let selected:HashSet<u64>=self.selection_ids().into_iter().collect();
-                        let editable:HashSet<u64>=self.doc.layers.iter()
-                            .filter(|l|l.visible&&!l.locked).map(|l|l.id).collect();
-                        for object in self.doc.objects.iter_mut(){
-                            if selected.contains(&object.id)&&editable.contains(&object.layer_id){
-                                object.shape.translate(now.x-previous.x,now.y-previous.y);
-                            }
-                        }
-                        self.drag_start=Some((now,_id));
+                    }else if self.drag_start.is_some(){
+                        self.move_selection_drag(now);
                     }
                 }
             }
             if response.drag_stopped_by(egui::PointerButton::Primary){
+                if self.marquee_drag.is_some(){self.finish_marquee();}
                 if let Some(drag)=self.guide_drag.take(){
                     self.commit_guide_drag(drag);
                 }else if self.tool==Tool::Freehand {
@@ -1357,6 +1373,7 @@ impl Editor{
                 }
                 self.curve_drag_anchor=None;
                 self.drag_start=None;self.creation_start=None;
+                self.selection_drag_checkpointed=false;self.marquee_drag=None;
                 self.resize_drag=None;self.node_drag=None;
                 self.node_drag_checkpointed=false;
             }
@@ -1503,6 +1520,8 @@ impl eframe::App for Editor{
             self.curve_start=None;self.curve_draft=None;self.curve_resumed=false;
             self.tool=Tool::Select;
             self.resize_drag=None;self.node_drag=None;self.active_node=None;
+            self.drag_start=None;self.selection_drag_checkpointed=false;
+            self.marquee_drag=None;
             self.node_drag_checkpointed=false;
             self.curve_outgoing=None;self.curve_drag_anchor=None;
             self.freehand_samples.clear();self.freehand_overflow=false;
