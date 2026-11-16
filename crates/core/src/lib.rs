@@ -9,6 +9,11 @@ pub mod kdr;
 pub mod preflight;
 pub mod transform;
 pub mod node_edit;
+pub mod path_topology;
+pub mod freehand;
+pub mod guides;
+pub mod offset;
+pub mod hit_testing;
 pub mod boolean_ops;
 pub mod appearance;
 use appearance::Appearance;
@@ -219,6 +224,10 @@ pub struct Object {
     /// Flat group membership. Zero/None means ungrouped; no nested groups.
     #[serde(default,skip_serializing_if="Option::is_none")]
     pub group_id:Option<u64>,
+    /// Persisted interior cubic node tangent modes. Absent in legacy KDR files.
+    /// Index remapping on node insertion/removal is handled by node_edit.
+    #[serde(default,skip_serializing_if="Vec::is_empty")]
+    pub node_modes:Vec<node_edit::NodeModeBinding>,
 }
 impl Object{
     pub fn bounds(&self)->Bounds{
@@ -250,12 +259,16 @@ pub struct Document {
     pub clip_links: Vec<ClipLink>,
     #[serde(default,skip_serializing_if="BTreeMap::is_empty")]
     pub appearances:BTreeMap<u64,Appearance>,
+    /// Nonprinting horizontal and vertical construction guides in mm.
+    /// Optional field keeps older .kdr documents compatible.
+    #[serde(default,skip_serializing_if="Vec::is_empty")]
+    pub guides:Vec<guides::Guide>,
 }
 impl Default for Document {
     fn default() -> Self {
         Self { schema_version:SCHEMA_VERSION, name:"Новый макет".into(),
             page:Page {width_mm:841.0,height_mm:594.0},objects:Vec::new(),next_id:1,
-            layers:default_layers(),next_layer_id:default_next_layer_id(),clip_links:Vec::new(),appearances:BTreeMap::new() }
+            layers:default_layers(),next_layer_id:default_next_layer_id(),clip_links:Vec::new(),appearances:BTreeMap::new(),guides:Vec::new() }
     }
 }
 
@@ -281,9 +294,11 @@ impl Document {
                 _=>0,
             };
             total=total.saturating_add(std::mem::size_of::<Object>()
-                +obj.style.fill.len()+obj.style.stroke.len()+obj.name.len()+shape_bytes);
+                +obj.style.fill.len()+obj.style.stroke.len()+obj.name.len()+shape_bytes
+                +obj.node_modes.len()*std::mem::size_of::<node_edit::NodeModeBinding>());
         }
-        total.saturating_add(self.clip_links.len()*std::mem::size_of::<ClipLink>())
+        total.saturating_add(self.guides.len()*std::mem::size_of::<guides::Guide>())
+            .saturating_add(self.clip_links.len()*std::mem::size_of::<ClipLink>())
             .saturating_add(self.appearances.iter().map(|(_,a)|
                 std::mem::size_of::<Appearance>()+
                 a.dash_array.len()*std::mem::size_of::<f32>()+
@@ -353,7 +368,8 @@ impl Document {
         let id=self.next_id;
         self.next_id+=1;
         self.objects.push(Object{id,shape,style,layer_id,
-            text_format:TextFormat::default(),name:String::new(),group_id:None});
+            text_format:TextFormat::default(),name:String::new(),group_id:None,
+            node_modes:Vec::new()});
         id
     }
     /// Create a flat, persistent group without changing the individual objects'
@@ -493,12 +509,32 @@ impl Document {
         positions.len()
     }
     pub fn hit_test(&self,p:Point,tolerance:f32) -> Option<u64> {
+        self.hit_test_with_bounds(p,tolerance,|object|object.bounds())
+    }
+
+    /// Allows a viewport to supply measured bounds (for example, font glyph
+    /// outlines) without changing persisted object geometry or bypassing
+    /// visibility, lock and clipping semantics.
+    pub fn hit_test_with_bounds<F>(&self,p:Point,tolerance:f32,bounds:F)->Option<u64>
+    where F:Fn(&Object)->Bounds {
+        self.hit_test_with_bounds_filtered(p,tolerance,bounds,|_,_,_|true)
+    }
+    /// Precise canvas picking while preserving visibility, lock, z-order,
+    /// and clipping rules of the generic document hit-test. The optional
+    /// shape predicate runs only after broad-phase bounds screening.
+    pub fn hit_test_with_bounds_filtered<F,G>(
+        &self,p:Point,tolerance:f32,bounds:F,shape_hit:G
+    )->Option<u64>
+    where F:Fn(&Object)->Bounds,G:Fn(&Object,Point,f32)->bool{
+        if !p.x.is_finite() || !p.y.is_finite() ||
+            !tolerance.is_finite() || tolerance<0.0{return None;}
         let editable:HashSet<u64>=self.layers.iter()
             .filter(|layer|layer.visible&&!layer.locked).map(|layer|layer.id).collect();
         let sources:HashSet<u64>=self.clip_links.iter().map(|c|c.source_id).collect();
         self.objects.iter().rev().find(|o|{
             if !editable.contains(&o.layer_id) || sources.contains(&o.id)
-                || !o.bounds().contains(p,tolerance){return false;}
+                || !bounds(o).contains(p,tolerance) ||
+                !shape_hit(o,p,tolerance){return false;}
             self.clip_links.iter().find(|link|link.target_id==o.id)
                 .is_none_or(|link|self.objects.iter().find(|src|src.id==link.source_id)
                     .is_some_and(|src|clip_contains_point(&src.shape,p)))
@@ -506,6 +542,7 @@ impl Document {
     }
     pub fn validate(&self)->Result<(),String>{
         if self.schema_version!=SCHEMA_VERSION {return Err("Unknown document schema".into());}
+        guides::validate(&self.guides)?;
         if ![self.page.width_mm,self.page.height_mm].iter().all(|v|v.is_finite() && (1.0..=100_000.0).contains(v)) {
             return Err("Invalid page dimensions".into());
         }
@@ -574,6 +611,7 @@ impl Document {
                 return Err("Invalid style".into());
             }
             o.text_format.validate()?;
+            node_edit::validate_modes(&o.shape,&o.node_modes)?;
             let b=o.bounds();
             if ![b.x,b.y,b.w,b.h].iter().all(|v|v.is_finite()) || b.w<0.0 || b.h<0.0 {
                 return Err("Invalid shape geometry".into());

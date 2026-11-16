@@ -6,15 +6,16 @@ use eframe::egui::{self,Align2,Color32,FontId,Pos2,Rect,Stroke,Vec2};
 
 pub(super) const COMPACT_WIDTH:f32=64.0;
 pub(super) const EXPANDED_WIDTH:f32=182.0;
-const PRIMARY:[Tool;4]=[Tool::Select,Tool::Nodes,Tool::Text,Tool::Curve];
+const PRIMARY:[Tool;5]=[Tool::Select,Tool::Nodes,Tool::Text,Tool::Curve,Tool::Freehand];
 const SHAPES:[Tool;4]=[Tool::Rect,Tool::Ellipse,Tool::Line,Tool::Polygon];
 
 #[derive(Clone,Copy)]
-enum Glyph{Select,Nodes,Text,Curve,Shapes,Image,Check,More,Help}
+enum Glyph{Select,Nodes,Text,Curve,Freehand,Shapes,Image,Check,More,Help}
 fn is_shape(tool:Tool)->bool{SHAPES.contains(&tool)}
 fn shortcut(tool:Tool)->&'static str{
     match tool{
         Tool::Select=>"V",Tool::Nodes=>"F10",Tool::Text=>"F8",Tool::Curve=>"B",
+        Tool::Freehand=>"H",
         Tool::Rect=>"F6",Tool::Ellipse=>"F7",Tool::Line=>"L",Tool::Polygon=>"P",
     }
 }
@@ -66,6 +67,14 @@ fn paint_icon(ui:&egui::Ui,rect:Rect,glyph:Glyph,expanded:bool,active:bool){
             p.circle_filled(at(-10.0,7.0),2.4,secondary);
             p.circle_filled(at(10.0,7.0),2.4,secondary);
         }
+        Glyph::Freehand=>{
+            let points=vec![
+                at(-11.0,5.0),at(-8.0,2.0),at(-5.0,-3.0),
+                at(-2.0,4.0),at(2.0,8.0),at(5.0,2.0),at(9.0,-7.0),
+            ];
+            p.add(egui::Shape::line(points,Stroke::new(2.0,tint)));
+            p.circle_filled(at(9.0,-7.0),2.8,secondary);
+        }
         Glyph::Shapes=>{
             for (a,b) in [
                 ((-10.0,-9.0),(1.0,-9.0)),((1.0,-9.0),(1.0,2.0)),
@@ -109,6 +118,7 @@ impl Editor{
         let glyph=match tool{
             Tool::Select=>Glyph::Select,Tool::Nodes=>Glyph::Nodes,
             Tool::Text=>Glyph::Text,Tool::Curve=>Glyph::Curve,
+            Tool::Freehand=>Glyph::Freehand,
             _=>Glyph::Shapes,
         };
         if is_active{
@@ -244,7 +254,7 @@ mod tests{
     use super::*;
     #[test]
     fn compact_rail_has_only_essential_top_level_tools(){
-        assert_eq!(PRIMARY.len(),4);
+        assert_eq!(PRIMARY.len(),5);
         assert_eq!(SHAPES.len(),4);
         assert!(!PRIMARY.contains(&Tool::Rect));
         assert!(!PRIMARY.contains(&Tool::Ellipse));

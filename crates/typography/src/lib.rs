@@ -9,7 +9,7 @@ const MAX_CONTOURS:usize=10_000;
 const MAX_SEGMENTS:usize=60_000;
 
 #[derive(Default)]
-pub struct TextOutliner { database:Option<Database> }
+pub struct TextOutliner { database:Option<Database>, cached_families:Option<Vec<String>> }
 impl TextOutliner {
     pub fn new()->Self{Self::default()}
     fn fonts(&mut self)->&Database{
@@ -18,6 +18,42 @@ impl TextOutliner {
             db.load_system_fonts();
             db
         })
+    }
+    /// Enumerate installed font families without exposing or copying font file bytes.
+    /// The database is loaded once per TextOutliner instance; callers may present
+    /// this list as an editable-font picker.
+    pub fn font_families(&mut self)->Vec<String>{
+        if let Some(families)=&self.cached_families {
+            return families.clone();
+        }
+        let mut families:Vec<String>=self.fonts().faces().flat_map(|face|
+            face.families.iter().map(|(name,_)|name.clone())
+        ).filter(|name|!name.trim().is_empty()).collect();
+        families.sort_by_key(|name|name.to_lowercase());
+        families.dedup_by(|a,b|a.eq_ignore_ascii_case(b));
+        self.cached_families=Some(families.clone());
+        families
+    }
+
+    /// Check whether the requested family is truly installed. Generic aliases
+    /// use fontdb fallback. Named faces are matched exactly, not silently
+    /// substituted with unrelated fonts.
+    pub fn font_available(&mut self,family:&str)->bool{
+        let family=family.trim();
+        if family.is_empty(){return false;}
+        let fallback=match family{
+            "sans-serif"=>Some(Family::SansSerif),
+            "serif"=>Some(Family::Serif),
+            "monospace"=>Some(Family::Monospace),
+            _=>None,
+        };
+        let db=self.fonts();
+        if let Some(alias)=fallback{
+            let families=[alias];
+            return db.query(&Query{families:&families,..Query::default()}).is_some();
+        }
+        db.faces().any(|face|face.families.iter().any(|(name,_)|
+            name.eq_ignore_ascii_case(family)))
     }
     pub fn convert_object(&mut self,object:&Object)->Result<Shape,String>{
         let Shape::Text{x,y,value,size_mm}=&object.shape else{
@@ -182,6 +218,18 @@ impl OutlineBuilder for Collector{
 mod tests{
     use super::*;
     use opencorel_core::{Document,Shape,Style};
+    #[test] fn installed_font_families_are_sorted_unique_and_nonempty(){
+        let mut outliner=TextOutliner::new();
+        let families=outliner.font_families();
+        assert_eq!(families,outliner.font_families());
+        assert!(!outliner.font_available("  "));
+        if let Some(name)=families.first(){
+            assert!(outliner.font_available(name));
+        }
+        assert!(families.iter().all(|name|!name.trim().is_empty()));
+        assert!(families.windows(2).all(|pair|
+            pair[0].to_lowercase()<pair[1].to_lowercase()));
+    }
     #[test] fn collector_creates_closed_curves_and_counters(){
         let mut b=Collector::new(10.0,20.0,0.1);
         b.move_to(0.0,0.0);

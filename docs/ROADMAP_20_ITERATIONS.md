@@ -1,5 +1,13 @@
 # OpenCorel — 20-iteration engineering plan (I01–I20)
 
+> **Priority update (16 November 2026):** The roadmap in this file is an
+> earlier proposed sequence. The active product priority is now
+> [CorelDRAW-workflow parity first](CORELDRAW_PARITY_FIRST.md). The phases in
+> that document supersede this feature order: complete and stabilize the
+> professional vector-editing workflows before adding proprietary OpenCorel
+> extensions. Previous version labels below are historical plans, not proof
+> of release readiness.
+
 **Baseline:** v0.8 Alpha, main commit `32f028b` (15 November 2026).
 **Goal:** an independent, reliable vector editor suitable for advertising, mapping, banners and graphics production, on Windows/Linux, with an honest and testable interchange path for CorelDRAW files. This plan is a *sequence of proposed deliveries*, not a claim that features are implemented or a guarantee of CDR fidelity.
 

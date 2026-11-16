@@ -1,6 +1,6 @@
 //! Corel-style, independently implemented workspace layout.
 //! Uses familiar panel positions and workflows but no proprietary assets.
-use super::{color, productivity, Editor, Tool};
+use super::{color, productivity, text_edit_ops, Editor, Tool};
 use eframe::egui::{self, Color32, RichText, Vec2};
 use opencorel_core::{Bounds, Shape, Alignment, Distribution, TextAlign, valid_paint};
 use std::collections::HashSet;
@@ -19,12 +19,24 @@ const SWATCHES: [&str; 27] = [
 impl Editor {
     pub(super) fn change_tool(&mut self, next: Tool) {
         self.tool=next;
-        if next!=Tool::Curve { self.curve_start=None; self.curve_draft=None; }
+        self.guide_drag=None;
+        if next!=Tool::Freehand{
+            self.freehand_samples.clear();self.freehand_overflow=false;
+        }
+        if next!=Tool::Curve {
+            self.curve_start=None;self.curve_draft=None;
+            self.curve_resumed=false;
+            self.curve_outgoing=None;self.curve_drag_anchor=None;
+        }
         self.drag_start=None;
+        self.selection_drag_checkpointed=false;
+        self.marquee_drag=None;
         self.creation_start=None;
         self.resize_drag=None;self.node_drag=None;
+        self.resize_drag_base=None;self.resize_drag_checkpointed=false;
+        self.node_drag_checkpointed=false;
         if next!=Tool::Nodes{self.active_node=None;}
-        if matches!(next,Tool::Text|Tool::Nodes){
+        if matches!(next,Tool::Text|Tool::Nodes|Tool::Freehand){
             self.inspector_tab=InspectorTab::Properties;
             self.show_inspector=true;
         }
@@ -34,18 +46,28 @@ impl Editor {
         self.checkpoint();
         self.doc=Default::default();
         self.active_node=None;self.node_drag=None;
+        self.node_drag_checkpointed=false;
         self.fill_cache.entries.clear();
         self.vector_cache.clear();
         self.raster_cache.clear();
         self.compound_cache.clear();
         self.selected=None;
         self.multi_selected.clear();
-        self.resize_drag=None;
+        self.resize_drag=None;self.resize_drag_base=None;
+        self.resize_drag_checkpointed=false;
+        self.drag_start=None;self.selection_drag_checkpointed=false;
+        self.marquee_drag=None;self.creation_start=None;
         self.active_layer=1;
         self.pan=Vec2::ZERO;
         self.zoom=1.0;
         self.curve_start=None;
         self.curve_draft=None;
+        self.curve_resumed=false;
+        self.curve_outgoing=None;
+        self.curve_drag_anchor=None;
+        self.freehand_samples.clear();self.freehand_overflow=false;
+        self.guide_drag=None;
+        self.guide_numeric_session=None;
         self.file="untitled.kdr".into();
         self.status="Создан новый документ. Выберите инструмент слева или нажмите F1 для помощи.".into();
     }
@@ -100,6 +122,16 @@ impl Editor {
                     if ui.button("Показать всю страницу  F4").clicked(){self.fit_page();ui.close_menu();}
                     ui.checkbox(&mut self.show_grid,"Сетка");
                     ui.checkbox(&mut self.snap_grid,"Привязка к сетке");
+                    ui.checkbox(&mut self.show_guides,"Показать направляющие");
+                    ui.checkbox(&mut self.snap_guides,"Привязка к направляющим");
+                    ui.checkbox(&mut self.snap_nodes,"Привязка к узлам объектов");
+                    if self.snap_nodes{
+                        ui.horizontal(|ui|{
+                            ui.label("Допуск, пикс.");
+                            ui.add(egui::DragValue::new(&mut self.snap_tolerance_px)
+                                .speed(0.2).range(2.0..=30.0));
+                        });
+                    }
                     ui.checkbox(&mut self.show_rulers,"Линейки");
                     ui.checkbox(&mut self.light_theme,"Светлая тема");
                 });
@@ -407,6 +439,7 @@ impl Editor {
                             Tool::Nodes=>"F10",
                             Tool::Text=>"F8",
                             Tool::Curve=>"B",
+                            Tool::Freehand=>"H",
                             Tool::Rect=>"F6",
                             Tool::Ellipse=>"F7",
                             Tool::Line=>"L",
@@ -585,6 +618,22 @@ impl Editor {
     }
 
     fn inspector_properties(&mut self,ui:&mut egui::Ui){
+        if self.tool==Tool::Freehand{
+            ui.heading("Свободное рисование");
+            ui.label("Удерживайте кнопку мыши и ведите линию. После отпускания появится редактируемая кривая Безье.");
+            ui.separator();
+            ui.label("Точность линии, пикс.");
+            ui.add(egui::Slider::new(&mut self.freehand_precision_px,0.5..=12.0)
+                .step_by(0.5).suffix(" px"));
+            ui.label("Плавность изгибов");
+            ui.add(egui::Slider::new(&mut self.freehand_smoothness,0.0..=1.0)
+                .step_by(0.05));
+            ui.checkbox(&mut self.freehand_closed,"Замкнутый контур");
+            ui.small("Для замкнутого контура плавность сохраняется и на стыке начала с концом. Заливку можно назначить после рисования.");
+            ui.small("Меньший допуск — больше узлов, лучше повторяет движение мыши. Больший допуск — проще контур.");
+            ui.small("Штрихи до 4096 отсчётов; одна линия = одна запись Ctrl+Z. Клавиша H — этот инструмент.");
+            return;
+        }
         // Context tools live here, not in the permanent left rail. A user
         // can always find the active text and node controls even with the
         // minimal panel collapsed to just icons.
@@ -596,9 +645,98 @@ impl Editor {
             ui.label("F8 — текст. Esc — выделение. Шрифт можно изменить после создания.");
             return;
         }
+        if matches!(self.tool,Tool::Nodes|Tool::Select) &&
+            self.selected.is_some() && self.multi_selected.is_empty(){
+            let can_offset=self.doc.objects.iter()
+                .find(|o|Some(o.id)==self.selected)
+                .is_some_and(|o|matches!(&o.shape,
+                    opencorel_core::Shape::Polyline{..}|
+                    opencorel_core::Shape::Bezier{..}|
+                    opencorel_core::Shape::Rectangle{..}|
+                    opencorel_core::Shape::Ellipse{..}));
+            if can_offset{
+                ui.heading("Параллельный контур");
+                ui.horizontal(|ui|{
+                    ui.label("Смещение");
+                    ui.add(egui::DragValue::new(&mut self.offset_distance_mm)
+                        .range(-1000.0..=1000.0).speed(0.2)
+                        .fixed_decimals(2).suffix(" мм"));
+                });
+                if ui.button("Создать смещённую копию")
+                    .on_hover_text("Создаёт новый редактируемый контур, исходный объект сохраняется")
+                    .clicked(){
+                    self.offset_selected_path();
+                }
+                ui.small("Знак задаёт сторону относительно направления контура. Безье/эллипс — приближённая ломаная; острые углы ограничиваются.");
+                ui.separator();
+            }
+        }
         if self.tool==Tool::Nodes{
             ui.heading("Редактирование узлов");
             ui.label("Клик по кривой — выбор. Двойной клик по сегменту — новый узел.");
+            if let Some(id)=self.selected{
+                if self.multi_selected.is_empty() && self.node_edit_allowed(id){
+                    let editable_kind=self.doc.objects.iter().find(|o|o.id==id)
+                        .map(|o|match &o.shape{
+                            opencorel_core::Shape::Polyline{..}=>1u8,
+                            opencorel_core::Shape::Bezier{..}=>2u8,
+                            _=>0u8,
+                        }).unwrap_or(0);
+                    if editable_kind!=0{
+                        ui.separator();
+                        ui.label("Упрощение и сглаживание");
+                        ui.horizontal(|ui|{
+                            ui.label("Допуск, мм");
+                            ui.add(egui::DragValue::new(&mut self.refit_tolerance_mm)
+                                .speed(0.1).range(0.0..=100.0).fixed_decimals(2));
+                        });
+                        ui.label("Плавность");
+                        ui.add(egui::Slider::new(&mut self.freehand_smoothness,0.0..=1.0)
+                            .step_by(0.05));
+                        let clicked=if editable_kind==1{
+                            ui.button("Ломаную → плавная кривая")
+                                .on_hover_text("Преобразовать прямые сегменты в редактируемую кривую (в том числе замкнутую)")
+                                .clicked()
+                        }else{
+                            ui.button("Упростить число узлов кривой")
+                                .on_hover_text("Повторная аппроксимация меняет геометрию и сбрасывает прежние типы узлов")
+                                .clicked()
+                        };
+                        if clicked{self.refit_selected_path(editable_kind==1);}
+                        ui.small("Повторная аппроксимация изменяет геометрию. Ctrl+Z восстанавливает исходные узлы и их типы.");
+                    }
+                }
+            }
+            if self.selection_ids().len()==2{
+                use opencorel_core::path_topology::JoinMode;
+                ui.separator();
+                ui.label("Соединить две выделенные кривые");
+                ui.small("V → Shift+щелчок по второй кривой → F10");
+                ui.horizontal(|ui|{
+                    ui.label("Допуск сшивки, мм");
+                    ui.add(egui::DragValue::new(&mut self.join_tolerance_mm)
+                        .speed(0.1).range(0.0..=1000.0).fixed_decimals(2));
+                });
+                ui.horizontal_wrapped(|ui|{
+                    if ui.button("Сшить концы")
+                        .on_hover_text("Совместить ближайшие конечные узлы с заданным допуском")
+                        .clicked(){
+                        self.join_selected_beziers(JoinMode::Snap{
+                            tolerance_mm:self.join_tolerance_mm});
+                    }
+                    if ui.button("Сшить плавно")
+                        .on_hover_text("Свести узлы, выровнять соседние касательные и сохранить гладкость")
+                        .clicked(){
+                        self.join_selected_beziers(JoinMode::SmoothSnap{
+                            tolerance_mm:self.join_tolerance_mm});
+                    }
+                    if ui.button("Соединить мостиком")
+                        .on_hover_text("Прямой сегмент между концами без смещения исходных точек")
+                        .clicked(){
+                        self.join_selected_beziers(JoinMode::Bridge);
+                    }
+                });
+            }
             if let Some((id,address))=self.active_node{
                 ui.label(format!("Узел: {address:?}"));
                 let location=self.doc.objects.iter().find(|o|o.id==id)
@@ -620,9 +758,89 @@ impl Editor {
                     if ui.button("Удалить выбранный узел  Del").clicked(){
                         self.remove_active_node();
                     }
+                    let can_split=self.doc.objects.iter().find(|o|o.id==id)
+                        .is_some_and(|o|matches!((&o.shape,address),
+                            (opencorel_core::Shape::Bezier{segments,closed:false,..},
+                             opencorel_core::node_edit::NodeAddress::BezierEnd(i))
+                                if i+1<segments.len()));
+                    if can_split && ui.button("Разрезать кривую в этом узле")
+                        .on_hover_text("Создаёт два отдельных открытых контура с общей конечной точкой")
+                        .clicked(){
+                        self.split_selected_bezier();
+                    }
+                    let has_pair=self.doc.objects.iter().find(|o|o.id==id)
+                        .is_some_and(|o|
+                            opencorel_core::node_edit::has_tangent_pair(&o.shape,address));
+                    if has_pair{
+                        use opencorel_core::node_edit::TangentOperation;
+                        ui.separator();
+                        let current=self.doc.objects.iter().find(|o|o.id==id)
+                            .and_then(|o|opencorel_core::node_edit::mode_at(
+                                &o.node_modes,address));
+                        let mode_text=match current{
+                            Some(TangentOperation::Corner)=>"Угловой — независимые рычаги",
+                            Some(TangentOperation::Smooth)=>"Гладкий — сохраняет направление",
+                            Some(TangentOperation::Symmetric)=>"Симметричный — равные рычаги",
+                            None=>"Свободный — рычаги независимы",
+                        };
+                        ui.label(format!("Режим узла: {mode_text}"));
+                        ui.horizontal_wrapped(|ui|{
+                            if ui.button("Угол")
+                                .on_hover_text("Сбросить оба рычага в узел").clicked(){
+                                self.apply_tangent_operation(TangentOperation::Corner);
+                            }
+                            if ui.button("Гладкий")
+                                .on_hover_text("Сделать касательные коллинеарными; длины сохранить")
+                                .clicked(){
+                                self.apply_tangent_operation(TangentOperation::Smooth);
+                            }
+                            if ui.button("Симметрия")
+                                .on_hover_text("Выровнять направления и длины обоих рычагов")
+                                .clicked(){
+                                self.apply_tangent_operation(TangentOperation::Symmetric);
+                            }
+                            if ui.button("Свободно")
+                                .on_hover_text("Отключить автоматическую связь рычагов без изменения формы")
+                                .clicked(){
+                                self.unlink_active_tangents();
+                            }
+                        });
+                        ui.small("Гладкий и Симметрия автоматически связывают рычаги при перетаскивании. Режим сохраняется в .kdr.");
+                    }
                 }
             }else{
                 ui.label("Выберите опорную точку для точного позиционирования.");
+            }
+            if self.selected.is_some_and(|id|self.node_edit_allowed(id)){
+                ui.separator();
+                ui.label("Операции с контуром");
+                let resumable=self.selected
+                    .and_then(|id|self.doc.objects.iter().find(|o|o.id==id))
+                    .is_some_and(|obj|matches!(&obj.shape,
+                        opencorel_core::Shape::Bezier{segments,closed:false,..}
+                            if !segments.is_empty() && segments.len()<10_000));
+                if resumable && ui.button("Продолжить кривую инструментом B")
+                    .on_hover_text("Добавить новые сегменты к существующей кривой без создания второго объекта")
+                    .clicked(){
+                    self.continue_selected_bezier();
+                }
+                ui.horizontal_wrapped(|ui|{
+                    if ui.button("Развернуть направление")
+                        .on_hover_text("Поменять начало и конец пути, сохранив форму и типы узлов")
+                        .clicked(){
+                        self.reverse_selected_path();
+                    }
+                    if ui.button("Замкнуть")
+                        .on_hover_text("Соединить начало и конец контура")
+                        .clicked(){
+                        self.set_selected_path_closed(true);
+                    }
+                    if ui.button("Разомкнуть")
+                        .on_hover_text("Убрать замыкающий сегмент")
+                        .clicked(){
+                        self.set_selected_path_closed(false);
+                    }
+                });
             }
             ui.small("F10 — узлы. Стрелки — сдвиг. Ctrl+Z — отмена.");
             ui.separator();
@@ -884,6 +1102,44 @@ impl Editor {
                 Shape::Text{x,y,value,size_mm}=>{
                     ui.label("Текст:");
                     changed|=ui.text_edit_multiline(value).changed();
+                    ui.horizontal(|ui|{
+                        if ui.small_button("АБВ → верхний регистр")
+                            .on_hover_text("Unicode-преобразование, включая кириллицу")
+                            .clicked(){
+                            let converted=value.to_uppercase();
+                            if *value!=converted{*value=converted;changed=true;}
+                        }
+                        if ui.small_button("абв → нижний регистр").clicked(){
+                            let converted=value.to_lowercase();
+                            if *value!=converted{*value=converted;changed=true;}
+                        }
+                    });
+                    ui.label(format!("Символов: {} · Строк: {}",
+                        value.chars().count(),value.lines().count().max(1)));
+                    ui.collapsing("Найти и заменить в надписи",|ui|{
+                        ui.add(egui::TextEdit::singleline(&mut self.text_find)
+                            .hint_text("Искать точное совпадение"));
+                        ui.add(egui::TextEdit::singleline(&mut self.text_replacement)
+                            .hint_text("Заменить на..."));
+                        let count=if self.text_find.is_empty(){0}else{
+                            value.matches(self.text_find.as_str()).count()
+                        };
+                        ui.label(format!("Совпадений: {count} · Поиск с учётом регистра"));
+                        if ui.add_enabled(count>0,egui::Button::new("Заменить все")).clicked(){
+                            match text_edit_ops::replace_all_literal(
+                                value,&self.text_find,&self.text_replacement){
+                                Ok((updated,replaced))=>{
+                                    if updated!=*value{
+                                        *value=updated;
+                                        changed=true;
+                                        self.status=format!(
+                                            "Заменено совпадений в тексте: {replaced}");
+                                    }
+                                },
+                                Err(reason)=>{self.status=format!("Замена отклонена: {reason}");}
+                            }
+                        }
+                    });
                     for (label,num) in [("X мм",x),("Y мм",y),("Размер мм",size_mm)]{
                         ui.horizontal(|ui|{
                             ui.label(label);
@@ -993,8 +1249,40 @@ impl Editor {
                 ui.label(RichText::new("Типографика").strong());
                 ui.label("Название шрифта (системного):");
                 changed|=ui.text_edit_singleline(&mut object.text_format.family).changed();
+                ui.collapsing("Выбрать из установленных шрифтов",|ui|{
+                    ui.add(egui::TextEdit::singleline(&mut self.font_search)
+                        .hint_text("Поиск по названию шрифта..."));
+                    let query=self.font_search.trim().to_lowercase();
+                    let fonts=self.text_outliner.font_families();
+                    let matches:Vec<_>=fonts.into_iter().filter(|name|
+                        name.to_lowercase().contains(&query)).collect();
+                    if matches.is_empty(){
+                        ui.label(if query.is_empty() {
+                            "Системные шрифты не обнаружены"
+                        } else {
+                            "По запросу шрифты не найдены"
+                        });
+                    }else{
+                        ui.label(format!("Найдено семейств: {}",matches.len()));
+                        egui::ScrollArea::vertical().max_height(180.0)
+                            .id_salt("font_family_list")
+                            .show_rows(ui,24.0,matches.len(),|ui,rows|{
+                                for index in rows{
+                                    let family=&matches[index];
+                                    changed|=ui.selectable_value(
+                                        &mut object.text_format.family,
+                                        family.clone(),family
+                                    ).changed();
+                                }
+                            });
+                    }
+                });
                 if ui.button("Шрифт по умолчанию").clicked(){
                     object.text_format.family="sans-serif".into();changed=true;
+                }
+                if !self.text_outliner.font_available(&object.text_format.family){
+                    ui.colored_label(Color32::from_rgb(231,156,69),
+                        "Шрифт не найден в системе: возможна подмена при экспорте. Выберите установленный шрифт.");
                 }
                 ui.horizontal(|ui|{
                     ui.label("Начертание:");
@@ -1053,7 +1341,13 @@ impl Editor {
                     self.doc.objects[index]=object.clone();
                     self.compound_cache.clear();
                 }else{
-                    self.status="Цвет задаётся в виде #RRGGBB или none".into();
+                    self.status=if !valid_paint(&object.style.fill) ||
+                        !valid_paint(&object.style.stroke) {
+                        "Цвет задаётся в виде #RRGGBB или none".into()
+                    }else{
+                        format!("Недопустимые параметры текста: {}",
+                            object.text_format.validate().unwrap_err())
+                    };
                 }
             }
             ui.separator();
@@ -1097,6 +1391,45 @@ impl Editor {
                 .speed(0.5).range(0.5..=1000.0));
         });
         ui.checkbox(&mut self.show_rulers,"Показать линейки");
+        ui.checkbox(&mut self.show_guides,"Показать направляющие");
+        ui.checkbox(&mut self.snap_guides,"Привязка к направляющим");
+        ui.small("Тяните из линеек для создания направляющих; Alt+перетаскивание — перемещение.");
+        ui.horizontal_wrapped(|ui|{
+            if ui.button("+ Вертикальная").clicked(){
+                self.add_guide(opencorel_core::guides::GuideAxis::Vertical,
+                    self.doc.page.width_mm/2.0);
+            }
+            if ui.button("+ Горизонтальная").clicked(){
+                self.add_guide(opencorel_core::guides::GuideAxis::Horizontal,
+                    self.doc.page.height_mm/2.0);
+            }
+            if ui.button("Удалить все").clicked(){self.clear_guides();}
+        });
+        ui.label(format!("Направляющих: {}",self.doc.guides.len()));
+        let mut guide_update=None;
+        let mut guide_remove=None;
+        let mut guide_edit_finished=false;
+        for (i,guide) in self.doc.guides.iter().enumerate(){
+            ui.horizontal(|ui|{
+                let axis=match guide.axis{
+                    opencorel_core::guides::GuideAxis::Horizontal=>"Г",
+                    opencorel_core::guides::GuideAxis::Vertical=>"В",
+                };
+                ui.label(format!("{axis} #{}",i+1));
+                let mut coordinate=guide.position_mm;
+                let response=ui.add(egui::DragValue::new(&mut coordinate)
+                    .speed(0.2).range(-100_000.0..=100_000.0)
+                    .fixed_decimals(2).suffix(" мм"));
+                if response.changed(){guide_update=Some((i,coordinate));}
+                if response.drag_stopped() || response.lost_focus(){
+                    guide_edit_finished=true;
+                }
+                if ui.small_button("×").clicked(){guide_remove=Some(i);}
+            });
+        }
+        if let Some(i)=guide_remove{self.remove_guide(i);}
+        else if let Some((i,p))=guide_update{self.edit_guide_numeric(i,p);}
+        if guide_edit_finished{self.guide_numeric_session=None;}
         ui.checkbox(&mut self.show_safe_area,"Показать безопасную область");
         ui.horizontal(|ui|{
             ui.label("Отступ от края, мм");
