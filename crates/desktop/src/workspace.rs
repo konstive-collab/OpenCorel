@@ -710,7 +710,7 @@ impl Editor {
             if self.selection_ids().len()==2{
                 use opencorel_core::path_topology::JoinMode;
                 ui.separator();
-                ui.label("Соединить две выделенные кривые");
+                ui.label("Соединить две открытые кривые или ломаные");
                 ui.small("V → Shift+щелчок по второй кривой → F10");
                 ui.horizontal(|ui|{
                     ui.label("Допуск сшивки, мм");
@@ -725,7 +725,7 @@ impl Editor {
                             tolerance_mm:self.join_tolerance_mm});
                     }
                     if ui.button("Сшить плавно")
-                        .on_hover_text("Свести узлы, выровнять соседние касательные и сохранить гладкость")
+                        .on_hover_text("Только для кривых Безье: выровнять касательные и сохранить гладкость")
                         .clicked(){
                         self.join_selected_beziers(JoinMode::SmoothSnap{
                             tolerance_mm:self.join_tolerance_mm});
@@ -759,11 +759,16 @@ impl Editor {
                         self.remove_active_node();
                     }
                     let can_split=self.doc.objects.iter().find(|o|o.id==id)
-                        .is_some_and(|o|matches!((&o.shape,address),
+                        .is_some_and(|o|match (&o.shape,address){
                             (opencorel_core::Shape::Bezier{segments,closed:false,..},
-                             opencorel_core::node_edit::NodeAddress::BezierEnd(i))
-                                if i+1<segments.len()));
-                    if can_split && ui.button("Разрезать кривую в этом узле")
+                             opencorel_core::node_edit::NodeAddress::BezierEnd(i))=>
+                                i+1<segments.len(),
+                            (opencorel_core::Shape::Polyline{points,closed:false},
+                             opencorel_core::node_edit::NodeAddress::Polyline(i))=>
+                                i>0 && i+1<points.len(),
+                            _=>false,
+                        });
+                    if can_split && ui.button("Разрезать контур в этом узле")
                         .on_hover_text("Создаёт два отдельных открытых контура с общей конечной точкой")
                         .clicked(){
                         self.split_selected_bezier();
