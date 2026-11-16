@@ -4,6 +4,7 @@
 //! handles. Those are not reliable anchors and would make drawing sticky.
 //! The scan is bounded to avoid an unbounded cost on imported outlines.
 use opencorel_core::{Document,Point,Shape};
+use std::cell::Cell;
 
 const MAX_VISITED_POINTS:usize=30_000;
 const MAX_OBJECTS:usize=8_000;
@@ -27,14 +28,14 @@ pub(super) fn nearest_anchor(
     let tol=tolerance_mm.min(500.0);
     let mut best_dist=tol as f64*tol as f64;
     let mut best=None;
-    let mut visited=0usize;
+    let visited=Cell::new(0usize);
     for obj in doc.objects.iter().take(MAX_OBJECTS){
-        if visited>=MAX_VISITED_POINTS{break;}
+        if visited.get()>=MAX_VISITED_POINTS{break;}
         if Some(obj.id)==excluded_id{continue;}
         if !doc.layer(obj.layer_id).is_some_and(|layer|layer.visible){continue;}
         let mut check=|candidate:Point|{
-            if visited>=MAX_VISITED_POINTS{return;}
-            visited+=1;
+            if visited.get()>=MAX_VISITED_POINTS{return;}
+            visited.set(visited.get()+1);
             if !valid(candidate){return;}
             let dx=candidate.x as f64-p.x as f64;
             let dy=candidate.y as f64-p.y as f64;
@@ -52,7 +53,7 @@ pub(super) fn nearest_anchor(
                 check(*start);
                 for seg in segments{
                     check(seg.end);
-                    if visited>=MAX_VISITED_POINTS{break;}
+                    if visited.get()>=MAX_VISITED_POINTS{break;}
                 }
             }
             Shape::CompoundPath{contours}=>{
@@ -60,15 +61,15 @@ pub(super) fn nearest_anchor(
                     check(contour.start);
                     for seg in &contour.segments{
                         check(seg.end);
-                        if visited>=MAX_VISITED_POINTS{break;}
+                        if visited.get()>=MAX_VISITED_POINTS{break;}
                     }
-                    if visited>=MAX_VISITED_POINTS{break;}
+                    if visited.get()>=MAX_VISITED_POINTS{break;}
                 }
             }
             Shape::Polyline{points,..}=>{
                 for point in points{
                     check(*point);
-                    if visited>=MAX_VISITED_POINTS{break;}
+                    if visited.get()>=MAX_VISITED_POINTS{break;}
                 }
             }
             Shape::Rectangle{x,y,w,h}=>{
