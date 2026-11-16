@@ -344,7 +344,7 @@ impl Editor{
     /// it in z-order. Copy appearance, style and the appropriate node modes.
     pub(super) fn split_selected_bezier(&mut self){
         let Some((id,address))=self.active_node else{
-            self.status="Выберите внутренний узел открытой кривой (F10)".into();
+            self.status="Выберите внутренний узел открытого контура (F10)".into();
             return;
         };
         if !self.node_edit_allowed(id){
@@ -361,15 +361,22 @@ impl Editor{
             return;
         }
         let Some(original)=self.doc.objects.iter().find(|o|o.id==id).cloned() else{return;};
-        let ((left,left_modes),(right,right_modes))=
-            match opencorel_core::path_topology::split_bezier(
-                &original.shape,&original.node_modes,address){
-                Ok(result)=>result,
-                Err(reason)=>{
-                    self.status=format!("Разрезание отклонено: {reason}");
-                    return;
-                }
-            };
+        let split=match &original.shape{
+            Shape::Polyline{..}=>
+                opencorel_core::path_topology::split_polyline(
+                    &original.shape,address).map(|(left,right)|{
+                    ((left,Vec::new()),(right,Vec::new()))
+                }),
+            _=>opencorel_core::path_topology::split_bezier(
+                &original.shape,&original.node_modes,address),
+        };
+        let ((left,left_modes),(right,right_modes))=match split{
+            Ok(result)=>result,
+            Err(reason)=>{
+                self.status=format!("Разрезание отклонено: {reason}");
+                return;
+            }
+        };
         self.checkpoint();
         if let Some(obj)=self.doc.get_mut(id){
             obj.shape=left;
