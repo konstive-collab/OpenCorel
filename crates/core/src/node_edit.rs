@@ -162,9 +162,11 @@ pub enum TangentOperation{
 /// Only interior anchors have an incoming and an outgoing cubic control.
 pub fn has_tangent_pair(shape:&Shape,address:NodeAddress)->bool{
     match (shape,address){
-        (Shape::Bezier{segments,..},NodeAddress::BezierEnd(i))=>i+1<segments.len(),
+        (Shape::Bezier{segments,..},NodeAddress::BezierEnd(i))=>
+            i.checked_add(1).is_some_and(|next|next<segments.len()),
         (Shape::CompoundPath{contours},NodeAddress::CompoundEnd(j,i))=>
-            contours.get(j).is_some_and(|c|i+1<c.segments.len()),
+            contours.get(j).is_some_and(|c|
+                i.checked_add(1).is_some_and(|next|next<c.segments.len())),
         _=>false,
     }
 }
@@ -499,7 +501,8 @@ mod tests{
     fn rejects_terminal_nodes_and_invalid_inputs_without_mutation(){
         let mut shape=two_cubics();
         for node in [NodeAddress::BezierStart,NodeAddress::BezierEnd(1),
-            NodeAddress::BezierEnd(100),NodeAddress::BezierControl1(1)] {
+            NodeAddress::BezierEnd(100),NodeAddress::BezierEnd(usize::MAX),
+            NodeAddress::BezierControl1(1)] {
             let old=shape.clone();
             assert!(set_tangent(&mut shape,node,TangentOperation::Smooth).is_err());
             assert_eq!(shape,old);
