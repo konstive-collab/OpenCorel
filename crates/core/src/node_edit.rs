@@ -1,8 +1,10 @@
 //! Structured, deterministic editing of polyline, cubic Bézier and compound path nodes.
 //! Coordinates in millimetres. All operations reject invalid indices and nonfinite coordinates.
 use crate::{CubicSegment,Point,Shape};
+use serde::{Deserialize,Serialize};
+use std::collections::HashSet;
 
-#[derive(Clone,Copy,Debug,PartialEq,Eq,Hash)]
+#[derive(Clone,Copy,Debug,PartialEq,Eq,Hash,Serialize,Deserialize)]
 pub enum NodeAddress{
     Polyline(usize),
     BezierStart,
@@ -149,7 +151,8 @@ pub fn move_node(shape:&mut Shape,address:NodeAddress,to:Point)->Result<(),Strin
 /// One-shot operations on the two handles adjacent to an *interior* cubic
 /// anchor. No persistent coupling is implied: individual handles remain freely
 /// editable afterward. These commands preserve the native document schema.
-#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+#[derive(Clone,Copy,Debug,PartialEq,Eq,Serialize,Deserialize)]
+#[serde(rename_all="snake_case")]
 pub enum TangentOperation{
     /// Set both handle points to their anchor (visible corner / cusp).
     Corner,
@@ -159,6 +162,123 @@ pub enum TangentOperation{
     Symmetric,
 }
 
+/// Persistent per-anchor mode. Missing metadata in older KDR means independent
+/// control handles, preserving legacy document behavior.
+#[derive(Clone,Copy,Debug,PartialEq,Eq,Serialize,Deserialize)]
+pub struct NodeModeBinding{
+    pub address:NodeAddress,
+    pub mode:TangentOperation,
+}
+pub fn mode_at(modes:&[NodeModeBinding],address:NodeAddress)->Option<TangentOperation>{
+    modes.iter().find(|entry|entry.address==address).map(|entry|entry.mode)
+}
+/// Changes or adds a mode without editing any geometry. Caller must first
+/// validate that address has a tangent pair.
+pub fn set_mode(modes:&mut Vec<NodeModeBinding>,address:NodeAddress,
+    mode:TangentOperation)->bool{
+    if let Some(existing)=modes.iter_mut().find(|entry|entry.address==address){
+        if existing.mode==mode{return false;}
+        existing.mode=mode;return true;
+    }
+    modes.push(NodeModeBinding{address,mode});
+    true
+}
+pub fn validate_modes(shape:&Shape,modes:&[NodeModeBinding])->Result<(),String>{
+    if modes.len()>60_000{return Err("Too many node tangent modes".into());}
+    let mut seen=HashSet::new();
+    for entry in modes{
+        if !has_tangent_pair(shape,entry.address)||!seen.insert(entry.address){
+            return Err("Invalid or duplicate node tangent mode".into());
+        }
+    }
+    Ok(())
+}
+/// After de Casteljau insertion all old end anchors from this segment
+/// forward move by one slot. The newly inserted anchor is independent.
+pub fn modes_after_insert(modes:&mut [NodeModeBinding],segment:SegmentAddress){
+    for entry in modes{
+        match (segment,&mut entry.address){
+            (SegmentAddress::Bezier(index),NodeAddress::BezierEnd(old))
+                if *old>=index=>*old+=1,
+            (SegmentAddress::Compound(contour,index),
+                NodeAddress::CompoundEnd(j,old))
+                if *j==contour && *old>=index=>*old+=1,
+            _=>{},
+        }
+    }
+}
+/// When deleting an end anchor, its node mode is removed; every later
+/// end anchor shifts one slot toward the beginning of the path.
+pub fn modes_after_remove(modes:&mut Vec<NodeModeBinding>,address:NodeAddress){
+    modes.retain(|entry|entry.address!=address);
+    for entry in modes{
+        match (address,&mut entry.address){
+            (NodeAddress::BezierStart,NodeAddress::BezierEnd(old))=>{
+                if *old>0{*old-=1;}
+            },
+            (NodeAddress::BezierEnd(index),NodeAddress::BezierEnd(old))
+                if *old>index=>*old-=1,
+            (NodeAddress::CompoundStart(contour),NodeAddress::CompoundEnd(j,old))
+                if *j==contour && *old>0=>*old-=1,
+            (NodeAddress::CompoundEnd(contour,index),NodeAddress::CompoundEnd(j,old))
+                if *j==contour && *old>index=>*old-=1,
+            _=>{},
+        }
+    }
+}
+/// Move a handle with persistent tangent coupling (if selected anchor mode
+/// requests it). No whole-shape clone is needed on each drag frame.
+pub fn move_node_with_modes(shape:&mut Shape,address:NodeAddress,
+    to:Point,modes:&[NodeModeBinding])->Result<(),String>{
+    if !valid(to){return Err("Handle coordinates outside valid bounds".into());}
+    let paired=match address{
+        NodeAddress::BezierControl1(i) if i>0=>
+            Some((NodeAddress::BezierEnd(i-1),NodeAddress::BezierControl2(i-1))),
+        NodeAddress::BezierControl2(i)=>
+            i.checked_add(1).map(|next|
+                (NodeAddress::BezierEnd(i),NodeAddress::BezierControl1(next))),
+        NodeAddress::CompoundControl1(j,i) if i>0=>
+            Some((NodeAddress::CompoundEnd(j,i-1),
+                NodeAddress::CompoundControl2(j,i-1))),
+        NodeAddress::CompoundControl2(j,i)=>
+            i.checked_add(1).map(|next|
+                (NodeAddress::CompoundEnd(j,i),
+                    NodeAddress::CompoundControl1(j,next))),
+        _=>None,
+    };
+    let other=paired.and_then(|(anchor,opposite)|{
+        let mode=mode_at(modes,anchor)?;
+        if mode==TangentOperation::Corner{return None;}
+        let centre=point_at(shape,anchor)?;
+        let old_opposite=point_at(shape,opposite)?;
+        let dx=to.x as f64-centre.x as f64;
+        let dy=to.y as f64-centre.y as f64;
+        let length=dx.hypot(dy);
+        let old_length=(centre.x as f64-old_opposite.x as f64)
+            .hypot(centre.y as f64-old_opposite.y as f64);
+        let other_length=if mode==TangentOperation::Symmetric{length}else{old_length};
+        let next=if length<1e-9{
+            centre
+        }else{
+            Point{
+                x:(centre.x as f64-dx/length*other_length) as f32,
+                y:(centre.y as f64-dy/length*other_length) as f32,
+            }
+        };
+        Some((opposite,next))
+    });
+    if let Some((_,other_target))=other{
+        if !valid(other_target){
+            return Err("Coupled tangent would exceed document bounds".into());
+        }
+    }
+    move_node(shape,address,to)?;
+    if let Some((opposite,target))=other{
+        // The opposite address was read and validated before the first edit.
+        move_node(shape,opposite,target)?;
+    }
+    Ok(())
+}
 /// Only interior anchors have an incoming and an outgoing cubic control.
 pub fn has_tangent_pair(shape:&Shape,address:NodeAddress)->bool{
     match (shape,address){
