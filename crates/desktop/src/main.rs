@@ -1045,10 +1045,19 @@ impl Editor{
                     let anchor=v.screen(last);
                     page_painter.circle_filled(anchor,3.0,
                         Color32::from_rgb(20,161,139));
+                    if let Some(handle)=self.curve_outgoing{
+                        page_painter.line_segment([anchor,v.screen(handle)],
+                            Stroke::new(1.0,Color32::from_rgb(137,123,218)));
+                        page_painter.circle_filled(v.screen(handle),3.5,
+                            Color32::from_rgb(137,123,218));
+                    }
                     if let Some(cursor)=response.hover_pos().filter(|p|v.rect.contains(*p)){
                         let next=self.snapped(v.mm(cursor));
-                        page_painter.line_segment([anchor,v.screen(next)],
-                            Stroke::new(1.2,Color32::from_rgb(20,161,139)));
+                        let vertices=bezier_pen::preview_segment(
+                            last,self.curve_outgoing,next)
+                            .into_iter().map(|point|v.screen(point)).collect();
+                        page_painter.add(egui::Shape::line(vertices,
+                            Stroke::new(1.2,Color32::from_rgb(20,161,139))));
                         page_painter.circle_stroke(v.screen(next),3.0,
                             Stroke::new(1.0,Color32::from_rgb(20,161,139)));
                     }
@@ -1303,6 +1312,10 @@ impl eframe::App for Editor{
         if self.inline_text.is_none() && !ctx.wants_keyboard_input() && ctx.input(|i|i.key_pressed(egui::Key::Delete)){
             if self.tool==Tool::Nodes {self.remove_active_node();}
             else{self.delete_selection();}
+        }
+        if self.inline_text.is_none() && !ctx.wants_keyboard_input() &&
+            self.tool==Tool::Curve && ctx.input(|i|i.key_pressed(egui::Key::Enter)){
+            self.curve_finish(false);
         }
         if self.inline_text.is_none() && ctx.input(|i|i.key_pressed(egui::Key::Escape)){
             self.curve_start=None;self.curve_draft=None;self.tool=Tool::Select;
