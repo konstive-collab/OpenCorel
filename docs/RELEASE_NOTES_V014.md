@@ -1,5 +1,22 @@
 # OpenCorel v0.14 Alpha — Typography iteration I06 (in progress)
 
+## Quality stabilization — regression and predictable editing
+
+- **Hidden-guide snap bug fixed:** turning guide visibility off also disables
+  invisible guide capture, even if guide snapping remains enabled.
+- **Correct numeric Undo:** continuous DragValue editing of one guide
+  coordinate records only one checkpoint. Validation/no-op input records none;
+  other commands and new editing sessions remain independent.
+- **Offset safety gate:** closed paths now reject oversized inward offsets
+  that flip local edge direction (e.g. a 10×10mm square inset by 6mm).
+  Unsafe reversed/collapsed edges, self-intersections and degenerate winding
+  are refused, with the original object untouched and no Undo checkpoint.
+  Self-intersections are not automatically repaired.
+- **Acceptance note:** successful compiler/CI checks are not evidence that
+  GUI ergonomics or CorelDRAW production workflows are mature. Manual
+  Windows acceptance of object manipulation, ruler drags and export fidelity
+  remains a release gate.
+
 ## Persistent guides and editable parallel contours
 
 - **Persistent nonprinting guides:** horizontal/vertical guide positions are
@@ -22,7 +39,8 @@
 - **Robust bounds:** 4096-point cap, degenerate/reversed segment checks,
   clamp for long miters on acute turns, finite ±100,000 mm coordinates,
   no unsupported clipped/grouped/locked edits. For curves, a finite sample
-  approximation is used. Self-intersections are not resolved automatically.
+  approximation is used. Invalid collapsed/reversed edges and intersecting
+  offset results are rejected rather than published silently.
 - **Tests:** guide persistence/legacy compatibility, intersection snapping,
   invalid values, create/move/delete + undo, ruler drag, signed offset of
   lines/L-shapes/squares/rectangles/cubic curves, rejected degenerate
