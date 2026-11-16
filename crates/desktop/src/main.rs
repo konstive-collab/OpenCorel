@@ -661,6 +661,12 @@ impl Editor{
                 segments.last().map(|seg|seg.end).unwrap_or(start),
             _=>start,
         };
+        if self.curve_resumed && p==previous {
+            // Pressing the saved last anchor can start a tangent drag without
+            // creating a degenerate zero-length segment in the existing path.
+            self.status="Последний узел выбран: потяните для касательной либо щёлкните дальше".into();
+            return;
+        }
         let seg=CubicSegment{
             control1:self.curve_outgoing.take().unwrap_or(Point{
                 x:previous.x+(p.x-previous.x)/3.0,
@@ -712,6 +718,13 @@ impl Editor{
             let Some(object)=self.doc.objects.iter().find(|o|o.id==id) else{return;};
             if !self.doc.layer(object.layer_id)
                 .is_some_and(|layer|layer.visible&&!layer.locked){return;}
+            let affects_existing=matches!(&object.shape,Shape::Bezier{segments,..}
+                if segments.last().is_some_and(|last|
+                    last.end==anchor && last.control2!=incoming));
+            if affects_existing && self.curve_resumed{
+                self.checkpoint();
+                self.curve_resumed=false;
+            }
             let Some(object)=self.doc.get_mut(id) else{return;};
             if let Shape::Bezier{segments,..}=&mut object.shape{
                 if let Some(last)=segments.last_mut(){
