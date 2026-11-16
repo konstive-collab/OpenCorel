@@ -1123,6 +1123,32 @@ impl Editor{
                     }
                 }
             }
+            // A small diamond marks the actual snapped anchor so mouse input
+            // has visible feedback at any zoom. Hidden layers are ignored.
+            if self.snap_nodes && matches!(self.tool,Tool::Curve|Tool::Nodes){
+                if let Some(cursor)=response.hover_pos().filter(|p|v.rect.contains(*p)){
+                    let excluded=if self.tool==Tool::Curve{
+                        self.curve_draft
+                    }else{
+                        self.selected
+                    };
+                    if let Some(hit)=snap_targets::nearest_anchor(
+                        &self.doc,v.mm(cursor),
+                        (self.snap_tolerance_px/v.scale.max(0.001)).min(500.0),
+                        excluded){
+                        let center=v.screen(hit.point);
+                        let diamond=vec![
+                            center+Vec2::new(0.,-6.),
+                            center+Vec2::new(6.,0.),
+                            center+Vec2::new(0.,6.),
+                            center+Vec2::new(-6.,0.),
+                            center+Vec2::new(0.,-6.),
+                        ];
+                        page_painter.add(egui::Shape::line(diamond,
+                            Stroke::new(1.8,Color32::from_rgb(219,133,46))));
+                    }
+                }
+            }
             // A draft is open: prevent clicks behind the popup from modifying
             // the document, while the canvas continues to render.
             if self.inline_text.is_some(){return;}
