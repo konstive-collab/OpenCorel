@@ -80,6 +80,34 @@ Bezier feature; this build is still a click-based curve tool.
 The product-level feature order now follows
 [CorelDRAW-workflow parity first](CORELDRAW_PARITY_FIRST.md).
 
+## Bezier mouse interaction — smooth handles and closed paths
+
+Building on the responsiveness work, the Bezier tool now supports:
+- **Click:** insert a cusp/corner anchor with straight fallback handles.
+- **Press and drag:** insert an anchor at the pointer press origin and shape
+  opposing symmetric incoming/outgoing cubic control handles with the drag.
+- **Live preview:** a 16-step temporary cubic preview respects the outgoing
+  handle rather than drawing a misleading straight rubber band; handle is
+  shown in a contrasting color.
+- **Close:** click the initial anchor after constructing at least two
+  segments to set the existing Bezier object's `closed` flag.
+- **Finish:** double-click or press Enter for an open curve.
+- **History and safety:** all anchors remain one undoable path; tangent
+  updates do not checkpoint each frame and respect locked/hidden layers;
+  switching tools, Escape and undo/redo discard stale in-progress handles.
+- **Regression tests:** symmetric geometry, invalid/nonfinite tangents,
+  Unicode-safe unrelated text functionality, drag-to-shape, cusp after a
+  smooth anchor, closure and layer-lock denial.
+
+Known limitations:
+- This is symmetric/smooth anchor creation, not a complete node-type
+  system: independent/asymmetric handles, tangent snapping and curve
+  continuation from previously saved paths still need dedicated work.
+- GUI drag/drop flow is not hardware-certified by Rust unit tests. It requires
+  explicit Windows acceptance after the newest workflow's CI finishes.
+- Double-click completion does not create an extra point at the second click.
+  Use Enter to finish with the current last anchor.
+
 ## Verification
 GitHub Actions Windows and Linux runs must complete against the latest PR head before merge. Early runs for the initial system-font picker passed, but do not imply later additions have passed.
 
