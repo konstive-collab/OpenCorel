@@ -242,7 +242,7 @@ impl Editor {
                                 ("По нижнему краю",Alignment::Bottom),
                             ]{
                                 if ui.button(title).clicked(){
-                                    self.align_selection(mode);ui.close_menu();
+                                    self.align_selection_precise(mode);ui.close_menu();
                                 }
                             }
                         });
@@ -250,11 +250,11 @@ impl Editor {
                         ui.label("Равные интервалы между центрами объектов");
                         ui.add_enabled_ui(count>=3,|ui|{
                             if ui.button("По горизонтали").clicked(){
-                                self.distribute_selection(Distribution::HorizontalCenters);
+                                self.distribute_selection_precise(Distribution::HorizontalCenters);
                                 ui.close_menu();
                             }
                             if ui.button("По вертикали").clicked(){
-                                self.distribute_selection(Distribution::VerticalCenters);
+                                self.distribute_selection_precise(Distribution::VerticalCenters);
                                 ui.close_menu();
                             }
                         });
