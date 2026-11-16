@@ -22,3 +22,6 @@ base64 = "0.22"
 
 lyon_tessellation = "1.0"
 opencorel-typography = { path = "../typography" }
+
+[dev-dependencies]
+serde_json = "1.0"
