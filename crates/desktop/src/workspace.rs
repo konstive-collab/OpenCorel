@@ -29,8 +29,11 @@ impl Editor {
             self.curve_outgoing=None;self.curve_drag_anchor=None;
         }
         self.drag_start=None;
+        self.selection_drag_checkpointed=false;
+        self.marquee_drag=None;
         self.creation_start=None;
         self.resize_drag=None;self.node_drag=None;
+        self.resize_drag_base=None;self.resize_drag_checkpointed=false;
         self.node_drag_checkpointed=false;
         if next!=Tool::Nodes{self.active_node=None;}
         if matches!(next,Tool::Text|Tool::Nodes|Tool::Freehand){
@@ -50,7 +53,10 @@ impl Editor {
         self.compound_cache.clear();
         self.selected=None;
         self.multi_selected.clear();
-        self.resize_drag=None;
+        self.resize_drag=None;self.resize_drag_base=None;
+        self.resize_drag_checkpointed=false;
+        self.drag_start=None;self.selection_drag_checkpointed=false;
+        self.marquee_drag=None;self.creation_start=None;
         self.active_layer=1;
         self.pan=Vec2::ZERO;
         self.zoom=1.0;
