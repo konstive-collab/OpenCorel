@@ -956,4 +956,53 @@ mod tests{
         editor.doc.objects.last_mut().unwrap().group_id=Some(9);
         assert!(!editor.node_edit_allowed(id));
     }
+    #[test]
+    fn joining_two_polylines_is_undoable_and_preserves_native_vertices(){
+        let mut editor=Editor::default();
+        let a=editor.doc.add(Shape::Polyline{
+            points:vec![Point{x:0.,y:0.},Point{x:10.,y:0.}],
+            closed:false,
+        },Style::default());
+        let b=editor.doc.add(Shape::Polyline{
+            points:vec![Point{x:20.,y:0.},Point{x:10.,y:0.}],
+            closed:false,
+        },Style::default());
+        let before=editor.doc.clone();
+        editor.selected=Some(a);
+        editor.multi_selected=vec![b];
+        editor.join_selected_beziers(
+            opencorel_core::path_topology::JoinMode::Snap{tolerance_mm:0.}
+        );
+        assert_eq!(editor.undo.len(),1);
+        assert!(editor.doc.objects.iter().all(|o|o.id!=b));
+        let Shape::Polyline{points,closed:false}=&editor.doc.objects.iter()
+            .find(|o|o.id==a).unwrap().shape else{panic!("Expected native polyline")};
+        assert_eq!(points,&vec![
+            Point{x:0.,y:0.},Point{x:10.,y:0.},Point{x:20.,y:0.}
+        ]);
+        editor.doc.validate().unwrap();
+        editor.undo();
+        assert_eq!(editor.doc,before);
+        editor.redo();
+        editor.doc.validate().unwrap();
+    }
+    #[test]
+    fn joining_polylines_with_different_styles_does_not_change_document(){
+        let mut editor=Editor::default();
+        let a=editor.doc.add(Shape::Polyline{
+            points:vec![Point{x:0.,y:0.},Point{x:10.,y:0.}],closed:false
+        },Style::default());
+        let mut style=Style::default();
+        style.stroke="#FF0000".into();
+        let b=editor.doc.add(Shape::Polyline{
+            points:vec![Point{x:10.,y:0.},Point{x:20.,y:0.}],closed:false
+        },style);
+        let before=editor.doc.clone();
+        editor.selected=Some(a);
+        editor.multi_selected=vec![b];
+        editor.join_selected_beziers(opencorel_core::path_topology::JoinMode::Bridge);
+        assert_eq!(editor.doc,before);
+        assert!(editor.undo.is_empty());
+    }
+
 }
