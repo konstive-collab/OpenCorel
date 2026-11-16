@@ -13,6 +13,7 @@ pub mod path_topology;
 pub mod freehand;
 pub mod guides;
 pub mod offset;
+pub mod hit_testing;
 pub mod boolean_ops;
 pub mod appearance;
 use appearance::Appearance;
@@ -516,6 +517,15 @@ impl Document {
     /// visibility, lock and clipping semantics.
     pub fn hit_test_with_bounds<F>(&self,p:Point,tolerance:f32,bounds:F)->Option<u64>
     where F:Fn(&Object)->Bounds {
+        self.hit_test_with_bounds_filtered(p,tolerance,bounds,|_,_,_|true)
+    }
+    /// Precise canvas picking while preserving visibility, lock, z-order,
+    /// and clipping rules of the generic document hit-test. The optional
+    /// shape predicate runs only after broad-phase bounds screening.
+    pub fn hit_test_with_bounds_filtered<F,G>(
+        &self,p:Point,tolerance:f32,bounds:F,shape_hit:G
+    )->Option<u64>
+    where F:Fn(&Object)->Bounds,G:Fn(&Object,Point,f32)->bool{
         if !p.x.is_finite() || !p.y.is_finite() ||
             !tolerance.is_finite() || tolerance<0.0{return None;}
         let editable:HashSet<u64>=self.layers.iter()
@@ -523,7 +533,8 @@ impl Document {
         let sources:HashSet<u64>=self.clip_links.iter().map(|c|c.source_id).collect();
         self.objects.iter().rev().find(|o|{
             if !editable.contains(&o.layer_id) || sources.contains(&o.id)
-                || !bounds(o).contains(p,tolerance){return false;}
+                || !bounds(o).contains(p,tolerance) ||
+                !shape_hit(o,p,tolerance){return false;}
             self.clip_links.iter().find(|link|link.target_id==o.id)
                 .is_none_or(|link|self.objects.iter().find(|src|src.id==link.source_id)
                     .is_some_and(|src|clip_contains_point(&src.shape,p)))
