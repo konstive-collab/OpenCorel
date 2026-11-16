@@ -10,6 +10,7 @@ pub mod preflight;
 pub mod transform;
 pub mod node_edit;
 pub mod path_topology;
+pub mod compound_ops;
 pub mod freehand;
 pub mod guides;
 pub mod offset;
