@@ -17,6 +17,9 @@
   corner and the Shift aspect ratio throughout a gesture. Candidate geometry
   is verified before the first checkpoint. Tapping a resize handle creates
   no history entry; actual edits remain undoable as one gesture.
+  After the first validated edit, the mouse loop resizes in-place instead of
+  cloning the entire object (including embedded images) each frame. Bézier
+  bounding-box calculation no longer clones its whole segment vector.
 - **Pixel-consistent geometric picking:** a new optional core filtered-hit
   API preserves document lock/visibility, clipping and stacking semantics.
   The canvas filters precise strokes of open cubic and polyline paths, true
