@@ -625,6 +625,31 @@ impl Editor {
                     if ui.button("Удалить выбранный узел  Del").clicked(){
                         self.remove_active_node();
                     }
+                    let has_pair=self.doc.objects.iter().find(|o|o.id==id)
+                        .is_some_and(|o|
+                            opencorel_core::node_edit::has_tangent_pair(&o.shape,address));
+                    if has_pair{
+                        use opencorel_core::node_edit::TangentOperation;
+                        ui.separator();
+                        ui.label("Управление касательными");
+                        ui.horizontal_wrapped(|ui|{
+                            if ui.button("Угол")
+                                .on_hover_text("Сбросить оба рычага в узел").clicked(){
+                                self.apply_tangent_operation(TangentOperation::Corner);
+                            }
+                            if ui.button("Гладкий")
+                                .on_hover_text("Сделать касательные коллинеарными; длины сохранить")
+                                .clicked(){
+                                self.apply_tangent_operation(TangentOperation::Smooth);
+                            }
+                            if ui.button("Симметрия")
+                                .on_hover_text("Выровнять направления и длины обоих рычагов")
+                                .clicked(){
+                                self.apply_tangent_operation(TangentOperation::Symmetric);
+                            }
+                        });
+                        ui.small("Команды разово изменяют геометрию; рычаги затем редактируются независимо.");
+                    }
                 }
             }else{
                 ui.label("Выберите опорную точку для точного позиционирования.");
