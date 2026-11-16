@@ -108,6 +108,32 @@ Known limitations:
 - Double-click completion does not create an extra point at the second click.
   Use Enter to finish with the current last anchor.
 
+## Professional node editor: tangent geometry and drag performance
+
+The node inspector now exposes three **one-shot** operations for an interior
+Bézier/compound-path anchor with both incoming and outgoing cubic handles:
+- **Corner:** collapse both handles onto the anchor.
+- **Smooth:** align tangent directions, keeping their original lengths.
+- **Symmetric:** align tangent directions and equalize handle lengths.
+
+The operations are computed and bounds-validated before changing a shape.
+Invalid addresses, terminal nodes, locked/grouped objects and non-finite handle
+coordinates are rejected without mutating the document. No-op commands
+do not add undo entries. Existing `.kdr` document schema is unchanged, but
+these are geometric commands, not persistent node-type settings: handle
+coupling after later drags is not yet implemented.
+
+Node drag history was also optimized: grabbing a node no longer deep-copies the
+whole document; the first valid movement records a checkpoint, and the rest of
+the continuous drag shares it. No-op/invalid positions create no history
+entries. Regression tests cover cubic and compound paths, different handle
+lengths, invalid/degenerate cases, serialization, undo/redo and lock behavior.
+
+Manual Windows checks: draw a three-anchor curve, press F10, select the middle
+anchor, use all three commands with Ctrl+Z between operations. Drag the
+control handles, and confirm Ctrl+Z after a continuous drag restores the
+original path in one step.
+
 ## Verification
 GitHub Actions Windows and Linux runs must complete against the latest PR head before merge. Early runs for the initial system-font picker passed, but do not imply later additions have passed.
 
