@@ -101,19 +101,37 @@ impl Editor{
         if !meaningful{return;}
         let clip_sources:HashSet<u64>=self.doc.clip_links
             .iter().map(|c|c.source_id).collect();
-        let mut matched:Vec<u64>=Vec::new();
-        let mut unique=HashSet::new();
+        // Two linear passes rather than group_members() inside each object
+        // (which was quadratic on documents with thousands of objects).
+        let editable=|o:&opencorel_core::Object|{
+            self.doc.layer(o.layer_id)
+                .is_some_and(|layer|layer.visible&&!layer.locked) &&
+            !clip_sources.contains(&o.id)
+        };
+        let mut direct=HashSet::new();
+        let mut groups=HashSet::new();
+        let mut blocked_groups=HashSet::new();
         for o in &self.doc.objects{
-            if !self.doc.layer(o.layer_id)
-                .is_some_and(|layer|layer.visible&&!layer.locked) ||
-                clip_sources.contains(&o.id){
+            if !editable(o){
+                if let Some(group)=o.group_id{blocked_groups.insert(group);}
                 continue;
             }
             let bounds=self.text_preview.ink_bounds(o)
                 .unwrap_or_else(||o.bounds());
-            if !drag.contains(bounds){continue;}
-            for id in self.doc.group_members(o.id){
-                if unique.insert(id){matched.push(id);}
+            if drag.contains(bounds){
+                direct.insert(o.id);
+                if let Some(group)=o.group_id{groups.insert(group);}
+            }
+        }
+        let mut matched:Vec<u64>=Vec::new();
+        for o in &self.doc.objects{
+            if !editable(o){continue;}
+            if let Some(group)=o.group_id{
+                if groups.contains(&group)&&!blocked_groups.contains(&group){
+                    matched.push(o.id);
+                }
+            }else if direct.contains(&o.id){
+                matched.push(o.id);
             }
         }
         let mut next=if drag.additive{
@@ -249,6 +267,63 @@ mod tests{
         e.update_marquee(p(15.,15.));
         e.finish_marquee();
         assert_eq!(e.selected,Some(id));
+    }
+    #[test]
+    fn resize_corner_is_lazy_and_preserves_original_aspect_ratio(){
+        let mut e=Editor::default();
+        e.doc=Document::default();
+        let id=e.doc.add(Shape::Rectangle{x:0.,y:0.,w:20.,h:10.},
+            Style::default());
+        e.selected=Some(id);
+        let original=e.doc.clone();
+        e.resize_drag=Some((id,super::super::ResizeCorner::BottomRight));
+        e.resize_drag_base=Some(e.doc.get_mut(id).unwrap().bounds());
+        e.resize_from_corner(id,super::super::ResizeCorner::BottomRight,p(20.,10.),false);
+        assert!(e.undo.is_empty(),"Clicking a resize handle is not an edit");
+        e.resize_from_corner(id,super::super::ResizeCorner::BottomRight,p(25.,12.5),true);
+        e.resize_from_corner(id,super::super::ResizeCorner::BottomRight,p(40.,20.),true);
+        assert_eq!(e.undo.len(),1,"Whole drag is one Undo operation");
+        let b=e.doc.get_mut(id).unwrap().bounds();
+        assert_eq!(b.x,0.);
+        assert_eq!(b.y,0.);
+        assert_eq!(b.w,40.);
+        assert_eq!(b.h,20.);
+        e.doc.validate().unwrap();
+        e.undo();
+        assert_eq!(e.doc,original);
+    }
+    #[test]
+    fn resize_drag_from_top_left_keeps_opposite_anchor_fixed(){
+        let mut e=Editor::default();
+        e.doc=Document::default();
+        let id=e.doc.add(Shape::Rectangle{x:10.,y:20.,w:30.,h:40.},
+            Style::default());
+        e.selected=Some(id);
+        let corner=super::super::ResizeCorner::TopLeft;
+        e.resize_drag=Some((id,corner));
+        e.resize_drag_base=Some(e.doc.get_mut(id).unwrap().bounds());
+        e.resize_from_corner(id,corner,p(0.,0.),false);
+        e.resize_from_corner(id,corner,p(15.,22.),false);
+        let b=e.doc.get_mut(id).unwrap().bounds();
+        assert_eq!((b.x,b.y,b.w,b.h),(15.,22.,25.,38.));
+        assert_eq!(e.undo.len(),1);
+    }
+    #[test]
+    fn group_marquee_skips_groups_partially_locked_on_other_layers(){
+        let mut e=Editor::default();
+        e.doc=Document::default();
+        let a=e.doc.add(Shape::Rectangle{x:5.,y:5.,w:5.,h:5.},Style::default());
+        let layer=e.doc.add_layer("Locked".into());
+        let b=e.doc.add_to_layer(Shape::Rectangle{x:30.,y:30.,w:5.,h:5.},
+            Style::default(),layer);
+        let _=e.doc.group_objects(&[a,b]);
+        e.doc.layers.iter_mut().find(|l|l.id==layer).unwrap().locked=true;
+        e.begin_marquee(p(0.,0.),false);
+        e.update_marquee(p(15.,15.));
+        e.finish_marquee();
+        assert!(e.selection_ids().is_empty(),
+            "Never select only half a group on an uneditable layer");
+        assert!(e.undo.is_empty());
     }
     #[test]
     fn marquee_predicate_ignores_malformed_or_empty_drag(){
