@@ -112,7 +112,8 @@ impl Editor{
             // Validate before cloning the full document. This prevents
             // no-op/illegal drags from polluting history.
             let mut tested=obj.shape.clone();
-            match node_edit::move_node(&mut tested,address,to){
+            match node_edit::move_node_with_modes(
+                &mut tested,address,to,&obj.node_modes){
                 Ok(())=>{
                     self.checkpoint();
                     self.node_drag_checkpointed=true;
@@ -125,7 +126,8 @@ impl Editor{
             }
         }else{
             let Some(obj)=self.doc.get_mut(id) else{return;};
-            if let Err(reason)=node_edit::move_node(&mut obj.shape,address,to){
+            if let Err(reason)=node_edit::move_node_with_modes(
+                &mut obj.shape,address,to,&obj.node_modes){
                 self.status=reason;
                 return;
             }
@@ -143,7 +145,8 @@ impl Editor{
         let to=Point{x:p.x+dx,y:p.y+dy};
         if !to.x.is_finite()||!to.y.is_finite(){return;}
         let mut updated=self.doc.objects.iter().find(|o|o.id==id).unwrap().shape.clone();
-        if node_edit::move_node(&mut updated,address,to).is_ok(){
+        if node_edit::move_node_with_modes(&mut updated,address,to,
+            &self.doc.objects.iter().find(|o|o.id==id).unwrap().node_modes).is_ok(){
             self.checkpoint();
             self.doc.get_mut(id).unwrap().shape=updated;
             self.compound_cache.clear();
@@ -165,7 +168,9 @@ impl Editor{
         match node_edit::insert_node(&mut updated,segment,t){
             Ok(address)=>{
                 self.checkpoint();
-                self.doc.get_mut(id).unwrap().shape=updated;
+                let obj=self.doc.get_mut(id).unwrap();
+                obj.shape=updated;
+                node_edit::modes_after_insert(&mut obj.node_modes,segment);
                 self.active_node=Some((id,address));
                 self.compound_cache.clear();self.fill_cache.entries.clear();
                 self.status="Узел добавлен без изменения формы кривой (Ctrl+Z — отмена)".into();
@@ -188,23 +193,26 @@ impl Editor{
         let Some(obj)=self.doc.objects.iter().find(|obj|obj.id==id) else{return;};
         let mut updated=obj.shape.clone();
         match node_edit::set_tangent(&mut updated,address,operation){
-            Ok(true)=>{
-                self.checkpoint();
-                if let Some(obj)=self.doc.get_mut(id){
-                    obj.shape=updated;
+            Ok(geometry_changed)=>{
+                let previous_mode=node_edit::mode_at(&obj.node_modes,address);
+                if geometry_changed || previous_mode!=Some(operation){
+                    self.checkpoint();
+                    if let Some(obj)=self.doc.get_mut(id){
+                        obj.shape=updated;
+                        node_edit::set_mode(&mut obj.node_modes,address,operation);
+                    }
+                    self.compound_cache.clear();
+                    self.bezier_preview.clear();
+                    self.fill_cache.entries.clear();
+                    let command=match operation{
+                        node_edit::TangentOperation::Corner=>"Угловой узел: независимые рычаги",
+                        node_edit::TangentOperation::Smooth=>"Касательные сохраняют гладкость",
+                        node_edit::TangentOperation::Symmetric=>"Касательные сохраняют симметрию",
+                    };
+                    self.status=format!("{command}. Режим сохранён в .kdr");
+                }else{
+                    self.status="Узел уже в этом режиме — изменений нет".into();
                 }
-                self.compound_cache.clear();
-                self.bezier_preview.clear();
-                self.fill_cache.entries.clear();
-                let command=match operation{
-                    node_edit::TangentOperation::Corner=>"Угловой узел: рычаги сброшены",
-                    node_edit::TangentOperation::Smooth=>"Касательные выровнены",
-                    node_edit::TangentOperation::Symmetric=>"Касательные симметричны",
-                };
-                self.status=format!("{command}. Ctrl+Z — отменить");
-            },
-            Ok(false)=>{
-                self.status="Геометрия касательных уже соответствует операции".into();
             },
             Err(reason)=>{
                 self.status=format!("Касательные не изменены: {reason}");
@@ -223,7 +231,9 @@ impl Editor{
         match node_edit::remove_node(&mut updated,address){
             Ok(())=>{
                 self.checkpoint();
-                self.doc.get_mut(id).unwrap().shape=updated;
+                let obj=self.doc.get_mut(id).unwrap();
+                obj.shape=updated;
+                node_edit::modes_after_remove(&mut obj.node_modes,address);
                 self.active_node=None;
                 self.compound_cache.clear();self.fill_cache.entries.clear();
                 self.status="Узел удалён. Ctrl+Z восстановит контур".into();
