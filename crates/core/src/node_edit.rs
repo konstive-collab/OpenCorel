@@ -175,16 +175,19 @@ pub fn set_tangent(shape:&mut Shape,address:NodeAddress,operation:TangentOperati
     if !has_tangent_pair(shape,address){
         return Err("Select an interior Bézier anchor with two adjacent handles".into());
     }
-    let (anchor,incoming,outgoing)=match (&*shape,address){
-        (Shape::Bezier{segments,..},NodeAddress::BezierEnd(i))=>
-            (segments[i].end,segments[i].control2,segments[i+1].control1),
+    let (anchor,incoming,outgoing,previous,next)=match (&*shape,address){
+        (Shape::Bezier{start,segments,..},NodeAddress::BezierEnd(i))=>
+            (segments[i].end,segments[i].control2,segments[i+1].control1,
+             if i==0{*start}else{segments[i-1].end},segments[i+1].end),
         (Shape::CompoundPath{contours},NodeAddress::CompoundEnd(j,i))=>{
-            let segments=&contours[j].segments;
-            (segments[i].end,segments[i].control2,segments[i+1].control1)
+            let contour=&contours[j];
+            let segments=&contour.segments;
+            (segments[i].end,segments[i].control2,segments[i+1].control1,
+             if i==0{contour.start}else{segments[i-1].end},segments[i+1].end)
         },
         _=>unreachable!(),
     };
-    if !valid(anchor)||!valid(incoming)||!valid(outgoing){
+    if ![anchor,incoming,outgoing,previous,next].into_iter().all(valid){
         return Err("Cannot adjust handles with invalid coordinates".into());
     }
     let (before,after)=if operation==TangentOperation::Corner{
@@ -202,11 +205,27 @@ pub fn set_tangent(shape:&mut Shape,address:NodeAddress,operation:TangentOperati
         if direction.0.hypot(direction.1)<1e-9{
             direction=if lo>=li{vout}else{vin};
         }
+        if direction.0.hypot(direction.1)<1e-9{
+            // Both handles were collapsed by Corner. Reconstruct a tangent
+            // along the neighboring anchors instead of trapping this node
+            // in an irreversible sharp-corner state.
+            direction=(next.x as f64-previous.x as f64,
+                       next.y as f64-previous.y as f64);
+        }
         let length=direction.0.hypot(direction.1);
         if length<1e-9{
-            return Err("Both tangent handles have zero length".into());
+            return Err("Neighboring anchors cannot define a tangent".into());
         }
         let unit=(direction.0/length,direction.1/length);
+        let incoming_span=(anchor.x as f64-previous.x as f64)
+            .hypot(anchor.y as f64-previous.y as f64)/3.0;
+        let outgoing_span=(next.x as f64-anchor.x as f64)
+            .hypot(next.y as f64-anchor.y as f64)/3.0;
+        let li=if li<1e-9{incoming_span}else{li};
+        let lo=if lo<1e-9{outgoing_span}else{lo};
+        if li<1e-9||lo<1e-9{
+            return Err("Adjacent anchors do not provide usable handles".into());
+        }
         let (len_in,len_out)=match operation{
             TangentOperation::Smooth=>(li,lo),
             TangentOperation::Symmetric=>((li+lo)*0.5,(li+lo)*0.5),
@@ -225,7 +244,10 @@ pub fn set_tangent(shape:&mut Shape,address:NodeAddress,operation:TangentOperati
     if !valid(before)||!valid(after){
         return Err("Adjusted handles would exceed the document bounds".into());
     }
-    if before==incoming && after==outgoing{return Ok(false);}
+    let unchanged=[(before.x,incoming.x),(before.y,incoming.y),
+        (after.x,outgoing.x),(after.y,outgoing.y)]
+        .into_iter().all(|(new,old)|(new-old).abs()<=1e-5);
+    if unchanged{return Ok(false);}
     match (shape,address){
         (Shape::Bezier{segments,..},NodeAddress::BezierEnd(i))=>{
             segments[i].control2=before;
