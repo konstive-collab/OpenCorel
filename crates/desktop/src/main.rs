@@ -9,6 +9,7 @@ use opencorel_core::transform;
 use opencorel_core::node_edit::{self,NodeAddress};
 mod node_interaction;
 mod boolean_commands;
+mod compound_commands;
 mod clip_commands;
 mod masked_canvas;
 mod appearance_commands;
