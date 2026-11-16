@@ -34,6 +34,26 @@ impl Editor{
         self.status=format!("Направляющая перемещена: {:.2} мм",value);
         true
     }
+    /// Called by a DragValue control many times while dragging or typing.
+    /// The first actual change checkpoints the whole document; subsequent
+    /// changes within the same gesture share that single Undo entry.
+    pub(super) fn edit_guide_numeric(&mut self,index:usize,value:f32)->bool{
+        let Some(old)=self.doc.guides.get(index) else{
+            self.guide_numeric_session=None;return false;
+        };
+        let guide=match Guide::new(old.axis,value){
+            Ok(g)=>g,
+            Err(reason)=>{self.status=reason;return false;}
+        };
+        if *old==guide{return false;}
+        if self.guide_numeric_session!=Some(index){
+            self.checkpoint();
+            self.guide_numeric_session=Some(index);
+        }
+        self.doc.guides[index]=guide;
+        self.status=format!("Направляющая: {:.2} мм (Ctrl+Z — отмена)",value);
+        true
+    }
     pub(super) fn remove_guide(&mut self,index:usize)->bool{
         if index>=self.doc.guides.len(){return false;}
         self.checkpoint();
@@ -226,6 +246,38 @@ mod tests{
         editor.undo();
         editor.undo();
         assert!(editor.doc.guides.is_empty());
+    }
+    #[test]
+    fn numeric_drag_uses_one_undo_checkpoint_for_many_changes(){
+        let mut e=Editor::default();
+        e.doc=Document::default();
+        e.add_guide(GuideAxis::Vertical,50.0);
+        e.undo.clear();e.redo.clear();
+        for v in [50.5,51.0,51.3,52.1,53.0]{
+            assert!(e.edit_guide_numeric(0,v));
+        }
+        assert_eq!(e.undo.len(),1);
+        assert_eq!(e.doc.guides[0].position_mm,53.0);
+        e.guide_numeric_session=None;
+        assert!(e.edit_guide_numeric(0,54.0));
+        assert_eq!(e.undo.len(),2);
+        e.undo();
+        assert_eq!(e.doc.guides[0].position_mm,53.0);
+        e.undo();
+        assert_eq!(e.doc.guides[0].position_mm,50.0);
+        e.doc.validate().unwrap();
+    }
+    #[test]
+    fn invalid_numeric_guide_edits_do_not_consume_history(){
+        let mut e=Editor::default();
+        e.doc=Document::default();
+        e.add_guide(GuideAxis::Horizontal,50.0);
+        e.undo.clear();
+        assert!(!e.edit_guide_numeric(0,f32::NAN));
+        assert!(!e.edit_guide_numeric(10,65.0));
+        assert!(!e.edit_guide_numeric(0,50.0));
+        assert!(e.undo.is_empty());
+        assert_eq!(e.doc.guides[0].position_mm,50.0);
     }
     #[test]
     fn ruler_drag_creates_guide_with_one_checkpoint(){
