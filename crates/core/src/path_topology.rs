@@ -153,7 +153,7 @@ pub fn split_bezier(
     let NodeAddress::BezierEnd(i)=cut else{
         return Err("Select an interior Bézier anchor to split the path".into());
     };
-    if i+1>=segments.len(){
+    if i>=segments.len()-1{
         return Err("Cannot split a path at its terminal node".into());
     }
     if segments.iter().any(|s|!valid(s.control1)||!valid(s.control2)||!valid(s.end))
@@ -302,5 +302,6 @@ mod tests{
         assert!(split_bezier(&a,&[],NodeAddress::BezierEnd(0)).is_err());
         if let Shape::Bezier{closed,..}=&mut a{*closed=false;}
         assert!(split_bezier(&a,&[],NodeAddress::BezierEnd(1)).is_err());
+        assert!(split_bezier(&a,&[],NodeAddress::BezierEnd(usize::MAX)).is_err());
     }
 }
