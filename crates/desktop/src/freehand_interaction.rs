@@ -244,22 +244,27 @@ mod tests{
         assert_eq!(e.doc,old);
     }
     #[test]
-    fn refit_declines_closed_and_locked_without_undo(){
+    fn closed_polyline_refit_works_but_locked_shape_is_unchanged(){
         let mut e=Editor::default();
         e.doc=Default::default();
         let id=e.doc.add(Shape::Polyline{
-            points:vec![Point{x:0.,y:0.},Point{x:1.,y:5.},
-                Point{x:2.,y:0.}],closed:true},Style::default());
+            points:vec![Point{x:0.,y:0.},Point{x:10.,y:0.},
+                Point{x:10.,y:10.},Point{x:0.,y:10.}],
+            closed:true},Style::default());
         e.selected=Some(id);e.tool=Tool::Nodes;
         let old=e.doc.clone();
         e.refit_selected_path(true);
-        assert_eq!(e.doc,old);assert!(e.undo.is_empty());
-        if let Shape::Polyline{closed,..}=&mut e.doc.get_mut(id).unwrap().shape{
-            *closed=false;
-        }
+        assert_eq!(e.undo.len(),1);
+        assert!(matches!(e.doc.get_mut(id).unwrap().shape,
+            Shape::Bezier{closed:true,..}));
+        e.doc.validate().unwrap();
+        e.undo();
+        assert_eq!(e.doc,old);
         e.doc.layers[0].locked=true;
-        let old=e.doc.clone();
+        let locked=e.doc.clone();
+        e.selected=Some(id);
         e.refit_selected_path(true);
-        assert_eq!(e.doc,old);assert!(e.undo.is_empty());
+        assert_eq!(e.doc,locked);
+        assert!(e.undo.is_empty());
     }
 }
