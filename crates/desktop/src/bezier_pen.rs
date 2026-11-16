@@ -21,9 +21,41 @@ pub(super) fn symmetric_tangent(anchor:Point,cursor:Point)->Option<(Point,Point)
     valid(incoming).then_some((incoming,cursor))
 }
 
+/// Lightweight temporary stroke displayed between the last anchor and pointer.
+/// Uses the same incoming straight-line fallback as a future curve_click.
+pub(super) fn preview_segment(start:Point,outgoing:Option<Point>,end:Point)->Vec<Point>{
+    let a=outgoing.unwrap_or(Point{
+        x:start.x+(end.x-start.x)/3.0,
+        y:start.y+(end.y-start.y)/3.0,
+    });
+    let b=Point{
+        x:start.x+2.0*(end.x-start.x)/3.0,
+        y:start.y+2.0*(end.y-start.y)/3.0,
+    };
+    let mut points=Vec::with_capacity(17);
+    for i in 0..=16{
+        let t=i as f32/16.0;
+        let u=1.0-t;
+        points.push(Point{
+            x:u*u*u*start.x+3.0*u*u*t*a.x+3.0*u*t*t*b.x+t*t*t*end.x,
+            y:u*u*u*start.y+3.0*u*u*t*a.y+3.0*u*t*t*b.y+t*t*t*end.y,
+        });
+    }
+    points
+}
+
 #[cfg(test)]
 mod tests{
     use super::*;
+    #[test]
+    fn preview_segment_preserves_endpoints(){
+        let start=Point{x:1.0,y:2.0};
+        let end=Point{x:20.0,y:30.0};
+        let line=preview_segment(start,Some(Point{x:10.0,y:0.0}),end);
+        assert_eq!(line.len(),17);
+        assert_eq!(line[0],start);
+        assert_eq!(line[16],end);
+    }
     #[test]
     fn horizontal_drag_creates_opposed_handles(){
         let (before,after)=symmetric_tangent(
