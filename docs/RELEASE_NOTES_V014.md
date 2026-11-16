@@ -1,5 +1,34 @@
 # OpenCorel v0.14 Alpha — Typography iteration I06 (in progress)
 
+## Precision drawing — node snapping and smooth seam joining
+
+- **Adjustable join distance:** the F10 panel now exposes an editable 0–1000 mm
+  snap tolerance (default 2 mm), replacing the old hard-coded 2 mm button.
+- **Smooth Snap Join:** in addition to ordinary snap join and bridge, a new
+  command snaps the nearest ends, aligns both cubic tangents while retaining
+  handle lengths, and stores a persistent Smooth node mode on the seam.
+  The result remains native and fully editable, with live tangent coupling.
+- **Visible node snapping:** View menu toggle (enabled by default) controls
+  snapping for Bézier anchor creation and F10 anchor movement. Pixel tolerance
+  can be adjusted between 2 and 30 px (default 10), so a change of zoom does
+  not change the perceived snap radius. A small orange diamond indicates
+  the active snap target.
+- **Target priority:** visible cubic/compound/polyline anchors and rectangle
+  corners; never hidden layers, bitmap pixels or imported SVG internals.
+  Locked visible objects can serve as immutable reference targets.
+  The edited object's own nodes are excluded; grid snapping remains fallback.
+- **Bounded work:** snapping scans no more than 30,000 target points from
+  8,000 objects per lookup, preventing unbounded cursor stalls on enormous
+  imported outlines. Snap may not inspect later candidates past the limit.
+- **Tests:** nearest-anchor selection, zoom-invariant tolerance, grid fallback,
+  hidden/locked layers, invalid coordinates, large 50k-point path budget,
+  smooth seam continuity and persistent node mode, join-tolerance rejection,
+  and undoability.
+
+Limits: no snapping to arbitrary curve interiors, intersections or guides yet.
+Smooth joining is a single tangent alignment, not a global curve optimization;
+extreme or degenerate geometry is rejected rather than silently flattened.
+
 ## Path connectivity — join / bridge / split (new)
 
 Two separate **open native Bézier** paths can now be combined into one path
