@@ -649,7 +649,7 @@ impl Editor {
                     }
                     let can_split=self.doc.objects.iter().find(|o|o.id==id)
                         .is_some_and(|o|matches!((&o.shape,address),
-                            (opencorel_core::Shape::Bezier{segments,closed:false},
+                            (opencorel_core::Shape::Bezier{segments,closed:false,..},
                              opencorel_core::node_edit::NodeAddress::BezierEnd(i))
                                 if i+1<segments.len()));
                     if can_split && ui.button("Разрезать кривую в этом узле")
