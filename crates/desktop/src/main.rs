@@ -1466,6 +1466,37 @@ impl eframe::App for Editor{
 mod tests {
     use super::*;
     #[test]
+    fn screen_tolerance_stays_constant_across_zoom_and_grid_falls_back(){
+        let mut e=Editor::default();
+        e.doc=Document::default();
+        e.snap_nodes=true;e.snap_grid=true;
+        e.grid_mm=10.0;e.snap_tolerance_px=10.0;
+        let id=e.doc.add(Shape::Polyline{
+            points:vec![Point{x:12.3,y:15.7},Point{x:35.,y:40.}],
+            closed:false,
+        },Style::default());
+        let near=Point{x:12.6,y:15.7};
+        assert_eq!(e.snap_canvas_point(near,5.0,None),Point{x:12.3,y:15.7});
+        assert_eq!(e.snap_canvas_point(near,50.0,None),Point{x:10.,y:20.});
+        assert_eq!(e.snap_canvas_point(near,5.0,Some(id)),Point{x:10.,y:20.});
+        e.snap_grid=false;e.snap_nodes=false;
+        assert_eq!(e.snap_canvas_point(near,5.0,None),near);
+    }
+    #[test]
+    fn snapping_to_visible_locked_reference_is_allowed_but_not_hidden(){
+        let mut e=Editor::default();
+        e.doc=Document::default();
+        e.snap_nodes=true;e.snap_grid=false;e.snap_tolerance_px=10.0;
+        let target=Point{x:17.0,y:21.0};
+        e.doc.add(Shape::Polyline{points:vec![target],closed:false},
+            Style::default());
+        e.doc.layers[0].locked=true;
+        assert_eq!(e.snap_canvas_point(Point{x:17.4,y:21.2},5.0,None),target);
+        e.doc.layers[0].visible=false;
+        assert_eq!(e.snap_canvas_point(Point{x:17.4,y:21.2},5.0,None),
+            Point{x:17.4,y:21.2});
+    }
+    #[test]
     fn bezier_drag_shapes_smooth_handles_without_extra_undo(){
         let mut editor=Editor::default();
         editor.change_tool(Tool::Curve);
