@@ -106,7 +106,7 @@ impl Editor{
             self.status="Переполнение количества копий".into();return;
         };
         if extra>MAX_NEW_OBJECTS || self.doc.objects.len().saturating_add(extra)>100_000
-            || self.doc.next_id.checked_add(extra as u64).is_none_or(|v|v>=u64::MAX){
+            || self.doc.next_id.checked_add(extra as u64).is_none_or(|v|v==u64::MAX){
             self.status="Сетка: превышен предел 2000 новых объектов или ID документа".into();
             return;
         }
