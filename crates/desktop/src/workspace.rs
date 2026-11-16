@@ -19,6 +19,9 @@ const SWATCHES: [&str; 27] = [
 impl Editor {
     pub(super) fn change_tool(&mut self, next: Tool) {
         self.tool=next;
+        if next!=Tool::Freehand{
+            self.freehand_samples.clear();self.freehand_overflow=false;
+        }
         if next!=Tool::Curve {
             self.curve_start=None;self.curve_draft=None;
             self.curve_resumed=false;
@@ -29,7 +32,7 @@ impl Editor {
         self.resize_drag=None;self.node_drag=None;
         self.node_drag_checkpointed=false;
         if next!=Tool::Nodes{self.active_node=None;}
-        if matches!(next,Tool::Text|Tool::Nodes){
+        if matches!(next,Tool::Text|Tool::Nodes|Tool::Freehand){
             self.inspector_tab=InspectorTab::Properties;
             self.show_inspector=true;
         }
@@ -55,6 +58,7 @@ impl Editor {
         self.curve_resumed=false;
         self.curve_outgoing=None;
         self.curve_drag_anchor=None;
+        self.freehand_samples.clear();self.freehand_overflow=false;
         self.file="untitled.kdr".into();
         self.status="Создан новый документ. Выберите инструмент слева или нажмите F1 для помощи.".into();
     }
@@ -602,6 +606,20 @@ impl Editor {
     }
 
     fn inspector_properties(&mut self,ui:&mut egui::Ui){
+        if self.tool==Tool::Freehand{
+            ui.heading("Свободное рисование");
+            ui.label("Удерживайте кнопку мыши и ведите линию. После отпускания появится редактируемая кривая Безье.");
+            ui.separator();
+            ui.label("Точность линии, пикс.");
+            ui.add(egui::Slider::new(&mut self.freehand_precision_px,0.5..=12.0)
+                .step_by(0.5).suffix(" px"));
+            ui.label("Плавность изгибов");
+            ui.add(egui::Slider::new(&mut self.freehand_smoothness,0.0..=1.0)
+                .step_by(0.05));
+            ui.small("Меньший допуск — больше узлов, лучше повторяет движение мыши. Больший допуск — проще контур.");
+            ui.small("Штрихи до 4096 отсчётов; одна линия = одна запись Ctrl+Z. Клавиша H — этот инструмент.");
+            return;
+        }
         // Context tools live here, not in the permanent left rail. A user
         // can always find the active text and node controls even with the
         // minimal panel collapsed to just icons.
@@ -616,6 +634,39 @@ impl Editor {
         if self.tool==Tool::Nodes{
             ui.heading("Редактирование узлов");
             ui.label("Клик по кривой — выбор. Двойной клик по сегменту — новый узел.");
+            if let Some(id)=self.selected{
+                if self.multi_selected.is_empty() && self.node_edit_allowed(id){
+                    let editable_kind=self.doc.objects.iter().find(|o|o.id==id)
+                        .map(|o|match &o.shape{
+                            opencorel_core::Shape::Polyline{closed:false,..}=>1u8,
+                            opencorel_core::Shape::Bezier{closed:false,..}=>2u8,
+                            _=>0u8,
+                        }).unwrap_or(0);
+                    if editable_kind!=0{
+                        ui.separator();
+                        ui.label("Упрощение и сглаживание");
+                        ui.horizontal(|ui|{
+                            ui.label("Допуск, мм");
+                            ui.add(egui::DragValue::new(&mut self.refit_tolerance_mm)
+                                .speed(0.1).range(0.0..=100.0).fixed_decimals(2));
+                        });
+                        ui.label("Плавность");
+                        ui.add(egui::Slider::new(&mut self.freehand_smoothness,0.0..=1.0)
+                            .step_by(0.05));
+                        let clicked=if editable_kind==1{
+                            ui.button("Ломаную → плавная кривая")
+                                .on_hover_text("Преобразовать открытые прямые сегменты в редактируемую кривую")
+                                .clicked()
+                        }else{
+                            ui.button("Упростить число узлов кривой")
+                                .on_hover_text("Повторная аппроксимация меняет геометрию и сбрасывает прежние типы узлов")
+                                .clicked()
+                        };
+                        if clicked{self.refit_selected_path(editable_kind==1);}
+                        ui.small("Повторная аппроксимация изменяет геометрию. Ctrl+Z восстанавливает исходные узлы и их типы.");
+                    }
+                }
+            }
             if self.selection_ids().len()==2{
                 use opencorel_core::path_topology::JoinMode;
                 ui.separator();
