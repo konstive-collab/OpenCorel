@@ -1541,6 +1541,36 @@ impl eframe::App for Editor{
 mod tests {
     use super::*;
     #[test]
+    fn guide_intersection_snaps_both_axes_and_grid_fills_unsnapped_axis(){
+        let mut e=Editor::default();
+        e.doc=Document::default();
+        e.snap_nodes=false;
+        e.snap_guides=true;
+        e.snap_grid=true;e.grid_mm=10.0;e.snap_tolerance_px=10.0;
+        e.doc.guides.push(Guide::new(GuideAxis::Vertical,13.0).unwrap());
+        e.doc.guides.push(Guide::new(GuideAxis::Horizontal,21.0).unwrap());
+        assert_eq!(e.snap_canvas_point(Point{x:12.8,y:20.4},10.0,None),
+            Point{x:13.0,y:21.0});
+        assert_eq!(e.snap_canvas_point(Point{x:12.8,y:17.1},10.0,None),
+            Point{x:13.0,y:20.0});
+        e.snap_guides=false;
+        assert_eq!(e.snap_canvas_point(Point{x:12.8,y:20.4},10.0,None),
+            Point{x:10.0,y:20.0});
+    }
+    #[test]
+    fn visible_anchor_priority_exceeds_nearby_guide(){
+        let mut e=Editor::default();
+        e.doc=Document::default();
+        e.snap_nodes=true;e.snap_guides=true;e.snap_grid=false;
+        e.snap_tolerance_px=10.0;
+        e.doc.guides.push(Guide::new(GuideAxis::Vertical,13.0).unwrap());
+        e.doc.add(Shape::Polyline{points:vec![
+            Point{x:12.5,y:18.0},Point{x:30.0,y:20.0},
+        ],closed:false},Style::default());
+        assert_eq!(e.snap_canvas_point(Point{x:12.7,y:18.1},10.0,None),
+            Point{x:12.5,y:18.0});
+    }
+    #[test]
     fn screen_tolerance_stays_constant_across_zoom_and_grid_falls_back(){
         let mut e=Editor::default();
         e.doc=Document::default();
