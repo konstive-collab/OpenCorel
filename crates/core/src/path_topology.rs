@@ -153,6 +153,69 @@ pub fn join_beziers(
         gap_mm:gap,added_connector:bridged,
     }))
 }
+/// Join two open polylines without flattening or converting their geometry.
+/// The first object retains its start/end identity and its existing vertices.
+/// SmoothSnap is deliberately unsupported: polylines have no cubic handles.
+pub fn join_polylines(
+    first:&Shape,second:&Shape,mode:JoinMode
+)->Result<(Shape,JoinReport),String>{
+    let vertices=|shape:&Shape|->Result<&[Point],String>{
+        match shape{
+            Shape::Polyline{points,closed:false} if points.len()>=2=>{
+                if points.iter().any(|p|!valid(*p)){
+                    return Err("Polyline contains invalid coordinates".into());
+                }
+                Ok(points)
+            },
+            _=>Err("Select two open polylines with at least two vertices each".into())
+        }
+    };
+    let a=vertices(first)?;
+    let b=vertices(second)?;
+    let tolerance=match mode{
+        JoinMode::SmoothSnap{..}=>return Err("Smooth joining requires Bézier handles".into()),
+        JoinMode::Snap{tolerance_mm}=>{
+            if !tolerance_mm.is_finite() || !(0.0..=1000.0).contains(&tolerance_mm){
+                return Err("Snap tolerance must be within 0–1000 mm".into());
+            }
+            Some(tolerance_mm)
+        },
+        JoinMode::Bridge=>None,
+    };
+    let mut best=(f32::INFINITY,false,false);
+    for rev_a in [false,true]{
+        for rev_b in [false,true]{
+            let end=if rev_a{a[0]}else{a[a.len()-1]};
+            let start=if rev_b{b[b.len()-1]}else{b[0]};
+            let gap=distance(end,start);
+            if gap<best.0{best=(gap,rev_a,rev_b);}
+        }
+    }
+    let (gap,reverse_a,reverse_b)=best;
+    if !gap.is_finite(){return Err("Polyline endpoint distance is invalid".into());}
+    if tolerance.is_some_and(|t|gap>t){
+        return Err(format!("Endpoints are {:.2} mm apart; adjust nodes or use Bridge",gap));
+    }
+    let needed=a.len().checked_add(b.len())
+        .ok_or("Polyline vertex count overflow")?;
+    if needed>60_000{return Err("Joined polyline exceeds 60,000 vertices".into());}
+    let mut points=a.to_vec();
+    let mut tail=b.to_vec();
+    if reverse_a{points.reverse();}
+    if reverse_b{tail.reverse();}
+    let end=*points.last().expect("validated length");
+    let bridged=matches!(mode,JoinMode::Bridge) && gap>EPSILON_MM;
+    if !bridged{
+        // A snap is a single shared vertex, not two almost-coincident nodes.
+        tail.remove(0);
+    }
+    points.extend(tail);
+    Ok((Shape::Polyline{points,closed:false},JoinReport{
+        reversed_first:reverse_a,reversed_second:reverse_b,
+        gap_mm:gap,added_connector:bridged,
+    }))
+}
+
 /// Cut an open Bézier at an existing interior anchor. The cut anchor becomes
 /// both the left end and the right start, so neither resulting path has a
 /// missing segment. Its persistent tangent mode is removed at the seam.
