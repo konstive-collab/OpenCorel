@@ -184,6 +184,8 @@ struct Editor{
     minimum_image_dpi:f32,
     show_safe_area:bool,
     safe_margin_mm:f32,
+    print_bleed_mm:f32,
+    print_crop_marks:bool,
     internal_clipboard:Vec<Object>,
     paste_number:usize,
     show_welcome:bool,
@@ -246,6 +248,7 @@ impl Default for Editor{
             show_preflight:false,preflight_lines:Vec::new(),
             minimum_image_dpi:150.0,
             show_safe_area:false,safe_margin_mm:5.0,
+            print_bleed_mm:3.0,print_crop_marks:true,
             internal_clipboard:Vec::new(),paste_number:0,
             show_welcome:true,toolbox_expanded:false,resize_drag:None,
             resize_drag_base:None,resize_drag_checkpointed:false,
@@ -937,6 +940,30 @@ impl Editor{
                     format!("Сохранено: {}",chosen.display())
                 },
                 Err(e)=>format!("Ошибка сохранения: {e}"),
+            };
+        }
+    }
+    fn export_print_sheet_dialog(&mut self){
+        let opts=opencorel_core::print_sheet::PrintSheetOptions{
+            bleed_mm:self.print_bleed_mm,
+            crop_marks:self.print_crop_marks,
+        };
+        if let Err(e)=opts.validate(){
+            self.status=format!("Ошибка параметров печатного SVG: {e}");
+            return;
+        }
+        let stem=std::path::Path::new(&self.file).file_stem()
+            .and_then(|s|s.to_str()).unwrap_or("Макет");
+        if let Some(chosen)=rfd::FileDialog::new()
+            .add_filter("SVG для печатного листа",&["svg"])
+            .set_file_name(format!("{stem} - печать.svg"))
+            .save_file(){
+            let path=chosen.with_extension("svg");
+            self.status=match opencorel_core::print_sheet::export_print_svg(
+                &self.doc,&path,opts){
+                Ok(())=>format!("Печатный SVG экспортирован: {}. Цвет RGB, не PDF/X",
+                    path.display()),
+                Err(e)=>format!("Ошибка экспорта печатного SVG: {e}"),
             };
         }
     }
