@@ -431,6 +431,149 @@ impl Editor{
 mod tests{
     use super::*;
     use opencorel_core::{CubicSegment,Style};
+    fn topology_curve(x0:f32,x1:f32,x2:f32)->Shape{
+        let segment=|a:f32,b:f32|opencorel_core::CubicSegment{
+            control1:Point{x:a+(b-a)/3.,y:10.},
+            control2:Point{x:a+2.*(b-a)/3.,y:10.},
+            end:Point{x:b,y:10.},
+        };
+        Shape::Bezier{start:Point{x:x0,y:10.},
+            segments:vec![segment(x0,x1),segment(x1,x2)],closed:false}
+    }
+    #[test]
+    fn join_near_endpoints_is_one_undo_step_and_preserves_native_shape(){
+        use opencorel_core::path_topology::JoinMode;
+        let mut e=Editor::default();
+        let style=Style::default();
+        let a=e.doc.add(topology_curve(0.,10.,20.),style.clone());
+        let b=e.doc.add(topology_curve(20.5,30.,40.),style);
+        e.select_object(Some(a),false);
+        e.select_object(Some(b),true);
+        e.tool=Tool::Nodes;
+        let previous=e.doc.clone();
+        e.join_selected_beziers(JoinMode::Snap{tolerance_mm:2.});
+        assert_eq!(e.doc.objects.len(),previous.objects.len()-1);
+        assert_eq!(e.selected,Some(a));
+        assert!(e.multi_selected.is_empty());
+        assert_eq!(e.undo.len(),1);
+        let Shape::Bezier{segments,..}=&e.doc.get_mut(a).unwrap().shape
+            else{panic!("native curve")};
+        assert_eq!(segments.len(),4);
+        e.doc.validate().unwrap();
+        e.undo();
+        assert_eq!(e.doc,previous);
+        e.redo();
+        e.doc.validate().unwrap();
+        assert!(e.doc.objects.iter().all(|obj|obj.id!=b));
+    }
+    #[test]
+    fn bridge_join_preserves_both_paths_with_one_connector(){
+        use opencorel_core::path_topology::JoinMode;
+        let mut e=Editor::default();
+        let a=e.doc.add(topology_curve(0.,10.,20.),Style::default());
+        let b=e.doc.add(topology_curve(100.,110.,120.),Style::default());
+        e.selected=Some(a);
+        e.multi_selected=vec![b];
+        e.tool=Tool::Nodes;
+        e.join_selected_beziers(JoinMode::Bridge);
+        assert_eq!(e.undo.len(),1);
+        let Shape::Bezier{segments,..}=&e.doc.get_mut(a).unwrap().shape
+            else{panic!("native curve")};
+        assert_eq!(segments.len(),5);
+        assert_eq!(segments[2].end,Point{x:100.,y:10.});
+        e.doc.validate().unwrap();
+    }
+    #[test]
+    fn incompatible_join_is_rejected_without_history_or_modification(){
+        use opencorel_core::path_topology::JoinMode;
+        let mut e=Editor::default();
+        let a=e.doc.add(topology_curve(0.,10.,20.),Style::default());
+        let b=e.doc.add(topology_curve(100.,110.,120.),Style::default());
+        e.selected=Some(a);
+        e.multi_selected=vec![b];
+        let old=e.doc.clone();
+        e.join_selected_beziers(JoinMode::Snap{tolerance_mm:2.});
+        assert_eq!(e.doc,old);
+        assert!(e.undo.is_empty());
+        e.doc.get_mut(b).unwrap().style.fill="#FF0000".into();
+        let old=e.doc.clone();
+        e.join_selected_beziers(JoinMode::Bridge);
+        assert_eq!(e.doc,old);
+        assert!(e.undo.is_empty());
+        e.doc.get_mut(b).unwrap().style.fill="#447BD4".into();
+        e.doc.layers[0].locked=true;
+        let old=e.doc.clone();
+        e.join_selected_beziers(JoinMode::Bridge);
+        assert_eq!(e.doc,old);
+        assert!(e.undo.is_empty());
+    }
+    #[test]
+    fn split_at_internal_anchor_creates_two_editable_siblings(){
+        use opencorel_core::node_edit::{NodeModeBinding,TangentOperation};
+        let mut e=Editor::default();
+        let id=e.doc.add(Shape::Bezier{
+            start:Point{x:0.,y:0.},segments:vec![
+                CubicSegment{control1:Point{x:2.,y:0.},
+                    control2:Point{x:8.,y:0.},end:Point{x:10.,y:0.}},
+                CubicSegment{control1:Point{x:12.,y:0.},
+                    control2:Point{x:18.,y:0.},end:Point{x:20.,y:0.}},
+                CubicSegment{control1:Point{x:22.,y:0.},
+                    control2:Point{x:28.,y:0.},end:Point{x:30.,y:0.}},
+            ],closed:false,
+        },Style::default());
+        e.doc.get_mut(id).unwrap().node_modes=vec![
+            NodeModeBinding{address:NodeAddress::BezierEnd(1),
+                mode:TangentOperation::Smooth},
+        ];
+        e.doc.validate().unwrap();
+        e.selected=Some(id);
+        e.tool=Tool::Nodes;
+        e.active_node=Some((id,NodeAddress::BezierEnd(0)));
+        let old=e.doc.clone();
+        e.split_selected_bezier();
+        assert_eq!(e.undo.len(),1);
+        assert_eq!(e.doc.objects.len(),old.objects.len()+1);
+        let new_id=e.selected.unwrap();
+        assert_ne!(new_id,id);
+        let Shape::Bezier{segments:left,..}=&e.doc.get_mut(id).unwrap().shape
+            else{panic!("left curve")};
+        assert_eq!(left.len(),1);
+        let right=e.doc.get_mut(new_id).unwrap();
+        let Shape::Bezier{start,segments,..}=&right.shape else{panic!("right curve")};
+        assert_eq!(*start,Point{x:10.,y:0.});
+        assert_eq!(segments.len(),2);
+        assert_eq!(right.node_modes.len(),1);
+        assert_eq!(right.node_modes[0].address,NodeAddress::BezierEnd(0));
+        e.doc.validate().unwrap();
+        e.undo();
+        assert_eq!(e.doc,old);
+        e.redo();
+        e.doc.validate().unwrap();
+    }
+    #[test]
+    fn split_refuses_closed_curve_and_clipped_object(){
+        let mut e=Editor::default();
+        let id=e.doc.add(topology_curve(0.,10.,20.),Style::default());
+        e.selected=Some(id);
+        e.active_node=Some((id,NodeAddress::BezierEnd(0)));
+        e.tool=Tool::Nodes;
+        if let Shape::Bezier{closed,..}=&mut e.doc.get_mut(id).unwrap().shape{
+            *closed=true;
+        }
+        let old=e.doc.clone();
+        e.split_selected_bezier();
+        assert_eq!(e.doc,old);
+        assert!(e.undo.is_empty());
+        if let Shape::Bezier{closed,..}=&mut e.doc.get_mut(id).unwrap().shape{
+            *closed=false;
+        }
+        e.doc.clip_links.push(opencorel_core::ClipLink{source_id:id,target_id:1});
+        let old=e.doc.clone();
+        e.split_selected_bezier();
+        assert_eq!(e.doc,old);
+        assert!(e.undo.is_empty());
+    }
+
     #[test] fn node_drag_only_records_history_on_first_valid_movement(){
         let mut editor=Editor::default();
         let id=editor.doc.add(Shape::Bezier{
