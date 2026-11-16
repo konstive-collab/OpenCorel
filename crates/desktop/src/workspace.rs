@@ -110,6 +110,31 @@ impl Editor {
                     if ui.add_enabled(!self.undo.is_empty(),egui::Button::new("Отменить      Ctrl+Z")).clicked(){self.undo();ui.close_menu();}
                     if ui.add_enabled(!self.redo.is_empty(),egui::Button::new("Повторить     Ctrl+Y")).clicked(){self.redo();ui.close_menu();}
                     if ui.button("Дублировать     Ctrl+D").clicked(){self.duplicate_preserving_styles();ui.close_menu();}
+                    ui.menu_button("Массив копий / сетка...",|ui|{
+                        ui.label("Размножить выделенные объекты по строкам и столбцам");
+                        ui.horizontal(|ui|{
+                            ui.label("Столбцы");
+                            ui.add(egui::DragValue::new(&mut self.array_columns).range(1..=50));
+                            ui.label("Строки");
+                            ui.add(egui::DragValue::new(&mut self.array_rows).range(1..=50));
+                        });
+                        ui.horizontal(|ui|{
+                            ui.label("Зазор X, мм");
+                            ui.add(egui::DragValue::new(&mut self.array_gap_x_mm)
+                                .range(-9999.0..=10000.0).speed(0.5));
+                        });
+                        ui.horizontal(|ui|{
+                            ui.label("Зазор Y, мм");
+                            ui.add(egui::DragValue::new(&mut self.array_gap_y_mm)
+                                .range(-9999.0..=10000.0).speed(0.5));
+                        });
+                        ui.small("Первая ячейка — исходные объекты; не более 2000 новых объектов.");
+                        if ui.add_enabled(!self.selection_ids().is_empty(),
+                            egui::Button::new("Создать сетку")).clicked(){
+                            self.repeat_selection_as_grid();
+                            ui.close_menu();
+                        }
+                    });
                     ui.separator();
                     if ui.button("Копировать      Ctrl+C").clicked(){self.copy_selection();ui.close_menu();}
                     if ui.button("Вырезать        Ctrl+X").clicked(){self.cut_selection();ui.close_menu();}
