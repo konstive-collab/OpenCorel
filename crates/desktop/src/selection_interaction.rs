@@ -326,6 +326,34 @@ mod tests{
         assert!(e.undo.is_empty());
     }
     #[test]
+    fn precise_pick_falls_through_empty_curve_bbox_to_object_below(){
+        use opencorel_core::CubicSegment;
+        let mut e=Editor::default();
+        e.doc=Document::default();
+        let back=e.doc.add(Shape::Rectangle{x:0.,y:0.,w:100.,h:100.},
+            Style::default());
+        let front=e.doc.add(Shape::Bezier{start:p(0.,0.),closed:false,
+            segments:vec![CubicSegment{control1:p(0.,100.),
+                control2:p(100.,100.),end:p(100.,0.)}]},
+            Style{fill:"none".into(),stroke:"#000000".into(),
+                stroke_width_mm:0.3});
+        assert_eq!(e.hit_test_at(p(50.,20.),1.),Some(back),
+            "A curve's empty bounding rectangle must not cover artwork below");
+        assert_eq!(e.hit_test_at(p(50.,75.),1.),Some(front));
+    }
+    #[test]
+    fn pointer_selection_tolerance_is_constant_across_zoom(){
+        use eframe::egui::Vec2;
+        let mut e=Editor::default();
+        e.doc=Document::default();
+        let viewport=Rect::from_min_size(Pos2::ZERO,
+            Vec2::new(1200.,800.));
+        let v=View::new(viewport,&e.doc,1.0,Vec2::ZERO);
+        let magnified=View::new(viewport,&e.doc,5.0,Vec2::ZERO);
+        assert!((e.pick_tolerance_mm(v)*v.scale-6.0).abs()<0.01);
+        assert!((e.pick_tolerance_mm(magnified)*magnified.scale-6.0).abs()<0.01);
+    }
+    #[test]
     fn marquee_predicate_ignores_malformed_or_empty_drag(){
         let rect=Bounds{x:10.,y:10.,w:10.,h:10.};
         let d=MarqueeDrag{start:p(0.,0.),current:p(15.,15.),additive:false};
