@@ -1233,6 +1233,38 @@ impl eframe::App for Editor{
 mod tests {
     use super::*;
     #[test]
+    fn bezier_many_vertices_are_one_undo_transaction(){
+        let mut editor=Editor::default();
+        let original=editor.doc.clone();
+        editor.change_tool(Tool::Curve);
+        editor.curve_click(Point{x:10.0,y:10.0});
+        assert!(editor.undo.is_empty());
+        for index in 1..=250 {
+            editor.curve_click(Point{x:10.0+index as f32,y:10.0});
+        }
+        assert_eq!(editor.undo.len(),1,
+            "Adding vertices must not deep-clone the whole document");
+        let curve_id=editor.curve_draft.expect("curve draft");
+        let curve=editor.doc.get_mut(curve_id).unwrap();
+        let Shape::Bezier{segments,..}=&curve.shape else{panic!("Bezier shape")};
+        assert_eq!(segments.len(),250);
+        editor.undo();
+        assert_eq!(editor.doc,original);
+        editor.redo();
+        assert_eq!(editor.doc.objects.len(),original.objects.len()+1);
+        editor.doc.validate().unwrap();
+    }
+    #[test]
+    fn bezier_before_second_anchor_does_not_create_empty_shape(){
+        let mut editor=Editor::default();
+        let before=editor.doc.clone();
+        editor.change_tool(Tool::Curve);
+        editor.curve_click(Point{x:10.0,y:20.0});
+        editor.change_tool(Tool::Select);
+        assert_eq!(editor.doc,before);
+        assert!(editor.undo.is_empty());
+    }
+    #[test]
     fn inline_text_apply_is_single_undoable_change(){
         let mut editor=Editor::default();
         let id=editor.doc.objects[1].id;
