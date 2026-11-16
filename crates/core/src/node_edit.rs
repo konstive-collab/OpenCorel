@@ -405,6 +405,119 @@ mod tests{
                 end:Point{x:10.,y:0.}}
         ],closed:false}
     }
+    fn two_cubics()->Shape{
+        Shape::Bezier{start:Point{x:0.0,y:0.0},segments:vec![
+            CubicSegment{
+                control1:Point{x:1.0,y:1.0},
+                control2:Point{x:7.0,y:5.0},
+                end:Point{x:10.0,y:10.0},
+            },
+            CubicSegment{
+                control1:Point{x:16.0,y:11.0},
+                control2:Point{x:19.0,y:19.0},
+                end:Point{x:20.0,y:20.0},
+            },
+        ],closed:false}
+    }
+    fn tangent_vectors(shape:&Shape)->((f64,f64),(f64,f64)){
+        let Shape::Bezier{segments,..}=shape else{panic!("not Bezier")};
+        let a=segments[0].end;
+        let prev=segments[0].control2;
+        let next=segments[1].control1;
+        ((a.x as f64-prev.x as f64,a.y as f64-prev.y as f64),
+         (next.x as f64-a.x as f64,next.y as f64-a.y as f64))
+    }
+    #[test]
+    fn smooth_handles_are_collinear_and_keep_individual_lengths(){
+        let mut shape=two_cubics();
+        let (before,after)=tangent_vectors(&shape);
+        let first=before.0.hypot(before.1);
+        let second=after.0.hypot(after.1);
+        assert!(set_tangent(&mut shape,NodeAddress::BezierEnd(0),
+            TangentOperation::Smooth).unwrap());
+        let (before,after)=tangent_vectors(&shape);
+        assert!((before.0*after.1-before.1*after.0).abs()<0.0001);
+        assert!((before.0.hypot(before.1)-first).abs()<0.0001);
+        assert!((after.0.hypot(after.1)-second).abs()<0.0001);
+        assert!(!set_tangent(&mut shape,NodeAddress::BezierEnd(0),
+            TangentOperation::Smooth).unwrap());
+    }
+    #[test]
+    fn symmetric_handles_have_equal_lengths_and_collinear_tangents(){
+        let mut shape=two_cubics();
+        assert!(set_tangent(&mut shape,NodeAddress::BezierEnd(0),
+            TangentOperation::Symmetric).unwrap());
+        let (before,after)=tangent_vectors(&shape);
+        assert!((before.0*after.1-before.1*after.0).abs()<0.0001);
+        assert!((before.0.hypot(before.1)-after.0.hypot(after.1)).abs()<0.0001);
+        let mut doc=Document::default();
+        doc.add(shape,Style::default());
+        doc.validate().unwrap();
+        let restored:Document=serde_json::from_str(
+            &serde_json::to_string(&doc).unwrap()).unwrap();
+        assert_eq!(doc,restored);
+    }
+    #[test]
+    fn corner_collapses_both_handles_and_allows_independent_editing(){
+        let mut shape=two_cubics();
+        assert!(set_tangent(&mut shape,NodeAddress::BezierEnd(0),
+            TangentOperation::Corner).unwrap());
+        let Shape::Bezier{segments,..}=&shape else{panic!()};
+        assert_eq!(segments[0].control2,segments[0].end);
+        assert_eq!(segments[1].control1,segments[0].end);
+        assert!(!set_tangent(&mut shape,NodeAddress::BezierEnd(0),
+            TangentOperation::Corner).unwrap());
+        move_node(&mut shape,NodeAddress::BezierControl1(1),
+            Point{x:15.0,y:5.0}).unwrap();
+        let Shape::Bezier{segments,..}=&shape else{panic!()};
+        assert_eq!(segments[0].control2,segments[0].end);
+        assert_eq!(segments[1].control1,Point{x:15.0,y:5.0});
+    }
+    #[test]
+    fn rejects_terminal_nodes_and_invalid_inputs_without_mutation(){
+        let mut shape=two_cubics();
+        for node in [NodeAddress::BezierStart,NodeAddress::BezierEnd(1),
+            NodeAddress::BezierEnd(100),NodeAddress::BezierControl1(1)] {
+            let old=shape.clone();
+            assert!(set_tangent(&mut shape,node,TangentOperation::Smooth).is_err());
+            assert_eq!(shape,old);
+        }
+        let Shape::Bezier{segments,..}=&mut shape else{panic!()};
+        segments[0].control2.x=f32::NAN;
+        let previous=shape.clone();
+        assert!(set_tangent(&mut shape,NodeAddress::BezierEnd(0),
+            TangentOperation::Symmetric).is_err());
+        assert_eq!(format!("{:?}",shape),format!("{:?}",previous));
+    }
+    #[test]
+    fn zero_length_tangents_are_rejected_for_smooth_and_symmetric(){
+        let mut shape=two_cubics();
+        set_tangent(&mut shape,NodeAddress::BezierEnd(0),
+            TangentOperation::Corner).unwrap();
+        let old=shape.clone();
+        assert!(set_tangent(&mut shape,NodeAddress::BezierEnd(0),
+            TangentOperation::Smooth).is_err());
+        assert!(set_tangent(&mut shape,NodeAddress::BezierEnd(0),
+            TangentOperation::Symmetric).is_err());
+        assert_eq!(shape,old);
+    }
+    #[test]
+    fn compound_path_supports_interior_tangent_commands(){
+        let Shape::Bezier{start,segments,..}=two_cubics() else{panic!()};
+        let mut shape=Shape::CompoundPath{contours:vec![Contour{
+            start,segments,closed:false,
+        }]};
+        assert!(has_tangent_pair(&shape,NodeAddress::CompoundEnd(0,0)));
+        assert!(!has_tangent_pair(&shape,NodeAddress::CompoundEnd(0,1)));
+        assert!(set_tangent(&mut shape,NodeAddress::CompoundEnd(0,0),
+            TangentOperation::Symmetric).unwrap());
+        let Shape::CompoundPath{contours}=&shape else{panic!()};
+        let s=&contours[0].segments;
+        let anchor=s[0].end;
+        let in_len=(anchor.x-s[0].control2.x).hypot(anchor.y-s[0].control2.y);
+        let out_len=(anchor.x-s[1].control1.x).hypot(anchor.y-s[1].control1.y);
+        assert!((in_len-out_len).abs()<1e-4);
+    }
     #[test] fn insert_bezier_preserves_entire_curve(){
         let mut shape=path();
         let before=shape.clone();
