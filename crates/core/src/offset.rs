@@ -106,9 +106,20 @@ fn validate_offset_topology(original:&[Point],offset:&[Point],closed:bool)
             // collinear overlap/touching point can corrupt a filled contour.
             let crosses=(o1>1e-8&&o2< -1e-8 || o1< -1e-8&&o2>1e-8)
                 && (o3>1e-8&&o4< -1e-8 || o3< -1e-8&&o4>1e-8);
-            let near_zero=o1.abs()<=1e-8||o2.abs()<=1e-8||
-                o3.abs()<=1e-8||o4.abs()<=1e-8;
-            if crosses || near_zero{
+            let on_segment=|point:Point,x:Point,y:Point|{
+                let eps=1e-7;
+                let px=point.x as f64;let py=point.y as f64;
+                px>=(x.x.min(y.x)) as f64-eps &&
+                px<=(x.x.max(y.x)) as f64+eps &&
+                py>=(x.y.min(y.y)) as f64-eps &&
+                py<=(x.y.max(y.y)) as f64+eps
+            };
+            let touching=
+                (o1.abs()<=1e-8 && on_segment(b.a,a.a,a.b)) ||
+                (o2.abs()<=1e-8 && on_segment(b.b,a.a,a.b)) ||
+                (o3.abs()<=1e-8 && on_segment(a.a,b.a,b.b)) ||
+                (o4.abs()<=1e-8 && on_segment(a.b,b.a,b.b));
+            if crosses || touching{
                 return Err("Offset contains overlapping or self-intersecting edges".into());
             }
         }
