@@ -1422,7 +1422,7 @@ mod tests {
         editor.curve_click(Point{x:20.0,y:0.0});
         editor.curve_click(Point{x:20.0,y:20.0});
         editor.curve_finish(true);
-        assert_eq!(editor.tool,Tool::Select);
+        assert!(editor.tool==Tool::Select);
         assert!(editor.curve_outgoing.is_none());
         assert!(editor.curve_drag_anchor.is_none());
         let Shape::Bezier{closed,segments,..}=&editor.doc.objects.last().unwrap().shape
