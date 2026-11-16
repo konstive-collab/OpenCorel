@@ -7,6 +7,7 @@ use std::{collections::{HashSet,BTreeMap}, fs, io::{self, Write}, path::Path};
 pub mod svg_import;
 pub mod kdr;
 pub mod preflight;
+pub mod print_sheet;
 pub mod transform;
 pub mod node_edit;
 pub mod path_topology;
