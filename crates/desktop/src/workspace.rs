@@ -26,6 +26,7 @@ impl Editor {
         self.drag_start=None;
         self.creation_start=None;
         self.resize_drag=None;self.node_drag=None;
+        self.node_drag_checkpointed=false;
         if next!=Tool::Nodes{self.active_node=None;}
         if matches!(next,Tool::Text|Tool::Nodes){
             self.inspector_tab=InspectorTab::Properties;
@@ -37,6 +38,7 @@ impl Editor {
         self.checkpoint();
         self.doc=Default::default();
         self.active_node=None;self.node_drag=None;
+        self.node_drag_checkpointed=false;
         self.fill_cache.entries.clear();
         self.vector_cache.clear();
         self.raster_cache.clear();
