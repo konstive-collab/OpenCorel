@@ -146,6 +146,99 @@ pub fn move_node(shape:&mut Shape,address:NodeAddress,to:Point)->Result<(),Strin
     }
     Ok(())
 }
+/// One-shot operations on the two handles adjacent to an *interior* cubic
+/// anchor. No persistent coupling is implied: individual handles remain freely
+/// editable afterward. These commands preserve the native document schema.
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+pub enum TangentOperation{
+    /// Set both handle points to their anchor (visible corner / cusp).
+    Corner,
+    /// Align handle directions while retaining each existing length.
+    Smooth,
+    /// Align directions and equalize the two handle lengths.
+    Symmetric,
+}
+
+/// Only interior anchors have an incoming and an outgoing cubic control.
+pub fn has_tangent_pair(shape:&Shape,address:NodeAddress)->bool{
+    match (shape,address){
+        (Shape::Bezier{segments,..},NodeAddress::BezierEnd(i))=>i+1<segments.len(),
+        (Shape::CompoundPath{contours},NodeAddress::CompoundEnd(j,i))=>
+            contours.get(j).is_some_and(|c|i+1<c.segments.len()),
+        _=>false,
+    }
+}
+/// Change adjoining cubic handles atomically. Invalid geometry and terminal
+/// anchors are rejected without changing any part of the input shape.
+pub fn set_tangent(shape:&mut Shape,address:NodeAddress,operation:TangentOperation)
+    ->Result<bool,String>{
+    if !has_tangent_pair(shape,address){
+        return Err("Select an interior Bézier anchor with two adjacent handles".into());
+    }
+    let (anchor,incoming,outgoing)=match (&*shape,address){
+        (Shape::Bezier{segments,..},NodeAddress::BezierEnd(i))=>
+            (segments[i].end,segments[i].control2,segments[i+1].control1),
+        (Shape::CompoundPath{contours},NodeAddress::CompoundEnd(j,i))=>{
+            let segments=&contours[j].segments;
+            (segments[i].end,segments[i].control2,segments[i+1].control1)
+        },
+        _=>unreachable!(),
+    };
+    if !valid(anchor)||!valid(incoming)||!valid(outgoing){
+        return Err("Cannot adjust handles with invalid coordinates".into());
+    }
+    let (before,after)=if operation==TangentOperation::Corner{
+        (anchor,anchor)
+    }else{
+        // Relative vectors in f64 avoid overflow when endpoints are at
+        // opposite ends of the permitted coordinate range.
+        let vin=(anchor.x as f64-incoming.x as f64,
+                  anchor.y as f64-incoming.y as f64);
+        let vout=(outgoing.x as f64-anchor.x as f64,
+                   outgoing.y as f64-anchor.y as f64);
+        let li=vin.0.hypot(vin.1);
+        let lo=vout.0.hypot(vout.1);
+        let mut direction=(vin.0+vout.0,vin.1+vout.1);
+        if direction.0.hypot(direction.1)<1e-9{
+            direction=if lo>=li{vout}else{vin};
+        }
+        let length=direction.0.hypot(direction.1);
+        if length<1e-9{
+            return Err("Both tangent handles have zero length".into());
+        }
+        let unit=(direction.0/length,direction.1/length);
+        let (len_in,len_out)=match operation{
+            TangentOperation::Smooth=>(li,lo),
+            TangentOperation::Symmetric=>((li+lo)*0.5,(li+lo)*0.5),
+            TangentOperation::Corner=>unreachable!(),
+        };
+        let new_before=Point{
+            x:(anchor.x as f64-unit.0*len_in) as f32,
+            y:(anchor.y as f64-unit.1*len_in) as f32,
+        };
+        let new_after=Point{
+            x:(anchor.x as f64+unit.0*len_out) as f32,
+            y:(anchor.y as f64+unit.1*len_out) as f32,
+        };
+        (new_before,new_after)
+    };
+    if !valid(before)||!valid(after){
+        return Err("Adjusted handles would exceed the document bounds".into());
+    }
+    if before==incoming && after==outgoing{return Ok(false);}
+    match (shape,address){
+        (Shape::Bezier{segments,..},NodeAddress::BezierEnd(i))=>{
+            segments[i].control2=before;
+            segments[i+1].control1=after;
+        },
+        (Shape::CompoundPath{contours},NodeAddress::CompoundEnd(j,i))=>{
+            contours[j].segments[i].control2=before;
+            contours[j].segments[i+1].control1=after;
+        },
+        _=>unreachable!(),
+    }
+    Ok(true)
+}
 fn shift(p:&mut Point,d:Point){p.x+=d.x;p.y+=d.y;}
 fn valid(p:Point)->bool{
     p.x.is_finite()&&p.y.is_finite()&&p.x.abs()<=100_000.&&p.y.abs()<=100_000.
