@@ -512,15 +512,31 @@ mod tests{
         assert_eq!(format!("{:?}",shape),format!("{:?}",previous));
     }
     #[test]
-    fn zero_length_tangents_are_rejected_for_smooth_and_symmetric(){
+    fn collapsed_corner_can_become_smooth_and_symmetric_again(){
         let mut shape=two_cubics();
         set_tangent(&mut shape,NodeAddress::BezierEnd(0),
             TangentOperation::Corner).unwrap();
+        assert!(set_tangent(&mut shape,NodeAddress::BezierEnd(0),
+            TangentOperation::Smooth).unwrap());
+        let (before,after)=tangent_vectors(&shape);
+        assert!(before.0.hypot(before.1)>0.001);
+        assert!(after.0.hypot(after.1)>0.001);
+        assert!((before.0*after.1-before.1*after.0).abs()<0.001);
+        assert!(set_tangent(&mut shape,NodeAddress::BezierEnd(0),
+            TangentOperation::Symmetric).unwrap());
+        let (before,after)=tangent_vectors(&shape);
+        assert!((before.0.hypot(before.1)-after.0.hypot(after.1)).abs()<1e-4);
+    }
+    #[test]
+    fn fully_degenerate_neighboring_anchors_remain_atomic(){
+        let origin=Point{x:10.0,y:10.0};
+        let mut shape=Shape::Bezier{start:origin,segments:vec![
+            CubicSegment{control1:origin,control2:origin,end:origin},
+            CubicSegment{control1:origin,control2:origin,end:origin},
+        ],closed:false};
         let old=shape.clone();
         assert!(set_tangent(&mut shape,NodeAddress::BezierEnd(0),
             TangentOperation::Smooth).is_err());
-        assert!(set_tangent(&mut shape,NodeAddress::BezierEnd(0),
-            TangentOperation::Symmetric).is_err());
         assert_eq!(shape,old);
     }
     #[test]
