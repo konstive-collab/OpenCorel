@@ -511,9 +511,15 @@ impl Editor{
     /// The canvas uses the same measured glyph envelope for visual selection
     /// and picking. Core still owns stacking, clipping and layer permissions.
     fn hit_test_at(&self,p:Point,tolerance:f32)->Option<u64>{
-        self.doc.hit_test_with_bounds(p,tolerance,|object|{
-            self.text_preview.ink_bounds(object).unwrap_or_else(||object.bounds())
-        })
+        self.doc.hit_test_with_bounds_filtered(
+            p,tolerance,
+            |object|self.text_preview.ink_bounds(object)
+                .unwrap_or_else(||object.bounds()),
+            opencorel_core::hit_testing::hit_object
+        )
+    }
+    fn pick_tolerance_mm(&self,v:View)->f32{
+        (6.0/v.scale.max(0.001)).clamp(0.05,20.0)
     }
     fn corner_at(&self,v:View,pos:Pos2)->Option<(u64,ResizeCorner)>{
         if self.tool!=Tool::Select || !self.multi_selected.is_empty(){return None;}
@@ -1320,7 +1326,7 @@ impl Editor{
                                     self.resize_drag_checkpointed=false;
                                 }else{
                                     let additive=ctx.input(|i|i.modifiers.shift);
-                                    let hit=self.hit_test_at(v.mm(press),2.0);
+                                    let hit=self.hit_test_at(v.mm(press),self.pick_tolerance_mm(v));
                                     if let Some(id)=hit{
                                         if !additive{
                                             if !self.is_selected(id){
@@ -1431,7 +1437,7 @@ impl Editor{
                 if self.tool==Tool::Select{
                     if let Some(pos)=response.interact_pointer_pos(){
                         if v.rect.contains(pos){
-                            if let Some(id)=self.hit_test_at(v.mm(pos),2.0){
+                            if let Some(id)=self.hit_test_at(v.mm(pos),self.pick_tolerance_mm(v)){
                                 self.begin_inline_text_edit(id,pos);
                             }
                         }
@@ -1454,7 +1460,7 @@ impl Editor{
                             Tool::Nodes=>{self.select_node_near(v,pos);return;},
                             Tool::Freehand=>{return;},
                             Tool::Select=>{
-                                let id=self.hit_test_at(v.mm(pos),2.0);
+                                let id=self.hit_test_at(v.mm(pos),self.pick_tolerance_mm(v));
                                 let shift=ctx.input(|i|i.modifiers.shift);
                                 if shift{self.select_object(id,true);}
                                 else{
