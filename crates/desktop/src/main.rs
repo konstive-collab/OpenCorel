@@ -971,6 +971,26 @@ impl Editor{
             if self.tool==Tool::Nodes{
                 self.paint_node_handles(&page_painter,v);
             }
+            if self.tool==Tool::Curve {
+                if let Some(start)=self.curve_start {
+                    let last=self.curve_draft
+                        .and_then(|id|self.doc.objects.iter().find(|o|o.id==id))
+                        .and_then(|o|match &o.shape{
+                            Shape::Bezier{segments,..}=>segments.last().map(|seg|seg.end),
+                            _=>None,
+                        }).unwrap_or(start);
+                    let anchor=v.screen(last);
+                    page_painter.circle_filled(anchor,3.0,
+                        Color32::from_rgb(20,161,139));
+                    if let Some(cursor)=response.hover_pos().filter(|p|v.rect.contains(*p)){
+                        let next=self.snapped(v.mm(cursor));
+                        page_painter.line_segment([anchor,v.screen(next)],
+                            Stroke::new(1.2,Color32::from_rgb(20,161,139)));
+                        page_painter.circle_stroke(v.screen(next),3.0,
+                            Stroke::new(1.0,Color32::from_rgb(20,161,139)));
+                    }
+                }
+            }
             // A draft is open: prevent clicks behind the popup from modifying
             // the document, while the canvas continues to render.
             if self.inline_text.is_some(){return;}
