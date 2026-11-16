@@ -10,6 +10,7 @@ pub mod preflight;
 pub mod transform;
 pub mod node_edit;
 pub mod path_topology;
+pub mod freehand;
 pub mod boolean_ops;
 pub mod appearance;
 use appearance::Appearance;
