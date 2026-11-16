@@ -219,6 +219,29 @@ impl Editor{
             },
         }
     }
+    /// Return a selected anchor to freely editable handles without
+    /// collapsing or repositioning either control point.
+    pub(super) fn unlink_active_tangents(&mut self){
+        let Some((id,address))=self.active_node else{return;};
+        if !self.node_edit_allowed(id){
+            self.status="Нельзя изменять заблокированный узел".into();
+            return;
+        }
+        let Some(obj)=self.doc.objects.iter().find(|o|o.id==id) else{return;};
+        if !node_edit::has_tangent_pair(&obj.shape,address){
+            self.status="Выберите внутренний узел кривой".into();
+            return;
+        }
+        if node_edit::mode_at(&obj.node_modes,address).is_none(){
+            self.status="Рычаги уже независимы".into();
+            return;
+        }
+        self.checkpoint();
+        if let Some(obj)=self.doc.get_mut(id){
+            obj.node_modes.retain(|mode|mode.address!=address);
+        }
+        self.status="Свободные рычаги: геометрия не изменена. Ctrl+Z — отмена".into();
+    }
     /// Reverse editable path direction without modifying its geometry.
     /// A complete node-mode reindex is part of this undoable transaction.
     pub(super) fn reverse_selected_path(&mut self){
