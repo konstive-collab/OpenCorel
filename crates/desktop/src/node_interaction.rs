@@ -322,6 +322,66 @@ mod tests{
         editor.undo();
         assert_eq!(editor.doc,original);
     }
+    #[test] fn persistent_smooth_mode_survives_undo_redo_and_subsequent_drag(){
+        let mut editor=Editor::default();
+        let id=editor.doc.add(Shape::Bezier{
+            start:Point{x:0.,y:0.},segments:vec![
+                CubicSegment{control1:Point{x:3.,y:4.},
+                    control2:Point{x:8.,y:7.},end:Point{x:10.,y:10.}},
+                CubicSegment{control1:Point{x:13.,y:18.},
+                    control2:Point{x:20.,y:18.},end:Point{x:30.,y:10.}},
+            ],closed:false},Style::default());
+        editor.select_object(Some(id),false);
+        editor.tool=Tool::Nodes;
+        editor.active_node=Some((id,NodeAddress::BezierEnd(0)));
+        editor.apply_tangent_operation(node_edit::TangentOperation::Symmetric);
+        let mode=node_edit::mode_at(&editor.doc.get_mut(id).unwrap().node_modes,
+            NodeAddress::BezierEnd(0));
+        assert_eq!(mode,Some(node_edit::TangentOperation::Symmetric));
+        assert_eq!(editor.undo.len(),1);
+        editor.undo();
+        assert!(editor.doc.get_mut(id).unwrap().node_modes.is_empty());
+        editor.redo();
+        assert_eq!(node_edit::mode_at(&editor.doc.get_mut(id).unwrap().node_modes,
+            NodeAddress::BezierEnd(0)),Some(node_edit::TangentOperation::Symmetric));
+        let obj=editor.doc.get_mut(id).unwrap();
+        node_edit::move_node_with_modes(&mut obj.shape,NodeAddress::BezierControl1(1),
+            Point{x:16.,y:22.},&obj.node_modes).unwrap();
+        let Shape::Bezier{segments,..}=&obj.shape else{panic!()};
+        let anchor=segments[0].end;
+        let other=segments[0].control2;
+        let target=segments[1].control1;
+        assert!((anchor.x-other.x-(target.x-anchor.x)).abs()<1e-4);
+        assert!((anchor.y-other.y-(target.y-anchor.y)).abs()<1e-4);
+        editor.doc.validate().unwrap();
+    }
+    #[test] fn path_reverse_and_closure_each_have_atomic_undo(){
+        let mut editor=Editor::default();
+        let id=editor.doc.add(Shape::Bezier{
+            start:Point{x:0.,y:0.},segments:vec![
+                CubicSegment{control1:Point{x:4.,y:0.},
+                    control2:Point{x:6.,y:5.},end:Point{x:10.,y:10.}},
+                CubicSegment{control1:Point{x:14.,y:14.},
+                    control2:Point{x:18.,y:6.},end:Point{x:20.,y:0.}},
+            ],closed:false},Style::default());
+        editor.tool=Tool::Nodes;editor.selected=Some(id);
+        let original=editor.doc.clone();
+        editor.reverse_selected_path();
+        assert_eq!(editor.undo.len(),1);
+        editor.set_selected_path_closed(true);
+        assert_eq!(editor.undo.len(),2);
+        editor.set_selected_path_closed(true);
+        assert_eq!(editor.undo.len(),2);
+        editor.undo();
+        let Shape::Bezier{closed,..}=&editor.doc.get_mut(id).unwrap().shape
+            else{panic!()};
+        assert!(!closed);
+        editor.undo();
+        assert_eq!(editor.doc,original);
+        editor.redo();
+        editor.redo();
+        editor.doc.validate().unwrap();
+    }
     #[test] fn tangent_command_is_undoable_and_not_repeated_as_noop(){
         let mut editor=Editor::default();
         let id=editor.doc.add(Shape::Bezier{
