@@ -22,6 +22,8 @@ mod bezier_preview;
 mod bezier_pen;
 mod snap_targets;
 mod freehand_interaction;
+mod guide_offset;
+use opencorel_core::guides::{Guide,GuideAxis};
 use compound_render::CompoundCache;
 use text_preview::TextPreview;
 use bezier_preview::BezierPreviewCache;
@@ -45,6 +47,12 @@ impl ResizeCorner{
     }
 }
 
+#[derive(Clone,Copy,Debug)]
+struct GuideDrag{
+    axis:GuideAxis,
+    index:Option<usize>,
+    position_mm:f32,
+}
 #[derive(Default)]
 struct FillCache { entries:HashMap<u64,(u64,Vec<usize>)> }
 impl FillCache {
@@ -121,6 +129,10 @@ struct Editor{
     snap_nodes:bool,
     snap_tolerance_px:f32,
     join_tolerance_mm:f32,
+    show_guides:bool,
+    snap_guides:bool,
+    guide_drag:Option<GuideDrag>,
+    offset_distance_mm:f32,
     grid_mm:f32,
     show_rulers:bool,
     light_theme:bool,
@@ -193,6 +205,8 @@ impl Default for Editor{
             show_grid:false,snap_grid:false,
             snap_nodes:true,snap_tolerance_px:10.0,
             join_tolerance_mm:2.0,
+            show_guides:true,snap_guides:true,guide_drag:None,
+            offset_distance_mm:2.0,
             grid_mm:10.0,
             show_rulers:true,light_theme:false,cursor_mm:None,
             fill_cache:FillCache::default(),vector_cache:VectorCache::default(),
@@ -619,6 +633,7 @@ impl Editor{
             self.curve_resumed=false;
             self.curve_outgoing=None;self.curve_drag_anchor=None;
             self.freehand_samples.clear();self.freehand_overflow=false;
+            self.guide_drag=None;
             self.resize_drag=None;self.node_drag=None;self.active_node=None;
             self.node_drag_checkpointed=false;
             self.status="Отменено".into();
@@ -637,6 +652,7 @@ impl Editor{
             self.curve_resumed=false;
             self.curve_outgoing=None;self.curve_drag_anchor=None;
             self.freehand_samples.clear();self.freehand_overflow=false;
+            self.guide_drag=None;
             self.resize_drag=None;self.node_drag=None;self.active_node=None;
             self.node_drag_checkpointed=false;
             self.status="Повторено".into();
@@ -963,11 +979,23 @@ impl Editor{
     /// Pixel-consistent anchor snap, with the grid as a fallback. The object
     /// being edited is excluded so its nearby handles cannot trap a drag.
     fn snap_canvas_point(&self,p:Point,scale:f32,excluded_id:Option<u64>)->Point{
-        if self.snap_nodes && scale.is_finite() && scale>0.0{
+        if scale.is_finite() && scale>0.0{
             let tolerance=(self.snap_tolerance_px/scale).min(500.0);
-            if let Some(hit)=snap_targets::nearest_anchor(
-                &self.doc,p,tolerance,excluded_id){
-                return hit.point;
+            if self.snap_nodes{
+                if let Some(hit)=snap_targets::nearest_anchor(
+                    &self.doc,p,tolerance,excluded_id){
+                    return hit.point;
+                }
+            }
+            if self.snap_guides{
+                let guided=opencorel_core::guides::snap(p,&self.doc.guides,tolerance);
+                let (x,y)=opencorel_core::guides::snapped_axes(
+                    p,&self.doc.guides,tolerance);
+                if x||y{
+                    let grid=self.snapped(p);
+                    return Point{x:if x{guided.x}else{grid.x},
+                        y:if y{guided.y}else{grid.y}};
+                }
             }
         }
         self.snapped(p)
@@ -1050,6 +1078,7 @@ impl Editor{
             outline(&painter,v.rect,Color32::GRAY,1.0);
             let page_painter=painter.with_clip_rect(v.rect.intersect(working));
             self.draw_grid_rulers(&painter,&page_painter,v,response.rect);
+            self.paint_guides(&page_painter,v);
             if self.doc.clip_links.is_empty() && self.doc.appearances.is_empty(){
                 for obj in self.doc.visible_objects(){
                     if v.bounds(obj.bounds()).intersects(v.rect.intersect(response.rect)){
@@ -1174,7 +1203,10 @@ impl Editor{
             if self.inline_text.is_some(){return;}
             if response.drag_started_by(egui::PointerButton::Primary){
                 if let Some(pos)=response.interact_pointer_pos(){
-                    if v.rect.contains(pos){
+                    let press=ctx.input(|i|i.pointer.press_origin()).unwrap_or(pos);
+                    let guide_started=self.begin_guide_drag(
+                        v,response.rect,press,ctx.input(|i|i.modifiers.alt));
+                    if !guide_started && v.rect.contains(pos){
                         let p=self.snapped(v.mm(pos));
                         match self.tool{
                             Tool::Nodes=>self.begin_node_drag(v,pos),
@@ -1248,7 +1280,9 @@ impl Editor{
                         self.node_drag.is_some_and(|(_,address)|!address.is_handle()){
                         self.snap_canvas_point(v.mm(pos),v.scale,self.selected)
                     }else{self.snapped(v.mm(pos))};
-                    if self.tool==Tool::Freehand {
+                    if self.guide_drag.is_some(){
+                        self.update_guide_drag(v.mm(pos));
+                    }else if self.tool==Tool::Freehand {
                         self.freehand_extend(v.mm(pos),v.scale);
                     }else if self.tool==Tool::Curve && self.curve_drag_anchor.is_some(){
                         self.curve_drag_to(now);
@@ -1292,7 +1326,9 @@ impl Editor{
                 }
             }
             if response.drag_stopped_by(egui::PointerButton::Primary){
-                if self.tool==Tool::Freehand {
+                if let Some(drag)=self.guide_drag.take(){
+                    self.commit_guide_drag(drag);
+                }else if self.tool==Tool::Freehand {
                     let last=response.interact_pointer_pos().map(|pos|
                         self.snap_canvas_point(v.mm(pos),v.scale,None));
                     self.freehand_finish(last,v.scale);
