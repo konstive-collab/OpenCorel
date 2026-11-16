@@ -1,5 +1,44 @@
 # OpenCorel v0.14 Alpha — Typography iteration I06 (in progress)
 
+## Freehand pen and geometric fitting — next professional toolset
+
+A new **Freehand (H)** tool collects pointer samples during a continuous
+left-button drag. On mouse release it creates **one native editable Bézier**
+object (not a bitmap) with one Undo entry. Preview is a lightweight line
+rather than re-fitting the entire sample set on every frame.
+
+- **Adjustable drawing precision:** 0.5–12 screen pixels converted to
+  millimetres using the active canvas scale. A bounded iterative
+  Ramer–Douglas–Peucker pass removes redundant points.
+- **Adjustable smoothness:** 0–1 tension-based cubic handle interpolation.
+  Low values preserve angular details; high values create flowing
+  interpolated cubic sections.
+- **Closed smooth strokes:** optional checkbox creates an editable closed
+  cubic contour with cyclic tangent continuity at the start/end seam.
+- **Existing-path conversion:** F10 properties can turn an open or closed
+  native polyline into a fitted Bézier without losing style or layer.
+- **Simplify existing cubic:** resample up to 500 native cubic segments,
+  reduce them within a user-entered millimetre tolerance and fit new
+  segments; refuses when the operation would not reduce the count.
+  Since it changes node topology it intentionally clears old per-node
+  tangent-mode assignments; Ctrl+Z restores them exactly.
+- **Safety and responsiveness:** rejects nonfinite/out-of-range geometry,
+  tap-only gestures, locked layers, oversized strokes (4096 samples) and
+  fitted paths with more than 2048 segments. An excessive gesture is
+  discarded with a warning rather than silently truncating its geometry.
+  Geometry fitting happens only on release or explicitly requested refit,
+  never for every pointer frame.
+- **Automated regression coverage:** collinear simplification, corner
+  retention, smoothness, closed tangent seam, document validation,
+  4096-sample budget, invalid values, undo/redo, locked layers and
+  conversion/refitting of existing open and closed paths.
+
+**Scope and caveats:** mouse/tablet pointer position is sampled, but pen
+pressure/tilt is not yet captured. This is stroke-outline editing rather
+than variable-width brush painting. Paths are approximate and must not
+be treated as dimensionally exact technical vectors without review.
+Manual Windows drawing tests remain required even if CI is green.
+
 ## Precision drawing — node snapping and smooth seam joining
 
 - **Adjustable join distance:** the F10 panel now exposes an editable 0–1000 mm
