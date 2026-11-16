@@ -987,7 +987,7 @@ impl Editor{
                     return hit.point;
                 }
             }
-            if self.snap_guides{
+            if self.show_guides && self.snap_guides{
                 let guided=opencorel_core::guides::snap(p,&self.doc.guides,tolerance);
                 let (x,y)=opencorel_core::guides::snapped_axes(
                     p,&self.doc.guides,tolerance);
@@ -1566,6 +1566,20 @@ mod tests {
         e.snap_guides=false;
         assert_eq!(e.snap_canvas_point(Point{x:12.8,y:20.4},10.0,None),
             Point{x:10.0,y:20.0});
+    }
+    #[test]
+    fn hidden_guides_never_capture_mouse_or_snap(){
+        let mut e=Editor::default();
+        e.doc=Document::default();
+        e.snap_nodes=false;e.snap_grid=false;
+        e.snap_guides=true;e.show_guides=false;
+        e.snap_tolerance_px=10.0;
+        e.doc.guides.push(Guide::new(GuideAxis::Vertical,12.0).unwrap());
+        let cursor=Point{x:12.3,y:35.0};
+        assert_eq!(e.snap_canvas_point(cursor,10.0,None),cursor);
+        e.show_guides=true;
+        assert_eq!(e.snap_canvas_point(cursor,10.0,None),
+            Point{x:12.0,y:35.0});
     }
     #[test]
     fn visible_anchor_priority_exceeds_nearby_guide(){
