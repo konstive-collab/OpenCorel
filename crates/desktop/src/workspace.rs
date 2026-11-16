@@ -109,6 +109,14 @@ impl Editor {
                     if ui.button("Показать всю страницу  F4").clicked(){self.fit_page();ui.close_menu();}
                     ui.checkbox(&mut self.show_grid,"Сетка");
                     ui.checkbox(&mut self.snap_grid,"Привязка к сетке");
+                    ui.checkbox(&mut self.snap_nodes,"Привязка к узлам объектов");
+                    if self.snap_nodes{
+                        ui.horizontal(|ui|{
+                            ui.label("Допуск, пикс.");
+                            ui.add(egui::DragValue::new(&mut self.snap_tolerance_px)
+                                .speed(0.2).range(2.0..=30.0));
+                        });
+                    }
                     ui.checkbox(&mut self.show_rulers,"Линейки");
                     ui.checkbox(&mut self.light_theme,"Светлая тема");
                 });
@@ -613,14 +621,26 @@ impl Editor {
                 ui.separator();
                 ui.label("Соединить две выделенные кривые");
                 ui.small("V → Shift+щелчок по второй кривой → F10");
+                ui.horizontal(|ui|{
+                    ui.label("Допуск сшивки, мм");
+                    ui.add(egui::DragValue::new(&mut self.join_tolerance_mm)
+                        .speed(0.1).range(0.0..=1000.0).fixed_decimals(2));
+                });
                 ui.horizontal_wrapped(|ui|{
-                    if ui.button("Сшить концы (до 2 мм)")
-                        .on_hover_text("Автоматически подберёт ближайшие концы и сведёт их в одну точку")
+                    if ui.button("Сшить концы")
+                        .on_hover_text("Совместить ближайшие конечные узлы с заданным допуском")
                         .clicked(){
-                        self.join_selected_beziers(JoinMode::Snap{tolerance_mm:2.0});
+                        self.join_selected_beziers(JoinMode::Snap{
+                            tolerance_mm:self.join_tolerance_mm});
+                    }
+                    if ui.button("Сшить плавно")
+                        .on_hover_text("Свести узлы, выровнять соседние касательные и сохранить гладкость")
+                        .clicked(){
+                        self.join_selected_beziers(JoinMode::SmoothSnap{
+                            tolerance_mm:self.join_tolerance_mm});
                     }
                     if ui.button("Соединить мостиком")
-                        .on_hover_text("Добавит прямой сегмент между ближайшими концами, не сдвигая исходные точки")
+                        .on_hover_text("Прямой сегмент между концами без смещения исходных точек")
                         .clicked(){
                         self.join_selected_beziers(JoinMode::Bridge);
                     }
