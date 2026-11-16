@@ -8,6 +8,66 @@ const MAX_NEW_OBJECTS:usize=2000;
 const MAX_NEW_ESTIMATED_BYTES:usize=96*1024*1024;
 
 impl Editor{
+    pub(super) fn align_selection(&mut self,alignment:opencorel_core::Alignment){
+        let ids=self.selection_ids();
+        if ids.len()<2{
+            self.status="Для выравнивания выберите не менее двух объектов".into();return;
+        }
+        if !self.layout_selection_editable(&ids){return;}
+        // Preview the change before checkpointing; reject non-finite positions.
+        let mut preview=self.doc.clone();
+        if preview.align_objects(&ids,alignment)!=ids.len() ||
+            preview.validate().is_err(){
+            self.status="Выравнивание отклонено из-за ограничений геометрии".into();
+            return;
+        }
+        if preview==self.doc{return;}
+        self.checkpoint();
+        self.doc=preview;
+        self.clear_layout_caches();
+        self.status=format!("Выровнено объектов: {}. Ctrl+Z — отмена",ids.len());
+    }
+
+    pub(super) fn distribute_selection(&mut self,dir:opencorel_core::Distribution){
+        let ids=self.selection_ids();
+        if ids.len()<3{
+            self.status="Для распределения нужно хотя бы три объекта".into();return;
+        }
+        if !self.layout_selection_editable(&ids){return;}
+        let mut preview=self.doc.clone();
+        if preview.distribute_objects(&ids,dir)!=ids.len() ||
+            preview.validate().is_err(){
+            self.status="Распределение отклонено из-за ограничений геометрии".into();
+            return;
+        }
+        if preview==self.doc{return;}
+        self.checkpoint();
+        self.doc=preview;
+        self.clear_layout_caches();
+        self.status=format!("Равномерно распределено объектов: {}. Ctrl+Z — отмена",ids.len());
+    }
+
+    fn layout_selection_editable(&mut self,ids:&[u64])->bool{
+        let chosen:HashSet<u64>=ids.iter().copied().collect();
+        if self.doc.objects.iter().filter(|o|chosen.contains(&o.id)).count()!=chosen.len() ||
+            self.doc.objects.iter().filter(|o|chosen.contains(&o.id)).any(|o|
+                o.group_id.is_some() ||
+                !self.doc.layer(o.layer_id).is_some_and(|l|l.visible&&!l.locked)) ||
+            self.doc.clip_links.iter().any(|l|
+                chosen.contains(&l.source_id)||chosen.contains(&l.target_id)){
+            self.status="Выравнивание: нужны доступные объекты без групп и обтравки".into();
+            return false;
+        }
+        true
+    }
+
+    fn clear_layout_caches(&mut self){
+        self.fill_cache.entries.clear();
+        self.compound_cache.clear();
+        self.vector_cache.clear();
+        self.bezier_preview.clear();
+        self.raster_cache.clear();
+    }
     pub(super) fn repeat_selection_as_grid(&mut self){
         let cols=self.array_columns as usize;
         let rows=self.array_rows as usize;
