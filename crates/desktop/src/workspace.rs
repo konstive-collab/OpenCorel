@@ -633,7 +633,16 @@ impl Editor {
                     if has_pair{
                         use opencorel_core::node_edit::TangentOperation;
                         ui.separator();
-                        ui.label("Управление касательными");
+                        let current=self.doc.objects.iter().find(|o|o.id==id)
+                            .and_then(|o|opencorel_core::node_edit::mode_at(
+                                &o.node_modes,address));
+                        let mode_text=match current{
+                            Some(TangentOperation::Corner)=>"Угловой — независимые рычаги",
+                            Some(TangentOperation::Smooth)=>"Гладкий — сохраняет направление",
+                            Some(TangentOperation::Symmetric)=>"Симметричный — равные рычаги",
+                            None=>"Свободный — рычаги независимы",
+                        };
+                        ui.label(format!("Режим узла: {mode_text}"));
                         ui.horizontal_wrapped(|ui|{
                             if ui.button("Угол")
                                 .on_hover_text("Сбросить оба рычага в узел").clicked(){
@@ -650,7 +659,7 @@ impl Editor {
                                 self.apply_tangent_operation(TangentOperation::Symmetric);
                             }
                         });
-                        ui.small("Команды разово изменяют геометрию; рычаги затем редактируются независимо.");
+                        ui.small("Гладкий и Симметрия автоматически связывают рычаги при перетаскивании. Режим сохраняется в .kdr.");
                     }
                 }
             }else{
