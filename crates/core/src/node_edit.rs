@@ -283,6 +283,43 @@ pub fn move_node_with_modes(shape:&mut Shape,address:NodeAddress,
     }
     Ok(())
 }
+/// Convert a native polyline to exactly the same geometric trace in cubic form.
+/// Each line is represented by cubic controls at one and two thirds.
+/// Closed paths retain their implicit closing edge; no smoothing is applied.
+/// The operation is pure, allowing callers to checkpoint only on success.
+pub fn polyline_to_bezier_exact(shape:&Shape)->Result<Shape,String>{
+    let Shape::Polyline{points,closed}=shape else{
+        return Err("Select an editable polyline".into());
+    };
+    if points.len()<2 || (*closed && points.len()<3){
+        return Err("Polyline does not contain enough vertices".into());
+    }
+    if points.len()>10_001{
+        return Err("Exact conversion is limited to 10,000 cubic segments".into());
+    }
+    if points.iter().any(|p|!valid(*p)){
+        return Err("Polyline contains invalid coordinates".into());
+    }
+    let mut segments=Vec::with_capacity(points.len()-1);
+    for edge in points.windows(2){
+        let a=edge[0];
+        let b=edge[1];
+        let control1=Point{
+            x:(a.x as f64+(b.x as f64-a.x as f64)/3.0) as f32,
+            y:(a.y as f64+(b.y as f64-a.y as f64)/3.0) as f32,
+        };
+        let control2=Point{
+            x:(a.x as f64+2.0*(b.x as f64-a.x as f64)/3.0) as f32,
+            y:(a.y as f64+2.0*(b.y as f64-a.y as f64)/3.0) as f32,
+        };
+        if !valid(control1)||!valid(control2){
+            return Err("Converted controls exceed document bounds".into());
+        }
+        segments.push(CubicSegment{control1,control2,end:b});
+    }
+    Ok(Shape::Bezier{start:points[0],segments,closed:*closed})
+}
+
 /// Reverse a path in-place while preserving every cubic's geometric trace.
 /// Cubic controls swap order; for compound shapes every contour is reversed.
 pub fn reverse_path(shape:&mut Shape)->Result<(),String>{
