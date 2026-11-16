@@ -1358,6 +1358,84 @@ impl eframe::App for Editor{
 mod tests {
     use super::*;
     #[test]
+    fn bezier_drag_shapes_smooth_handles_without_extra_undo(){
+        let mut editor=Editor::default();
+        editor.change_tool(Tool::Curve);
+        let p0=Point{x:10.0,y:20.0};
+        let p1=Point{x:50.0,y:40.0};
+        editor.curve_click(p0);
+        editor.curve_drag_anchor=Some(p0);
+        editor.curve_drag_to(Point{x:22.0,y:24.0});
+        assert_eq!(editor.curve_outgoing,Some(Point{x:22.0,y:24.0}));
+        editor.curve_drag_anchor=None;
+        editor.curve_click(p1);
+        let id=editor.curve_draft.unwrap();
+        editor.curve_drag_anchor=Some(p1);
+        editor.curve_drag_to(Point{x:58.0,y:50.0});
+        let obj=editor.doc.objects.iter().find(|o|o.id==id).unwrap();
+        let Shape::Bezier{segments,..}=&obj.shape else{panic!("curve")};
+        assert_eq!(segments[0].control1,Point{x:22.0,y:24.0});
+        assert_eq!(segments[0].control2,Point{x:42.0,y:30.0});
+        assert_eq!(editor.curve_outgoing,Some(Point{x:58.0,y:50.0}));
+        assert_eq!(editor.undo.len(),1);
+        editor.curve_drag_anchor=None;
+        editor.curve_click(Point{x:80.0,y:40.0});
+        let Shape::Bezier{segments,..}=&editor.doc.objects.iter()
+            .find(|o|o.id==id).unwrap().shape else{panic!("curve")};
+        assert_eq!(segments[1].control1,Point{x:58.0,y:50.0});
+        assert_eq!(editor.undo.len(),1);
+        editor.doc.validate().unwrap();
+    }
+    #[test]
+    fn bezier_click_starts_cusp_and_does_not_reuse_old_tangent(){
+        let mut editor=Editor::default();
+        editor.change_tool(Tool::Curve);
+        editor.curve_click(Point{x:0.0,y:0.0});
+        editor.curve_drag_anchor=Some(Point{x:0.0,y:0.0});
+        editor.curve_drag_to(Point{x:9.0,y:0.0});
+        editor.curve_drag_anchor=None;
+        editor.curve_click(Point{x:30.0,y:0.0});
+        assert!(editor.curve_outgoing.is_none());
+        editor.curve_click(Point{x:60.0,y:30.0});
+        let Shape::Bezier{segments,..}=&editor.doc.objects.last().unwrap().shape
+            else{panic!("curve")};
+        assert_eq!(segments[1].control1,Point{x:40.0,y:10.0});
+    }
+    #[test]
+    fn bezier_close_sets_closed_flag_and_preserves_single_history_entry(){
+        let mut editor=Editor::default();
+        editor.change_tool(Tool::Curve);
+        editor.curve_click(Point{x:0.0,y:0.0});
+        editor.curve_click(Point{x:20.0,y:0.0});
+        editor.curve_click(Point{x:20.0,y:20.0});
+        editor.curve_finish(true);
+        assert_eq!(editor.tool,Tool::Select);
+        assert!(editor.curve_outgoing.is_none());
+        assert!(editor.curve_drag_anchor.is_none());
+        let Shape::Bezier{closed,segments,..}=&editor.doc.objects.last().unwrap().shape
+            else{panic!("curve")};
+        assert!(*closed);
+        assert_eq!(segments.len(),2);
+        assert_eq!(editor.undo.len(),1);
+        editor.undo();
+        assert_eq!(editor.doc.objects.len(),2);
+    }
+    #[test]
+    fn bezier_locked_layer_does_not_change_drag_tangent(){
+        let mut editor=Editor::default();
+        editor.change_tool(Tool::Curve);
+        let p0=Point{x:1.0,y:1.0};
+        editor.curve_click(p0);
+        editor.curve_click(Point{x:20.0,y:20.0});
+        let id=editor.curve_draft.unwrap();
+        let before=editor.doc.objects.iter().find(|o|o.id==id).unwrap().shape.clone();
+        editor.curve_drag_anchor=Some(Point{x:20.0,y:20.0});
+        editor.doc.layers[0].locked=true;
+        editor.curve_drag_to(Point{x:30.0,y:25.0});
+        assert_eq!(editor.doc.objects.iter().find(|o|o.id==id).unwrap().shape,before);
+        assert!(editor.curve_outgoing.is_none());
+    }
+    #[test]
     fn bezier_many_vertices_are_one_undo_transaction(){
         let mut editor=Editor::default();
         let original=editor.doc.clone();
