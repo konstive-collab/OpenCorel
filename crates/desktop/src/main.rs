@@ -570,17 +570,21 @@ impl Editor{
         let current=self.doc.objects[index].bounds();
         if target.x==current.x&&target.y==current.y&&
             target.w==current.w&&target.h==current.h{return;}
-        // Verify candidate first: unsuccessful transforms do not create
-        // empty Undo entries or leave half-modified geometry in the document.
-        let mut candidate=self.doc.objects[index].shape.clone();
-        if let Err(e)=transform::resize_shape(&mut candidate,target){
-            self.status=e;return;
-        }
+        // Only the first edit needs a candidate clone for transactional
+        // validation before the Undo checkpoint. Later frames use in-place
+        // resizing; the core transform pre-validates before mutation.
         if self.resize_drag.is_some()&&!self.resize_drag_checkpointed{
+            let mut candidate=self.doc.objects[index].shape.clone();
+            if let Err(e)=transform::resize_shape(&mut candidate,target){
+                self.status=e;return;
+            }
             self.checkpoint();
             self.resize_drag_checkpointed=true;
+            self.doc.objects[index].shape=candidate;
+        }else if let Err(e)=transform::resize_shape(
+            &mut self.doc.objects[index].shape,target){
+            self.status=e;return;
         }
-        self.doc.objects[index].shape=candidate;
         self.fill_cache.entries.clear();
         self.vector_cache.clear();
         self.compound_cache.clear();
