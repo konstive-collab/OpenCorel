@@ -20,6 +20,7 @@ mod text_preview;
 mod text_edit_ops;
 mod bezier_preview;
 mod bezier_pen;
+mod snap_targets;
 use compound_render::CompoundCache;
 use text_preview::TextPreview;
 use bezier_preview::BezierPreviewCache;
@@ -940,10 +941,22 @@ impl Editor{
         }
     }
     fn snapped(&self,p:Point)->Point {
-        if self.snap_grid {
+        if self.snap_grid && self.grid_mm.is_finite() && self.grid_mm>0.0 {
             Point{x:(p.x/self.grid_mm).round()*self.grid_mm,
                 y:(p.y/self.grid_mm).round()*self.grid_mm}
         }else{p}
+    }
+    /// Pixel-consistent anchor snap, with the grid as a fallback. The object
+    /// being edited is excluded so its nearby handles cannot trap a drag.
+    fn snap_canvas_point(&self,p:Point,scale:f32,excluded_id:Option<u64>)->Point{
+        if self.snap_nodes && scale.is_finite() && scale>0.0{
+            let tolerance=(self.snap_tolerance_px/scale).min(500.0);
+            if let Some(hit)=snap_targets::nearest_anchor(
+                &self.doc,p,tolerance,excluded_id){
+                return hit.point;
+            }
+        }
+        self.snapped(p)
     }
     fn draw_grid_rulers(&self,painter:&egui::Painter, page:&egui::Painter,
         v:View, area:Rect){
@@ -1098,7 +1111,8 @@ impl Editor{
                             Color32::from_rgb(137,123,218));
                     }
                     if let Some(cursor)=response.hover_pos().filter(|p|v.rect.contains(*p)){
-                        let next=self.snapped(v.mm(cursor));
+                        let next=self.snap_canvas_point(v.mm(cursor),v.scale,
+                            self.curve_draft);
                         let vertices=bezier_pen::preview_segment(
                             last,self.curve_outgoing,next)
                             .into_iter().map(|point|v.screen(point)).collect();
@@ -1122,7 +1136,8 @@ impl Editor{
                                 let press=ctx.input(|i|i.pointer.press_origin())
                                     .unwrap_or(pos);
                                 if v.rect.contains(press){
-                                    let anchor=self.snapped(v.mm(press));
+                                    let anchor=self.snap_canvas_point(v.mm(press),
+                                        v.scale,self.curve_draft);
                                     self.curve_click(anchor);
                                     let valid_draft=self.curve_draft
                                         .and_then(|id|self.doc.objects.iter().find(|o|o.id==id))
@@ -1175,7 +1190,10 @@ impl Editor{
             }
             if response.dragged_by(egui::PointerButton::Primary){
                 if let Some(pos)=response.interact_pointer_pos(){
-                    let now=self.snapped(v.mm(pos));
+                    let now=if self.tool==Tool::Nodes &&
+                        self.node_drag.is_some_and(|(_,address)|!address.is_handle()){
+                        self.snap_canvas_point(v.mm(pos),v.scale,self.selected)
+                    }else{self.snapped(v.mm(pos))};
                     if self.tool==Tool::Curve && self.curve_drag_anchor.is_some(){
                         self.curve_drag_to(now);
                     }else if self.node_drag.is_some(){
@@ -1263,6 +1281,8 @@ impl Editor{
                                 return;
                             },
                             Tool::Curve=>{
+                                let p=self.snap_canvas_point(v.mm(pos),v.scale,
+                                    self.curve_draft);
                                 let closing=self.curve_start.is_some_and(|start|{
                                     let segments=self.curve_draft
                                         .and_then(|id|self.doc.objects.iter().find(|o|o.id==id))
