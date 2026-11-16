@@ -14,6 +14,12 @@ without flattening:
 - **Split at Anchor**: an open cubic can be split at a selected interior
   endpoint into two editable objects. Styles and object appearances are
   copied; tangent modes are partitioned and renumbered correctly.
+- **Continue Existing Curve**: F10 on a selected editable open Bézier
+  exposes an action to resume the Bézier pen on the same object. New segments
+  append directly to that path. Selecting the saved last anchor for a drag
+  does not add a zero-length segment; it shapes the outgoing tangent.
+  History is recorded lazily: entering/exiting without edits creates no
+  checkpoint, and all additional segments or tangent edits are one Undo step.
 - Undo restores the original object graph in **one** step. Redo restores
   the joined or split result.
 
