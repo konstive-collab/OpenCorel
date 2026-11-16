@@ -89,8 +89,9 @@ impl Editor{
         }
     }
     pub(super) fn begin_node_drag(&mut self,v:View,pos:Pos2){
+        self.node_drag_checkpointed=false;
         if let Some(target)=self.node_at(v,pos){
-            self.checkpoint();
+            // Do not snapshot the entire document just for grabbing a node.
             self.active_node=Some(target);
             self.node_drag=Some(target);
         }else{
@@ -99,16 +100,40 @@ impl Editor{
     }
     pub(super) fn drag_node_to(&mut self,to:Point){
         let Some((id,address))=self.node_drag else{return;};
-        if !self.node_edit_allowed(id){self.node_drag=None;return;}
-        let Some(obj)=self.doc.get_mut(id) else{return;};
-        match node_edit::move_node(&mut obj.shape,address,to){
-            Ok(())=>{
-                self.fill_cache.entries.clear();
-                self.compound_cache.clear();
-                self.status=format!("Узел: X {:.2} мм, Y {:.2} мм",to.x,to.y);
-            }
-            Err(e)=>self.status=e,
+        if !self.node_edit_allowed(id){
+            self.node_drag=None;
+            self.node_drag_checkpointed=false;
+            return;
         }
+        let Some(obj)=self.doc.objects.iter().find(|obj|obj.id==id) else{return;};
+        let Some(previous)=node_edit::point_at(&obj.shape,address) else{return;};
+        if previous==to{return;}
+        if !self.node_drag_checkpointed{
+            // Validate before cloning the full document. This prevents
+            // no-op/illegal drags from polluting history.
+            let mut tested=obj.shape.clone();
+            match node_edit::move_node(&mut tested,address,to){
+                Ok(())=>{
+                    self.checkpoint();
+                    self.node_drag_checkpointed=true;
+                    if let Some(obj)=self.doc.get_mut(id){obj.shape=tested;}
+                },
+                Err(reason)=>{
+                    self.status=reason;
+                    return;
+                },
+            }
+        }else{
+            let Some(obj)=self.doc.get_mut(id) else{return;};
+            if let Err(reason)=node_edit::move_node(&mut obj.shape,address,to){
+                self.status=reason;
+                return;
+            }
+        }
+        self.fill_cache.entries.clear();
+        self.compound_cache.clear();
+        self.bezier_preview.clear();
+        self.status=format!("Узел: X {:.2} мм, Y {:.2} мм",to.x,to.y);
     }
     pub(super) fn nudge_active_node(&mut self,dx:f32,dy:f32){
         let Some((id,address))=self.active_node else{return;};
