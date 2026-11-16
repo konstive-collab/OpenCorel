@@ -85,8 +85,8 @@ impl Editor{
         let dx=step_x*(cols-1) as f32;
         let dy=step_y*(rows-1) as f32;
         if ![min_x,min_y,max_x,max_y,dx,dy].iter().all(|v|v.is_finite())||
-            min_x.min(min_x+dx)<-100_000. || max_x.max(max_x+dx)>100_000. ||
-            min_y.min(min_y+dy)<-100_000. || max_y.max(max_y+dy)>100_000.{
+            min_x.min(min_x+dx)< -100_000. || max_x.max(max_x+dx)>100_000. ||
+            min_y.min(min_y+dy)< -100_000. || max_y.max(max_y+dy)>100_000.{
             self.status="Сетка выходит за допустимые координаты документа".into();
             return;
         }
