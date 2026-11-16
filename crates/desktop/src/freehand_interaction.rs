@@ -57,7 +57,12 @@ impl Editor{
         }
         let tolerance=(self.freehand_precision_px/scale.max(0.001))
             .clamp(0.0,100.0);
-        match freehand::fit_stroke(&samples,tolerance,self.freehand_smoothness){
+        let fitted=if self.freehand_closed{
+            freehand::fit_closed_stroke(&samples,tolerance,self.freehand_smoothness)
+        }else{
+            freehand::fit_stroke(&samples,tolerance,self.freehand_smoothness)
+        };
+        match fitted{
             Ok(shape)=>{
                 let Shape::Bezier{segments,..}=&shape else{unreachable!()};
                 let count=segments.len();
@@ -91,8 +96,8 @@ impl Editor{
         }
         let Some(obj)=self.doc.objects.iter().find(|o|o.id==id) else{return;};
         match (&obj.shape,convert_polyline){
-            (Shape::Polyline{closed:false,..},true)|
-            (Shape::Bezier{closed:false,..},false)=>{},
+            (Shape::Polyline{..},true)|
+            (Shape::Bezier{..},false)=>{},
             _=>{
                 self.status=if convert_polyline{
                     "Выберите открытую ломаную для преобразования в гладкую кривую"
@@ -107,7 +112,7 @@ impl Editor{
             Shape::Polyline{points,..}=>points.len().saturating_sub(1),
             _=>0,
         };
-        let new_shape=match freehand::refit_open_path(
+        let new_shape=match freehand::refit_path(
             &obj.shape,self.refit_tolerance_mm,self.freehand_smoothness){
             Ok(shape)=>shape,
             Err(reason)=>{
@@ -162,6 +167,27 @@ mod tests{
         assert_eq!(e.doc.objects.len(),0);
         e.redo();
         assert_eq!(e.doc.objects.len(),1);
+    }
+    #[test]
+    fn closed_freehand_is_editable_and_undoable(){
+        let mut e=Editor::default();
+        e.doc=Default::default();
+        e.tool=Tool::Freehand;
+        e.freehand_closed=true;
+        e.freehand_begin(Point{x:0.,y:0.});
+        for p in [Point{x:20.,y:0.},Point{x:20.,y:20.},
+            Point{x:0.,y:20.},Point{x:0.1,y:0.1}]{
+            e.freehand_extend(p,10.);
+        }
+        e.freehand_finish(None,10.);
+        let Shape::Bezier{start,segments,closed}=&e.doc.objects[0].shape
+            else{panic!("native cubic loop required")};
+        assert!(*closed);
+        assert_eq!(segments.last().unwrap().end,*start);
+        assert_eq!(e.undo.len(),1);
+        e.doc.validate().unwrap();
+        e.undo();
+        assert!(e.doc.objects.is_empty());
     }
     #[test]
     fn tap_and_locked_layer_do_not_create_documents(){
