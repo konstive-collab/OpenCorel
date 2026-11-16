@@ -614,6 +614,41 @@ mod tests{
         assert!(e.doc.objects.iter().all(|obj|obj.id!=b));
     }
     #[test]
+    fn smooth_join_creates_persistent_seam_and_one_undo_entry(){
+        use opencorel_core::path_topology::JoinMode;
+        let mut e=Editor::default();
+        let a=e.doc.add(topology_curve(0.,10.,20.),Style::default());
+        let b=e.doc.add(topology_curve(20.8,30.,40.),Style::default());
+        e.selected=Some(a);
+        e.multi_selected=vec![b];
+        let original=e.doc.clone();
+        e.join_selected_beziers(JoinMode::SmoothSnap{tolerance_mm:1.});
+        assert_eq!(e.undo.len(),1);
+        assert_eq!(e.doc.objects.len(),original.objects.len()-1);
+        let joined=e.doc.objects.iter().find(|o|o.id==a).unwrap();
+        assert_eq!(node_edit::mode_at(&joined.node_modes,NodeAddress::BezierEnd(1)),
+            Some(node_edit::TangentOperation::Smooth));
+        e.doc.validate().unwrap();
+        e.undo();
+        assert_eq!(e.doc,original);
+    }
+    #[test]
+    fn configurable_join_tolerance_controls_acceptance(){
+        use opencorel_core::path_topology::JoinMode;
+        let mut e=Editor::default();
+        let a=e.doc.add(topology_curve(0.,10.,20.),Style::default());
+        let b=e.doc.add(topology_curve(20.8,30.,40.),Style::default());
+        e.selected=Some(a);
+        e.multi_selected=vec![b];
+        let before=e.doc.clone();
+        e.join_selected_beziers(JoinMode::Snap{tolerance_mm:0.25});
+        assert_eq!(e.doc,before);
+        assert!(e.undo.is_empty());
+        e.join_selected_beziers(JoinMode::Snap{tolerance_mm:1.0});
+        assert_eq!(e.undo.len(),1);
+        assert_eq!(e.doc.objects.len(),before.objects.len()-1);
+    }
+    #[test]
     fn bridge_join_preserves_both_paths_with_one_connector(){
         use opencorel_core::path_topology::JoinMode;
         let mut e=Editor::default();
