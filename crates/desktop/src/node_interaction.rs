@@ -1012,4 +1012,51 @@ mod tests{
         assert!(editor.undo.is_empty());
     }
 
+    #[test]
+    fn splitting_polyline_creates_two_editable_objects_and_supports_undo(){
+        let mut editor=Editor::default();
+        let id=editor.doc.add(Shape::Polyline{
+            points:vec![
+                Point{x:0.,y:0.},Point{x:10.,y:5.},
+                Point{x:20.,y:10.},Point{x:30.,y:20.},
+            ],
+            closed:false,
+        },Style::default());
+        editor.selected=Some(id);
+        editor.tool=Tool::Nodes;
+        editor.active_node=Some((id,NodeAddress::Polyline(2)));
+        let before=editor.doc.clone();
+        editor.split_selected_bezier();
+        assert_eq!(editor.undo.len(),1);
+        assert_eq!(editor.doc.objects.len(),before.objects.len()+1);
+        let left=editor.doc.objects.iter().find(|obj|obj.id==id).unwrap();
+        let Shape::Polyline{points,..}=&left.shape else{panic!("first piece")};
+        assert_eq!(points.len(),3);
+        let second_id=editor.selected.unwrap();
+        let right=editor.doc.objects.iter().find(|obj|obj.id==second_id).unwrap();
+        let Shape::Polyline{points,..}=&right.shape else{panic!("second piece")};
+        assert_eq!(points.len(),2);
+        assert_eq!(points[0],Point{x:20.,y:10.});
+        editor.doc.validate().unwrap();
+        editor.undo();
+        assert_eq!(editor.doc,before);
+        editor.redo();
+        editor.doc.validate().unwrap();
+    }
+    #[test]
+    fn splitting_endpoint_of_polyline_does_not_create_history(){
+        let mut editor=Editor::default();
+        let id=editor.doc.add(Shape::Polyline{
+            points:vec![Point{x:0.,y:0.},Point{x:10.,y:0.},
+                Point{x:20.,y:0.}],closed:false
+        },Style::default());
+        editor.selected=Some(id);
+        editor.tool=Tool::Nodes;
+        editor.active_node=Some((id,NodeAddress::Polyline(0)));
+        let before=editor.doc.clone();
+        editor.split_selected_bezier();
+        assert_eq!(editor.doc,before);
+        assert!(editor.undo.is_empty());
+    }
+
 }
