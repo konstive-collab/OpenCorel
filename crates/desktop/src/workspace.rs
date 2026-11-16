@@ -86,6 +86,15 @@ impl Editor {
                     if ui.button("Новый лист A3").clicked(){self.blank_page(297.0,420.0);ui.close_menu();}
                     if ui.button("Новый баннер 3×2 м").clicked(){self.blank_page(3000.0,2000.0);ui.close_menu();}
                     if ui.button("Пример готового макета").clicked(){self.sample_design();ui.close_menu();}
+                    ui.menu_button("Создать из шаблона",|ui|{
+                        ui.small("Готовые редактируемые макеты — без растровой подложки");
+                        for kind in super::starter_templates::StarterTemplate::ALL{
+                            if ui.button(kind.title()).clicked(){
+                                self.create_starter_template(kind);
+                                ui.close_menu();
+                            }
+                        }
+                    });
                     ui.separator();
                     if ui.button("Новый документ       Ctrl+N").clicked(){self.new_document();ui.close_menu();}
                     if ui.button("Открыть...         Ctrl+O").clicked(){self.open_picker();ui.close_menu();}
