@@ -417,4 +417,53 @@ mod tests{
         let empty=Shape::Bezier{start:p(0.,0.),segments:vec![],closed:false};
         assert!(split_bezier(&empty,&[],NodeAddress::BezierEnd(0)).is_err());
     }
+    fn line(xs:&[(f32,f32)])->Shape{
+        Shape::Polyline{
+            points:xs.iter().map(|(x,y)|p(*x,*y)).collect(),
+            closed:false,
+        }
+    }
+    #[test]
+    fn polyline_snap_preserves_vertex_type_and_removes_duplicate_joint(){
+        let a=line(&[(0.,0.),(10.,0.)]);
+        let b=line(&[(10.,0.),(20.,0.)]);
+        let (joined,report)=join_polylines(&a,&b,JoinMode::Snap{tolerance_mm:0.}).unwrap();
+        assert!(!report.added_connector);
+        assert_eq!(joined,line(&[(0.,0.),(10.,0.),(20.,0.)]));
+    }
+    #[test]
+    fn polyline_snap_reorients_nearest_ends(){
+        let a=line(&[(0.,0.),(10.,0.)]);
+        let b=line(&[(20.,0.),(10.,0.)]);
+        let (joined,report)=join_polylines(&a,&b,JoinMode::Snap{tolerance_mm:0.}).unwrap();
+        assert!(report.reversed_second);
+        assert_eq!(joined,line(&[(0.,0.),(10.,0.),(20.,0.)]));
+    }
+    #[test]
+    fn polyline_bridge_retains_both_endpoints(){
+        let a=line(&[(0.,0.),(10.,0.)]);
+        let b=line(&[(20.,0.),(30.,0.)]);
+        let (joined,report)=join_polylines(&a,&b,JoinMode::Bridge).unwrap();
+        assert!(report.added_connector);
+        assert_eq!(report.gap_mm,10.);
+        assert_eq!(joined,line(&[(0.,0.),(10.,0.),(20.,0.),(30.,0.)]));
+    }
+    #[test]
+    fn polyline_snap_rejects_invalid_input_without_mutating_sources(){
+        let a=line(&[(0.,0.),(10.,0.)]);
+        let b=line(&[(20.,0.),(30.,0.)]);
+        let original=a.clone();
+        for tolerance in [-1.,f32::NAN,f32::INFINITY,1.]{
+            assert!(join_polylines(&a,&b,JoinMode::Snap{
+                tolerance_mm:tolerance
+            }).is_err());
+        }
+        assert!(join_polylines(&a,&b,JoinMode::SmoothSnap{
+            tolerance_mm:100.
+        }).is_err());
+        assert_eq!(a,original);
+        let malformed=line(&[(0.,0.),(f32::NAN,1.)]);
+        assert!(join_polylines(&malformed,&b,JoinMode::Bridge).is_err());
+    }
+
 }
