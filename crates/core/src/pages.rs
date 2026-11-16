@@ -163,6 +163,23 @@ impl Document{
         else{self.page_slots[index].title=title.into();}
         Ok(())
     }
+    /// Change logical page order while preserving the selected page and artwork.
+    pub fn move_page(&mut self,from:usize,to:usize)->Result<(),String>{
+        if from>=self.page_count()||to>=self.page_count(){
+            return Err("Page index out of range".into());
+        }
+        if from==to{return Ok(());}
+        if self.page_slots.is_empty(){return Err("No other page".into());}
+        let original_active=self.active_page_index;
+        let mut original_indices:Vec<usize>=(0..self.page_slots.len()).collect();
+        let moved_index=original_indices.remove(from);
+        original_indices.insert(to,moved_index);
+        let moved=self.page_slots.remove(from);
+        self.page_slots.insert(to,moved);
+        self.active_page_index=original_indices.iter()
+            .position(|i|*i==original_active).ok_or("Active page missing")?;
+        Ok(())
+    }
     pub fn delete_page(&mut self,index:usize)->Result<(),String>{
         if index>=self.page_count(){return Err("Page index out of range".into());}
         if self.page_count()<=1{return Err("Cannot remove last page".into());}
@@ -276,6 +293,25 @@ mod tests{
         let path=dir.path().join("multipage.kdr");
         kdr::save_kdr(&restored,&path).unwrap();
         assert_eq!(kdr::read_kdr(&path).unwrap(),restored);
+    }
+    #[test]
+    fn reordering_pages_preserves_active_selection_and_page_names(){
+        let mut d=Document::default();
+        d.rename_page(0,"Front").unwrap();
+        d.append_page(false).unwrap();
+        d.rename_page(1,"Back").unwrap();
+        d.append_page(false).unwrap();
+        d.rename_page(2,"Insert").unwrap();
+        d.move_page(2,0).unwrap();
+        assert_eq!(d.active_page_index,0);
+        assert_eq!(d.page_title(0),Some("Insert"));
+        assert_eq!(d.page_title(1),Some("Front"));
+        assert_eq!(d.page_title(2),Some("Back"));
+        d.switch_page(2).unwrap();
+        d.move_page(0,2).unwrap();
+        assert_eq!(d.active_page_index,1);
+        assert_eq!(d.page_title(1),Some("Back"));
+        d.validate().unwrap();
     }
     #[test]
     fn old_one_page_json_remains_valid_and_new_pages_are_rejected_if_corrupt(){
