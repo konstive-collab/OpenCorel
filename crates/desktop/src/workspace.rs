@@ -617,6 +617,8 @@ impl Editor {
             ui.label("Плавность изгибов");
             ui.add(egui::Slider::new(&mut self.freehand_smoothness,0.0..=1.0)
                 .step_by(0.05));
+            ui.checkbox(&mut self.freehand_closed,"Замкнутый контур");
+            ui.small("Для замкнутого контура плавность сохраняется и на стыке начала с концом. Заливку можно назначить после рисования.");
             ui.small("Меньший допуск — больше узлов, лучше повторяет движение мыши. Больший допуск — проще контур.");
             ui.small("Штрихи до 4096 отсчётов; одна линия = одна запись Ctrl+Z. Клавиша H — этот инструмент.");
             return;
@@ -639,8 +641,8 @@ impl Editor {
                 if self.multi_selected.is_empty() && self.node_edit_allowed(id){
                     let editable_kind=self.doc.objects.iter().find(|o|o.id==id)
                         .map(|o|match &o.shape{
-                            opencorel_core::Shape::Polyline{closed:false,..}=>1u8,
-                            opencorel_core::Shape::Bezier{closed:false,..}=>2u8,
+                            opencorel_core::Shape::Polyline{..}=>1u8,
+                            opencorel_core::Shape::Bezier{..}=>2u8,
                             _=>0u8,
                         }).unwrap_or(0);
                     if editable_kind!=0{
@@ -656,7 +658,7 @@ impl Editor {
                             .step_by(0.05));
                         let clicked=if editable_kind==1{
                             ui.button("Ломаную → плавная кривая")
-                                .on_hover_text("Преобразовать открытые прямые сегменты в редактируемую кривую")
+                                .on_hover_text("Преобразовать прямые сегменты в редактируемую кривую (в том числе замкнутую)")
                                 .clicked()
                         }else{
                             ui.button("Упростить число узлов кривой")
