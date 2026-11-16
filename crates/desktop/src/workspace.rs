@@ -173,6 +173,28 @@ impl Editor {
                     ui.checkbox(&mut self.light_theme,"Светлая тема");
                 });
                 ui.menu_button("Макет",|ui|{
+                    ui.menu_button("Страницы документа",|ui|{
+                        ui.label(format!("Страниц: {} / максимум 64",self.doc.page_count()));
+                        for index in 0..self.doc.page_count(){
+                            let name=self.doc.page_title(index).unwrap_or("Страница").to_string();
+                            if ui.selectable_label(index==self.doc.active_page_index,
+                                format!("{} — {}",index+1,name)).clicked(){
+                                self.navigate_page(index);ui.close_menu();
+                            }
+                        }
+                        ui.separator();
+                        if ui.button("+ Пустая страница").clicked(){
+                            self.create_page(false);ui.close_menu();
+                        }
+                        if ui.button("Дублировать текущую страницу").clicked(){
+                            self.create_page(true);ui.close_menu();
+                        }
+                        if ui.add_enabled(self.doc.page_count()>1,
+                            egui::Button::new("Удалить текущую страницу")).clicked(){
+                            self.remove_current_page();ui.close_menu();
+                        }
+                    });
+                    ui.separator();
                     if ui.button("A0 — 841×1189 мм").clicked(){self.page_size(841.0,1189.0);ui.close_menu();}
                     if ui.button("A2 — 420×594 мм").clicked(){self.page_size(420.0,594.0);ui.close_menu();}
                     if ui.button("A4 — 210×297 мм").clicked(){self.page_size(210.0,297.0);ui.close_menu();}
@@ -1460,6 +1482,58 @@ impl Editor {
     }
 
     fn inspector_page(&mut self,ui:&mut egui::Ui){
+        ui.heading("Страницы документа");
+        ui.label(format!("Страница {} из {}",
+            self.doc.active_page_index+1,self.doc.page_count()));
+        let entries:Vec<_>=(0..self.doc.page_count()).map(|index|{
+            let label=self.doc.page_title(index).unwrap_or("Страница").to_owned();
+            let dims=self.doc.page_dimensions(index).unwrap_or((0.,0.));
+            (index,label,dims)
+        }).collect();
+        egui::ScrollArea::vertical()
+            .id_salt("pages_list")
+            .max_height(190.0).show(ui,|ui|{
+                for (index,label,(w,h)) in entries{
+                    let title=format!("{} — {}  ({w:.0}×{h:.0} мм)",
+                        index+1,label);
+                    if ui.selectable_label(self.doc.active_page_index==index,title).clicked(){
+                        self.navigate_page(index);
+                    }
+                }
+            });
+        ui.horizontal_wrapped(|ui|{
+            if ui.button("+ Страница").clicked(){self.create_page(false);}
+            if ui.button("Дублировать").clicked(){self.create_page(true);}
+            if ui.add_enabled(self.doc.page_count()>1,
+                egui::Button::new("Удалить")).clicked(){self.remove_current_page();}
+        });
+        ui.horizontal_wrapped(|ui|{
+            if ui.add_enabled(self.doc.active_page_index>0,
+                egui::Button::new("← Ранее")).clicked(){self.shift_current_page(false);}
+            if ui.add_enabled(self.doc.active_page_index+1<self.doc.page_count(),
+                egui::Button::new("Позднее →")).clicked(){self.shift_current_page(true);}
+        });
+        if !self.page_rename_mode{
+            ui.horizontal(|ui|{
+                ui.label(format!("Название: {}",self.doc.active_page_title));
+                if ui.small_button("Изменить").clicked(){
+                    self.page_name_edit=self.doc.active_page_title.clone();
+                    self.page_rename_mode=true;
+                }
+            });
+        }else{
+            ui.label("Новое имя страницы");
+            ui.text_edit_singleline(&mut self.page_name_edit);
+            ui.horizontal(|ui|{
+                if ui.button("Применить").clicked(){
+                    let next=self.page_name_edit.clone();
+                    self.rename_current_page(&next);
+                }
+                if ui.button("Отмена").clicked(){self.page_rename_mode=false;}
+            });
+        }
+        ui.small("Страницы хранят собственные объекты, слои, направляющие и размеры.");
+        ui.separator();
         ui.heading("Параметры листа");
         ui.label("Наименование документа");
         let mut name=self.doc.name.clone();
@@ -1555,7 +1629,7 @@ impl Editor {
                 .speed(5.0).range(30.0..=600.0));
         });
         if ui.button("Проверить макет").clicked(){self.run_preflight();}
-        ui.label("Один редактируемый лист. Многостраничность — следующий этап.");
+        ui.label("Многостраничные проекты сохраняются в KDR. SVG/PDF в обычном экспорте содержат только активную страницу.");
     }
 
     pub(super) fn workspace_footer(&mut self,ctx:&egui::Context){
@@ -1579,8 +1653,27 @@ impl Editor {
         });
         egui::TopBottomPanel::bottom("page_navigator").exact_height(29.0).show(ctx,|ui|{
             ui.horizontal(|ui|{
-                ui.label(RichText::new("Страница 1 из 1").strong())
-                    .on_hover_text("Многостраничные проекты пока не реализованы.");
+                if ui.add_enabled(self.doc.active_page_index>0,
+                    egui::Button::new("◀")).on_hover_text("Предыдущая страница").clicked(){
+                    self.navigate_page(self.doc.active_page_index-1);
+                }
+                ui.menu_button(format!("Страница {} из {}",
+                    self.doc.active_page_index+1,self.doc.page_count()),|ui|{
+                    for i in 0..self.doc.page_count(){
+                        let name=self.doc.page_title(i).unwrap_or("Страница").to_owned();
+                        if ui.selectable_label(i==self.doc.active_page_index,
+                            format!("{} — {}",i+1,name)).clicked(){
+                            self.navigate_page(i);ui.close_menu();
+                        }
+                    }
+                });
+                if ui.add_enabled(self.doc.active_page_index+1<self.doc.page_count(),
+                    egui::Button::new("▶")).on_hover_text("Следующая страница").clicked(){
+                    self.navigate_page(self.doc.active_page_index+1);
+                }
+                if ui.small_button("+").on_hover_text("Добавить пустую страницу").clicked(){
+                    self.create_page(false);
+                }
                 ui.separator();
                 ui.label(RichText::new("ЦВЕТА").strong().small());
                 for swatch in SWATCHES.iter().take(14){
