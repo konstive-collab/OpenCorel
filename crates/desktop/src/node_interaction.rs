@@ -1093,4 +1093,45 @@ mod tests{
         assert!(editor.undo.is_empty());
     }
 
+    #[test]
+    fn exact_conversion_is_one_undo_step_and_preserves_style(){
+        let mut editor=Editor::default();
+        let id=editor.doc.add(Shape::Polyline{
+            points:vec![Point{x:0.,y:0.},Point{x:10.,y:5.},
+                Point{x:20.,y:8.}],closed:false
+        },Style::default());
+        editor.selected=Some(id);
+        editor.tool=Tool::Nodes;
+        let before=editor.doc.clone();
+        editor.convert_selected_polyline_exact();
+        let after=editor.doc.clone();
+        assert_eq!(editor.undo.len(),1);
+        let converted=editor.doc.objects.iter().find(|o|o.id==id).unwrap();
+        assert!(matches!(converted.shape,Shape::Bezier{..}));
+        assert_eq!(converted.style,before.objects.last().unwrap().style);
+        editor.doc.validate().unwrap();
+        editor.undo();
+        assert_eq!(editor.doc,before);
+        editor.redo();
+        assert_eq!(editor.doc,after);
+    }
+    #[test]
+    fn invalid_or_locked_conversion_has_no_history(){
+        let mut editor=Editor::default();
+        let id=editor.doc.add(Shape::Polyline{
+            points:vec![Point{x:0.,y:0.},Point{x:10.,y:5.}],
+            closed:false,
+        },Style::default());
+        editor.selected=Some(id);
+        editor.doc.layers[0].locked=true;
+        let before=editor.doc.clone();
+        editor.convert_selected_polyline_exact();
+        assert_eq!(editor.doc,before);
+        assert!(editor.undo.is_empty());
+        editor.doc.layers[0].locked=false;
+        editor.multi_selected.push(id);
+        editor.convert_selected_polyline_exact();
+        assert!(editor.undo.is_empty());
+    }
+
 }
