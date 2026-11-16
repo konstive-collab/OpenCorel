@@ -89,7 +89,7 @@ impl Editor{
         };
         if self.doc.objects.len().saturating_add(pieces.len()-1)>100_000 ||
             self.doc.next_id.checked_add((pieces.len()-1) as u64)
-                .is_none_or(|v|v>=u64::MAX){
+                .is_none_or(|v|v==u64::MAX){
             self.status="Недостаточно свободных идентификаторов или мест для объектов".into();
             return;
         }
