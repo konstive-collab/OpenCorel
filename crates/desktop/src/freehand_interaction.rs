@@ -140,7 +140,6 @@ impl Editor{
 #[cfg(test)]
 mod tests{
     use super::*;
-    use opencorel_core::{CubicSegment,NodeModeBinding};
     #[test]
     fn one_freehand_gesture_has_one_checkpoint_and_editable_shape(){
         let mut e=Editor::default();
