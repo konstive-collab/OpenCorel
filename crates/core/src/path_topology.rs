@@ -216,6 +216,27 @@ pub fn join_polylines(
     }))
 }
 
+/// Split an open polyline at an existing interior vertex. The vertex is
+/// shared by both resulting objects, so the original visual trace is exact.
+pub fn split_polyline(shape:&Shape,cut:NodeAddress)->Result<(Shape,Shape),String>{
+    let Shape::Polyline{points,closed:false}=shape else{
+        return Err("Only an open polyline can be split".into());
+    };
+    let NodeAddress::Polyline(i)=cut else{
+        return Err("Select an interior polyline vertex".into());
+    };
+    if points.len()<3 || i==0 || i>=points.len()-1{
+        return Err("Cannot split at a terminal polyline vertex".into());
+    }
+    if points.len()>60_000 || points.iter().any(|p|!valid(*p)){
+        return Err("Polyline has too many or invalid vertices".into());
+    }
+    Ok((
+        Shape::Polyline{points:points[..=i].to_vec(),closed:false},
+        Shape::Polyline{points:points[i..].to_vec(),closed:false},
+    ))
+}
+
 /// Cut an open Bézier at an existing interior anchor. The cut anchor becomes
 /// both the left end and the right start, so neither resulting path has a
 /// missing segment. Its persistent tangent mode is removed at the seam.
