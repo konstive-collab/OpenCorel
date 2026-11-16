@@ -210,7 +210,11 @@ pub fn modes_after_insert(modes:&mut [NodeModeBinding],segment:SegmentAddress){
 /// When deleting an end anchor, its node mode is removed; every later
 /// end anchor shifts one slot toward the beginning of the path.
 pub fn modes_after_remove(modes:&mut Vec<NodeModeBinding>,address:NodeAddress){
-    modes.retain(|entry|entry.address!=address);
+    modes.retain(|entry|match (address,entry.address){
+        (NodeAddress::BezierStart,NodeAddress::BezierEnd(0))=>false,
+        (NodeAddress::CompoundStart(j),NodeAddress::CompoundEnd(k,0)) if j==k=>false,
+        _=>entry.address!=address,
+    });
     for entry in modes{
         match (address,&mut entry.address){
             (NodeAddress::BezierStart,NodeAddress::BezierEnd(old))=>{
@@ -278,6 +282,78 @@ pub fn move_node_with_modes(shape:&mut Shape,address:NodeAddress,
         move_node(shape,opposite,target)?;
     }
     Ok(())
+}
+/// Reverse a path in-place while preserving every cubic's geometric trace.
+/// Cubic controls swap order; for compound shapes every contour is reversed.
+pub fn reverse_path(shape:&mut Shape)->Result<(),String>{
+    fn reverse_cubic(start:&mut Point,segments:&mut Vec<CubicSegment>)->Result<(),String>{
+        if segments.is_empty(){return Err("Curve has no segments".into());}
+        let old_start=*start;
+        let old=std::mem::take(segments);
+        *start=old.last().expect("not empty").end;
+        let mut reversed=Vec::with_capacity(old.len());
+        for i in (0..old.len()).rev(){
+            let s=&old[i];
+            reversed.push(CubicSegment{
+                control1:s.control2,
+                control2:s.control1,
+                end:if i==0{old_start}else{old[i-1].end},
+            });
+        }
+        *segments=reversed;
+        Ok(())
+    }
+    match shape{
+        Shape::Bezier{start,segments,..}=>reverse_cubic(start,segments),
+        Shape::CompoundPath{contours}=>{
+            if contours.is_empty()||contours.iter().any(|c|c.segments.is_empty()){
+                return Err("Compound path has no segments".into());
+            }
+            for contour in contours{
+                reverse_cubic(&mut contour.start,&mut contour.segments)?;
+            }
+            Ok(())
+        },
+        Shape::Polyline{points,..} if points.len()>=2=>{
+            points.reverse();
+            Ok(())
+        },
+        _=>Err("Select a line, Bézier or compound vector path".into()),
+    }
+}
+/// Preserve persistent mode bindings when reversing the path direction.
+pub fn modes_after_reverse(shape:&Shape,modes:&mut [NodeModeBinding]){
+    for entry in modes{
+        match (shape,&mut entry.address){
+            (Shape::Bezier{segments,..},NodeAddress::BezierEnd(i))=>
+                *i=segments.len().saturating_sub(2).saturating_sub(*i),
+            (Shape::CompoundPath{contours},NodeAddress::CompoundEnd(j,i))=>{
+                if let Some(contour)=contours.get(*j){
+                    *i=contour.segments.len().saturating_sub(2).saturating_sub(*i);
+                }
+            },
+            _=>{},
+        }
+    }
+}
+/// Change explicit closure without adding/deleting any anchor or handle.
+pub fn set_closed(shape:&mut Shape,closed:bool)->Result<bool,String>{
+    match shape{
+        Shape::Bezier{segments,closed:flag,..} if !segments.is_empty()=>{
+            if *flag==closed{return Ok(false);}
+            *flag=closed;Ok(true)
+        },
+        Shape::Polyline{points,closed:flag} if points.len()>=2=>{
+            if *flag==closed{return Ok(false);}
+            *flag=closed;Ok(true)
+        },
+        Shape::CompoundPath{contours} if !contours.is_empty()=>{
+            if contours.iter().all(|c|c.closed==closed){return Ok(false);}
+            for c in contours{c.closed=closed;}
+            Ok(true)
+        },
+        _=>Err("This object cannot be opened or closed".into()),
+    }
 }
 /// Only interior anchors have an incoming and an outgoing cubic control.
 pub fn has_tangent_pair(shape:&Shape,address:NodeAddress)->bool{
