@@ -15,6 +15,10 @@ pub enum JoinMode{
     /// are within the specified distance. The second start point and its
     /// incoming handle are moved to the first endpoint, without adding a span.
     Snap{tolerance_mm:f32},
+    /// Snap endpoints then align tangent handles on the joining anchor.
+    /// Retains the lengths of both handles and stores a persistent Smooth
+    /// node mode, so subsequent mouse edits remain tangent-continuous.
+    SmoothSnap{tolerance_mm:f32},
     /// Connect the nearest endpoints with a new straight cubic segment,
     /// without moving any existing endpoint or control handle.
     Bridge,
@@ -56,7 +60,7 @@ pub fn join_beziers(
     node_edit::validate_modes(first,first_modes)?;
     node_edit::validate_modes(second,second_modes)?;
     let tolerance=match mode{
-        JoinMode::Snap{tolerance_mm}=>{
+        JoinMode::Snap{tolerance_mm}|JoinMode::SmoothSnap{tolerance_mm}=>{
             if !tolerance_mm.is_finite() || !(0.0..=1000.0).contains(&tolerance_mm){
                 return Err("Snap tolerance must be within 0–1000 mm".into());
             }
@@ -96,9 +100,9 @@ pub fn join_beziers(
     let end=a_segments.last().expect("nonempty").end;
     let bridged=match mode{
         JoinMode::Bridge=>gap>EPSILON_MM,
-        JoinMode::Snap{..}=>false,
+        JoinMode::Snap{..}|JoinMode::SmoothSnap{..}=>false,
     };
-    if matches!(mode,JoinMode::Snap{..}) && end!=b_start{
+    if matches!(mode,JoinMode::Snap{..}|JoinMode::SmoothSnap{..}) && end!=b_start{
         let delta=Point{x:end.x-b_start.x,y:end.y-b_start.y};
         let first_b=&mut b_segments[0];
         first_b.control1=Point{
@@ -133,7 +137,16 @@ pub fn join_beziers(
         entry.address=NodeAddress::BezierEnd(offset+i);
     }
     modes_a.extend(modes_b);
-    let joined=Shape::Bezier{start:a_start,segments:a_segments,closed:false};
+    let mut joined=Shape::Bezier{start:a_start,segments:a_segments,closed:false};
+    if matches!(mode,JoinMode::SmoothSnap{..}){
+        let seam=node_edit::NodeAddress::BezierEnd(offset-1);
+        // set_tangent validates geometry before changing either control
+        // handle, so malformed joins return an error without side effects.
+        node_edit::set_tangent(&mut joined,seam,
+            node_edit::TangentOperation::Smooth)?;
+        node_edit::set_mode(&mut modes_a,seam,
+            node_edit::TangentOperation::Smooth);
+    }
     node_edit::validate_modes(&joined,&modes_a)?;
     Ok((joined,modes_a,JoinReport{
         reversed_first:reverse_a,reversed_second:reverse_b,
@@ -261,6 +274,41 @@ mod tests{
         let original_control=p(20.3+(30.-20.3)/3.,0.4+(0.-0.4)/3.);
         assert!((segments[2].control1.x-(original_control.x-0.3)).abs()<0.0001);
         assert!((segments[2].control1.y-(original_control.y-0.4)).abs()<0.0001);
+    }
+    #[test]
+    fn smooth_join_creates_persistent_continuous_seam(){
+        let (mut a,mut b)=two();
+        if let Shape::Bezier{segments,..}=&mut a{
+            segments[1].control2=p(13.,8.);
+        }
+        if let Shape::Bezier{segments,..}=&mut b{
+            segments[0].control1=p(23.,-3.);
+        }
+        let (joined,modes,_)=join_beziers(
+            &a,&[],&b,&[],JoinMode::SmoothSnap{tolerance_mm:0.}).unwrap();
+        let seam=NodeAddress::BezierEnd(1);
+        assert_eq!(node_edit::mode_at(&modes,seam),
+            Some(node_edit::TangentOperation::Smooth));
+        let Shape::Bezier{segments,..}=&joined else{panic!()};
+        let anchor=segments[1].end;
+        let incoming=p(anchor.x-segments[1].control2.x,
+                       anchor.y-segments[1].control2.y);
+        let outgoing=p(segments[2].control1.x-anchor.x,
+                       segments[2].control1.y-anchor.y);
+        assert!((incoming.x*outgoing.y-incoming.y*outgoing.x).abs()<0.0001);
+        assert!(incoming.x*outgoing.x+incoming.y*outgoing.y>0.);
+        node_edit::validate_modes(&joined,&modes).unwrap();
+    }
+    #[test]
+    fn smooth_join_rejects_invalid_tolerance_and_distance(){
+        let (a,b)=two();
+        for t in [f32::NAN,f32::INFINITY,-1.,1000.01]{
+            assert!(join_beziers(&a,&[],&b,&[],
+                JoinMode::SmoothSnap{tolerance_mm:t}).is_err());
+        }
+        let b=path(p(100.,30.),p(130.,30.),p(140.,30.));
+        assert!(join_beziers(&a,&[],&b,&[],
+            JoinMode::SmoothSnap{tolerance_mm:1.}).is_err());
     }
     #[test]
     fn snap_rejects_far_endpoints_without_side_effects(){
