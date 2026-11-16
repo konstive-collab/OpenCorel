@@ -487,4 +487,26 @@ mod tests{
         assert!(join_polylines(&malformed,&b,JoinMode::Bridge).is_err());
     }
 
+    #[test]
+    fn polyline_split_preserves_original_visual_trace(){
+        let original=line(&[(0.,0.),(10.,5.),(20.,10.),(30.,20.)]);
+        let (left,right)=split_polyline(&original,NodeAddress::Polyline(2)).unwrap();
+        assert_eq!(left,line(&[(0.,0.),(10.,5.),(20.,10.)]));
+        assert_eq!(right,line(&[(20.,10.),(30.,20.)]));
+        assert_eq!(original,line(&[(0.,0.),(10.,5.),(20.,10.),(30.,20.)]));
+    }
+    #[test]
+    fn polyline_split_rejects_terminal_closed_and_invalid_vertices(){
+        let a=line(&[(0.,0.),(10.,0.),(20.,0.)]);
+        for i in [0,2,3,usize::MAX]{
+            assert!(split_polyline(&a,NodeAddress::Polyline(i)).is_err());
+        }
+        assert!(split_polyline(&a,NodeAddress::BezierStart).is_err());
+        let mut closed=a.clone();
+        if let Shape::Polyline{closed,..}=&mut closed{*closed=true;}
+        assert!(split_polyline(&closed,NodeAddress::Polyline(1)).is_err());
+        let broken=line(&[(0.,0.),(f32::NAN,0.),(20.,0.)]);
+        assert!(split_polyline(&broken,NodeAddress::Polyline(1)).is_err());
+    }
+
 }
