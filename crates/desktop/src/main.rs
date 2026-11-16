@@ -182,6 +182,8 @@ struct Editor{
     show_welcome:bool,
     toolbox_expanded:bool,
     resize_drag:Option<(u64,ResizeCorner)>,
+    resize_drag_base:Option<Bounds>,
+    resize_drag_checkpointed:bool,
     object_filter:String,
     active_node:Option<(u64,NodeAddress)>,
     node_drag:Option<(u64,NodeAddress)>,
@@ -237,6 +239,7 @@ impl Default for Editor{
             show_safe_area:false,safe_margin_mm:5.0,
             internal_clipboard:Vec::new(),paste_number:0,
             show_welcome:true,toolbox_expanded:false,resize_drag:None,
+            resize_drag_base:None,resize_drag_checkpointed:false,
             object_filter:String::new(),active_node:None,node_drag:None,
             node_drag_checkpointed:false}
     }
@@ -531,7 +534,20 @@ impl Editor{
     fn resize_from_corner(&mut self,id:u64,corner:ResizeCorner,
         pointer:Point,keep_ratio:bool){
         let Some(index)=self.doc.objects.iter().position(|o|o.id==id) else{return;};
-        let b=self.doc.objects[index].bounds();
+        if !pointer.x.is_finite()||!pointer.y.is_finite()||
+            pointer.x.abs()>100_000.0||pointer.y.abs()>100_000.0{
+            self.status="Недопустимая координата изменения размера".into();
+            return;
+        }
+        if !self.doc.layer(self.doc.objects[index].layer_id)
+            .is_some_and(|l|l.visible&&!l.locked) ||
+            !transform::resizable(&self.doc.objects[index].shape){
+            self.status="Размер заблокированного объекта изменить нельзя".into();
+            return;
+        }
+        // A stable source rectangle keeps the opposite corner and Shift ratio
+        // unchanged across frames; current-shape bounds cause resize jitter.
+        let b=self.resize_drag_base.unwrap_or_else(||self.doc.objects[index].bounds());
         let left=matches!(corner,ResizeCorner::TopLeft|ResizeCorner::BottomLeft);
         let top=matches!(corner,ResizeCorner::TopLeft|ResizeCorner::TopRight);
         let ax=if left{b.x+b.w}else{b.x};
@@ -545,12 +561,25 @@ impl Editor{
         }
         let target=Bounds{x:if left{ax-w}else{ax},
             y:if top{ay-h}else{ay},w,h};
-        if let Err(e)=transform::resize_shape(&mut self.doc.objects[index].shape,target){
-            self.status=e;
-        }else{
-            self.fill_cache.entries.clear();
-            self.compound_cache.clear();
+        let current=self.doc.objects[index].bounds();
+        if target.x==current.x&&target.y==current.y&&
+            target.w==current.w&&target.h==current.h{return;}
+        // Verify candidate first: unsuccessful transforms do not create
+        // empty Undo entries or leave half-modified geometry in the document.
+        let mut candidate=self.doc.objects[index].shape.clone();
+        if let Err(e)=transform::resize_shape(&mut candidate,target){
+            self.status=e;return;
         }
+        if self.resize_drag.is_some()&&!self.resize_drag_checkpointed{
+            self.checkpoint();
+            self.resize_drag_checkpointed=true;
+        }
+        self.doc.objects[index].shape=candidate;
+        self.fill_cache.entries.clear();
+        self.vector_cache.clear();
+        self.compound_cache.clear();
+        self.bezier_preview.clear();
+        self.raster_cache.clear();
     }
     fn selection_ids(&self)->Vec<u64>{
         let mut ids=Vec::with_capacity(self.multi_selected.len()+1);
@@ -645,6 +674,7 @@ impl Editor{
             self.guide_drag=None;
             self.guide_numeric_session=None;
             self.resize_drag=None;self.node_drag=None;self.active_node=None;
+            self.resize_drag_base=None;self.resize_drag_checkpointed=false;
             self.drag_start=None;self.selection_drag_checkpointed=false;
             self.marquee_drag=None;
             self.node_drag_checkpointed=false;
@@ -667,6 +697,7 @@ impl Editor{
             self.guide_drag=None;
             self.guide_numeric_session=None;
             self.resize_drag=None;self.node_drag=None;self.active_node=None;
+            self.resize_drag_base=None;self.resize_drag_checkpointed=false;
             self.drag_start=None;self.selection_drag_checkpointed=false;
             self.marquee_drag=None;
             self.node_drag_checkpointed=false;
@@ -930,6 +961,7 @@ impl Editor{
                 self.doc=result.document;
                 self.selected=None;self.multi_selected.clear();self.active_layer=1;
                 self.resize_drag=None;self.node_drag=None;self.active_node=None;
+            self.resize_drag_base=None;self.resize_drag_checkpointed=false;
             self.drag_start=None;self.selection_drag_checkpointed=false;
             self.marquee_drag=None;
             self.node_drag_checkpointed=false;
@@ -1267,8 +1299,10 @@ impl Editor{
                             },
                             Tool::Select=>{
                                 if let Some((id,corner))=self.corner_at(v,press){
-                                    self.checkpoint();
                                     self.resize_drag=Some((id,corner));
+                                    self.resize_drag_base=self.doc.objects.iter()
+                                        .find(|o|o.id==id).map(|o|o.bounds());
+                                    self.resize_drag_checkpointed=false;
                                 }else{
                                     let additive=ctx.input(|i|i.modifiers.shift);
                                     let hit=self.hit_test_at(v.mm(press),2.0);
@@ -1375,6 +1409,7 @@ impl Editor{
                 self.drag_start=None;self.creation_start=None;
                 self.selection_drag_checkpointed=false;self.marquee_drag=None;
                 self.resize_drag=None;self.node_drag=None;
+                self.resize_drag_base=None;self.resize_drag_checkpointed=false;
                 self.node_drag_checkpointed=false;
             }
             if response.double_clicked(){
@@ -1520,6 +1555,7 @@ impl eframe::App for Editor{
             self.curve_start=None;self.curve_draft=None;self.curve_resumed=false;
             self.tool=Tool::Select;
             self.resize_drag=None;self.node_drag=None;self.active_node=None;
+            self.resize_drag_base=None;self.resize_drag_checkpointed=false;
             self.drag_start=None;self.selection_drag_checkpointed=false;
             self.marquee_drag=None;
             self.node_drag_checkpointed=false;
