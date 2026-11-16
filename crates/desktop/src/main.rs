@@ -99,6 +99,8 @@ struct Editor{
     curve_outgoing:Option<Point>,
     curve_drag_anchor:Option<Point>,
     curve_draft:Option<u64>,
+    /// True only while resuming an existing curve before its first new segment.
+    curve_resumed:bool,
     active_layer:u64,
     pan:Vec2,
     undo:Vec<Document>,
@@ -168,6 +170,7 @@ impl Default for Editor{
             text:"Новый текст".into(),status:"Экспериментальный прототип".into(),
             zoom:1.0,drag_start:None,creation_start:None,
             curve_start:None,curve_draft:None,curve_outgoing:None,curve_drag_anchor:None,
+            curve_resumed:false,
             active_layer:1,pan:Vec2::ZERO,
             undo:Vec::new(),redo:Vec::new(),
             inspector_tab:InspectorTab::Objects,show_inspector:true,
@@ -595,6 +598,7 @@ impl Editor{
             self.raster_cache.clear();
             self.selected=None;self.multi_selected.clear();
             self.curve_draft=None;self.curve_start=None;
+            self.curve_resumed=false;
             self.curve_outgoing=None;self.curve_drag_anchor=None;
             self.resize_drag=None;self.node_drag=None;self.active_node=None;
             self.node_drag_checkpointed=false;
@@ -611,6 +615,7 @@ impl Editor{
             self.raster_cache.clear();
             self.selected=None;self.multi_selected.clear();
             self.curve_draft=None;self.curve_start=None;
+            self.curve_resumed=false;
             self.curve_outgoing=None;self.curve_drag_anchor=None;
             self.resize_drag=None;self.node_drag=None;self.active_node=None;
             self.node_drag_checkpointed=false;
@@ -632,6 +637,11 @@ impl Editor{
         Some(id)
     }
     fn curve_click(&mut self,p:Point){
+        if !p.x.is_finite()||!p.y.is_finite()||
+            p.x.abs()>100_000.0||p.y.abs()>100_000.0{
+            self.status="Координаты кривой выходят за допустимые пределы".into();
+            return;
+        }
         // Once drawing starts, the curve belongs to its original layer even
         // if the user changes the active layer from the layer panel.
         let layer_id=self.curve_draft
@@ -663,21 +673,26 @@ impl Editor{
             end:p,
         };
         if let Some(id)=self.curve_draft{
-            // Keep the entire in-progress curve in one undo transaction.
-            // A full document checkpoint on every vertex made long paths
-            // increasingly slow, especially with embedded bitmap assets.
-            // add_shape() already checkpoints when the first segment is made.
-            let Some(obj)=self.doc.get_mut(id) else{
+            // Existing curves checkpoint on the first actual new segment.
+            // A newly-created curve was already checkpointed by add_shape.
+            let appendable=self.doc.objects.iter().find(|obj|obj.id==id)
+                .is_some_and(|obj|matches!(&obj.shape,
+                    Shape::Bezier{segments,closed:false,..}
+                    if segments.len()<10_000));
+            if !appendable {
                 self.curve_start=None;self.curve_draft=None;
-                self.status="Кривая больше не существует: начните новую".into();
+                self.curve_resumed=false;
+                self.status="Кривая недоступна, замкнута или содержит слишком много узлов".into();
                 return;
-            };
-            if let Shape::Bezier{segments,..}=&mut obj.shape{
-                segments.push(seg);
-            }else{
-                self.curve_start=None;self.curve_draft=None;
-                self.status="Тип кривой изменился: начните новую".into();
-                return;
+            }
+            if self.curve_resumed {
+                self.checkpoint();
+                self.curve_resumed=false;
+            }
+            if let Some(obj)=self.doc.get_mut(id){
+                if let Shape::Bezier{segments,..}=&mut obj.shape{
+                    segments.push(seg);
+                }
             }
         }else{
             let style=Style{fill:"#000000".into(),stroke:"#202020".into(),stroke_width_mm:0.8};
@@ -712,13 +727,19 @@ impl Editor{
     fn curve_finish(&mut self,close:bool){
         if close{
             if let Some(id)=self.curve_draft{
-                let editable=self.doc.objects.iter().find(|o|o.id==id)
+                let can_close=self.doc.objects.iter().find(|o|o.id==id)
                     .is_some_and(|o|self.doc.layer(o.layer_id)
-                        .is_some_and(|l|l.visible&&!l.locked));
-                if editable {
+                        .is_some_and(|l|l.visible&&!l.locked)
+                        && matches!(&o.shape,Shape::Bezier{segments,closed:false,..}
+                            if segments.len()>=2));
+                if can_close {
+                    if self.curve_resumed {
+                        self.checkpoint();
+                        self.curve_resumed=false;
+                    }
                     if let Some(obj)=self.doc.get_mut(id){
-                        if let Shape::Bezier{segments,closed,..}=&mut obj.shape{
-                            if segments.len()>=2{*closed=true;}
+                        if let Shape::Bezier{closed,..}=&mut obj.shape{
+                            *closed=true;
                         }
                     }
                 }
@@ -726,6 +747,7 @@ impl Editor{
         }
         self.curve_start=None;
         self.curve_draft=None;
+        self.curve_resumed=false;
         self.curve_outgoing=None;
         self.curve_drag_anchor=None;
         self.tool=Tool::Select;
@@ -849,6 +871,7 @@ impl Editor{
                 self.compound_cache.clear();
                 self.raster_cache.clear();
                 self.curve_start=None;self.curve_draft=None;
+                self.curve_resumed=false;
                 let source=opencorel_formats::extension(std::path::Path::new(&self.file));
                 if source!="kdr"&&source!="ocd"{
                     // Imported artwork must not automatically overwrite an existing
@@ -1324,7 +1347,8 @@ impl eframe::App for Editor{
             self.curve_finish(false);
         }
         if self.inline_text.is_none() && ctx.input(|i|i.key_pressed(egui::Key::Escape)){
-            self.curve_start=None;self.curve_draft=None;self.tool=Tool::Select;
+            self.curve_start=None;self.curve_draft=None;self.curve_resumed=false;
+            self.tool=Tool::Select;
             self.resize_drag=None;self.node_drag=None;self.active_node=None;
             self.node_drag_checkpointed=false;
             self.curve_outgoing=None;self.curve_drag_anchor=None;
