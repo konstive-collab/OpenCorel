@@ -161,6 +161,23 @@ impl Editor {
                         }
                     });
                     ui.separator();
+                    ui.label(RichText::new("СОСТАВНЫЕ КОНТУРЫ (EVEN-ODD)").strong());
+                    ui.small("Без сваривания: кривые сохраняют исходную геометрию, а пересечения меняют правило заливки.");
+                    let selected_count=self.selection_ids().len();
+                    if ui.add_enabled(selected_count>=2,
+                        egui::Button::new("Объединить контуры (Combine)")).clicked(){
+                        self.combine_selected_contours();ui.close_menu();
+                    }
+                    let one_compound=if selected_count==1{
+                        self.selected.and_then(|id|self.doc.objects.iter()
+                            .find(|o|o.id==id)).is_some_and(|o|
+                                matches!(o.shape,opencorel_core::Shape::CompoundPath{..}))
+                    }else{false};
+                    if ui.add_enabled(one_compound,
+                        egui::Button::new("Разделить контуры (Break Apart)")).clicked(){
+                        self.break_apart_selected_contour();ui.close_menu();
+                    }
+                    ui.separator();
                     ui.label("Результат: редактируемые контуры.");
                     ui.label("Ctrl+Z возвращает обе фигуры.");
                 });
