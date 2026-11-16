@@ -1078,7 +1078,6 @@ impl Editor{
             outline(&painter,v.rect,Color32::GRAY,1.0);
             let page_painter=painter.with_clip_rect(v.rect.intersect(working));
             self.draw_grid_rulers(&painter,&page_painter,v,response.rect);
-            self.paint_guides(&page_painter,v);
             if self.doc.clip_links.is_empty() && self.doc.appearances.is_empty(){
                 for obj in self.doc.visible_objects(){
                     if v.bounds(obj.bounds()).intersects(v.rect.intersect(response.rect)){
@@ -1093,6 +1092,8 @@ impl Editor{
                 // Cached SVG proof uses the same clip paths as PDF/raster output.
                 self.masked_canvas.paint(ctx,&page_painter,&self.doc,v.rect);
             }
+            // Construction guides stay visible above artwork and are never exported.
+            self.paint_guides(&page_painter,v);
             if self.show_safe_area {
                 let margin=self.safe_margin_mm;
                 if margin>0.0 && self.doc.page.width_mm>2.0*margin &&
