@@ -638,6 +638,32 @@ impl Editor {
             ui.label("F8 — текст. Esc — выделение. Шрифт можно изменить после создания.");
             return;
         }
+        if matches!(self.tool,Tool::Nodes|Tool::Select) &&
+            self.selected.is_some() && self.multi_selected.is_empty(){
+            let can_offset=self.doc.objects.iter()
+                .find(|o|Some(o.id)==self.selected)
+                .is_some_and(|o|matches!(&o.shape,
+                    opencorel_core::Shape::Polyline{..}|
+                    opencorel_core::Shape::Bezier{..}|
+                    opencorel_core::Shape::Rectangle{..}|
+                    opencorel_core::Shape::Ellipse{..}));
+            if can_offset{
+                ui.heading("Параллельный контур");
+                ui.horizontal(|ui|{
+                    ui.label("Смещение");
+                    ui.add(egui::DragValue::new(&mut self.offset_distance_mm)
+                        .range(-1000.0..=1000.0).speed(0.2)
+                        .fixed_decimals(2).suffix(" мм"));
+                });
+                if ui.button("Создать смещённую копию")
+                    .on_hover_text("Создаёт новый редактируемый контур, исходный объект сохраняется")
+                    .clicked(){
+                    self.offset_selected_path();
+                }
+                ui.small("Знак задаёт сторону относительно направления контура. Безье/эллипс — приближённая ломаная; острые углы ограничиваются.");
+                ui.separator();
+            }
+        }
         if self.tool==Tool::Nodes{
             ui.heading("Редактирование узлов");
             ui.label("Клик по кривой — выбор. Двойной клик по сегменту — новый узел.");
