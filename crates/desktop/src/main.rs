@@ -70,6 +70,15 @@ impl FillCache {
         }
     }
 }
+/// Temporary text editing state. The document is modified only on Apply,
+/// so a whole typing session becomes one undoable transaction.
+struct InlineTextEdit{
+    object_id:u64,
+    draft:String,
+    initial:String,
+    screen_pos:Pos2,
+    request_focus:bool,
+}
 struct Editor{
     doc:Document,
     selected:Option<u64>,
@@ -123,6 +132,7 @@ struct Editor{
     font_search:String,
     text_find:String,
     text_replacement:String,
+    inline_text:Option<InlineTextEdit>,
     proof_dpi:u32,
     keep_bitmap_ratio:bool,
     show_preflight:bool,
@@ -168,7 +178,7 @@ impl Default for Editor{
             appearance_gradient_angle:0.0,appearance_dash_mm:0.0,
             appearance_cap:0,appearance_join:0,
             custom_pivot:false,pivot_x:0.0,pivot_y:0.0,
-            text_outliner:TextOutliner::new(),text_preview:TextPreview::default(),font_search:String::new(),text_find:String::new(),text_replacement:String::new(),proof_dpi:96,
+            text_outliner:TextOutliner::new(),text_preview:TextPreview::default(),font_search:String::new(),text_find:String::new(),text_replacement:String::new(),inline_text:None,proof_dpi:96,
             keep_bitmap_ratio:true,
             show_preflight:false,preflight_lines:Vec::new(),
             minimum_image_dpi:150.0,
@@ -332,6 +342,79 @@ fn trim_history(history:&mut Vec<Document>) {
     }
 }
 impl Editor{
+    fn begin_inline_text_edit(&mut self,id:u64,pos:Pos2){
+        let Some(object)=self.doc.objects.iter().find(|o|o.id==id) else{return;};
+        let editable=self.doc.layer(object.layer_id)
+            .is_some_and(|layer|layer.visible&&!layer.locked);
+        if !editable {
+            self.status="Текст находится на скрытом или заблокированном слое".into();
+            return;
+        }
+        let Shape::Text{value,..}=&object.shape else{return;};
+        self.selected=Some(id);
+        self.multi_selected.clear();
+        self.inline_text=Some(InlineTextEdit{
+            object_id:id,draft:value.clone(),initial:value.clone(),
+            screen_pos:pos,request_focus:true,
+        });
+    }
+    fn apply_inline_text_edit(&mut self,session:InlineTextEdit){
+        if session.draft==session.initial{return;}
+        if session.draft.len()>text_edit_ops::MAX_EDITED_TEXT_BYTES{
+            self.status="Текст слишком длинный для редактирования".into();
+            return;
+        }
+        let Some(object)=self.doc.objects.iter().find(|o|o.id==session.object_id) else{
+            self.status="Объект больше не существует".into();return;
+        };
+        let editable=self.doc.layer(object.layer_id)
+            .is_some_and(|layer|layer.visible&&!layer.locked);
+        if !editable {
+            self.status="Нельзя изменять текст на заблокированном слое".into();return;
+        }
+        let Shape::Text{value,..}=&object.shape else{return;};
+        if value!=&session.initial{
+            self.status="Объект был изменён в другом месте; повторите редактирование".into();
+            return;
+        }
+        let index=self.doc.objects.iter().position(|o|o.id==session.object_id).unwrap();
+        self.checkpoint();
+        if let Shape::Text{value,..}=&mut self.doc.objects[index].shape {
+            *value=session.draft;
+        }
+        self.text_preview.clear();
+        self.status="Текст изменён. Ctrl+Z отменит всю правку".into();
+    }
+    fn inline_text_window(&mut self,ctx:&egui::Context){
+        let Some(mut session)=self.inline_text.take() else{return;};
+        let mut apply=false;
+        let mut cancel=false;
+        let mut open=true;
+        let pos=session.screen_pos;
+        egui::Window::new("Редактирование текста")
+            .id(egui::Id::new("inline_text_editor"))
+            .default_pos(pos)
+            .default_width(380.0)
+            .resizable(true)
+            .open(&mut open)
+            .show(ctx,|ui|{
+                ui.label("Выделяйте текст мышью или клавиатурой. Ввод поддерживает Unicode.");
+                let response=ui.add(egui::TextEdit::multiline(&mut session.draft)
+                    .desired_width(f32::INFINITY).desired_rows(6));
+                if session.request_focus {
+                    response.request_focus();
+                    session.request_focus=false;
+                }
+                ui.horizontal(|ui|{
+                    if ui.button("Применить").clicked(){apply=true;}
+                    if ui.button("Отмена").clicked(){cancel=true;}
+                });
+                ui.label("Применить — одна запись в истории. Отмена не меняет документ.");
+            });
+        if ctx.input(|i|i.key_pressed(egui::Key::Escape)){cancel=true;}
+        if apply{self.apply_inline_text_edit(session);}
+        else if open&&!cancel{self.inline_text=Some(session);}
+    }
     fn run_preflight(&mut self){
         let issues=opencorel_core::preflight::check(&self.doc,
             opencorel_core::preflight::PreflightOptions{
@@ -976,6 +1059,15 @@ impl Editor{
                 self.resize_drag=None;self.node_drag=None;
             }
             if response.double_clicked(){
+                if self.tool==Tool::Select{
+                    if let Some(pos)=response.interact_pointer_pos(){
+                        if v.rect.contains(pos){
+                            if let Some(id)=self.hit_test_at(v.mm(pos),2.0){
+                                self.begin_inline_text_edit(id,pos);
+                            }
+                        }
+                    }
+                }
                 if self.tool==Tool::Nodes{
                     if let Some(pos)=response.interact_pointer_pos(){
                         if v.rect.contains(pos){self.insert_node_at_pointer(v,pos);}
@@ -1028,8 +1120,10 @@ impl eframe::App for Editor{
         let undo=ctx.input(|i|i.modifiers.command&&i.key_pressed(egui::Key::Z)&&!i.modifiers.shift);
         let redo=ctx.input(|i|i.modifiers.command&&(i.key_pressed(egui::Key::Y) ||
             (i.key_pressed(egui::Key::Z)&&i.modifiers.shift)));
-        if undo{self.undo();}
-        if redo{self.redo();}
+        if self.inline_text.is_none(){
+            if undo{self.undo();}
+            if redo{self.redo();}
+        }
         let save_as=ctx.input(|i|i.modifiers.command&&i.modifiers.shift
             && i.key_pressed(egui::Key::S));
         if save_as{self.save_as_picker();}
@@ -1081,7 +1175,7 @@ impl eframe::App for Editor{
             if self.tool==Tool::Nodes {self.remove_active_node();}
             else{self.delete_selection();}
         }
-        if ctx.input(|i|i.key_pressed(egui::Key::Escape)){
+        if self.inline_text.is_none() && ctx.input(|i|i.key_pressed(egui::Key::Escape)){
             self.curve_start=None;self.curve_draft=None;self.tool=Tool::Select;
             self.resize_drag=None;self.node_drag=None;self.active_node=None;
         }
@@ -1111,7 +1205,9 @@ impl eframe::App for Editor{
         self.color_palette(ctx);
         if self.show_inspector{self.inspector(ctx);}
         self.workspace_footer(ctx);
-        self.canvas(ctx);
+        if self.inline_text.is_none(){self.canvas(ctx);}
+        else{self.canvas(ctx);}
+        self.inline_text_window(ctx);
         self.welcome_window(ctx);
         if self.show_preflight{
             egui::Window::new("Проверка макета")
