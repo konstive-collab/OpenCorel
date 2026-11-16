@@ -949,6 +949,48 @@ impl Editor{
             };
         }
     }
+    /// Export each page as its own numbered vector file, without touching
+    /// the native KDR and without silently dropping inactive pages.
+    fn export_all_pages_dialog(&mut self,ext:&str){
+        if !matches!(ext,"svg"|"pdf"){return;}
+        let mut documents=Vec::with_capacity(self.doc.page_count());
+        for page_index in 0..self.doc.page_count(){
+            match self.doc.page_document(page_index){
+                Ok(doc)=>documents.push(doc),
+                Err(e)=>{
+                    self.status=format!("Ошибка страницы {}: {e}",page_index+1);
+                    return;
+                }
+            }
+        }
+        let Some(folder)=rfd::FileDialog::new()
+            .set_title("Выберите папку для экспорта всех страниц")
+            .pick_folder() else{return;};
+        let stem=std::path::Path::new(&self.file).file_stem()
+            .and_then(|v|v.to_str()).unwrap_or("OpenCorel");
+        let safe_stem:String=stem.chars()
+            .filter(|c|c.is_alphanumeric()||matches!(c,'-'|'_'|' '))
+            .take(48).collect();
+        let folder_name=if safe_stem.trim().is_empty(){
+            "OpenCorel - страницы".to_string()
+        }else{format!("{safe_stem} - страницы")};
+        let target=folder.join(folder_name);
+        if let Err(e)=std::fs::create_dir(&target){
+            self.status=format!("Не удалось создать отдельную папку экспорта: {e}. Выберите другое место.");
+            return;
+        }
+        for (i,document) in documents.iter().enumerate(){
+            let path=target.join(format!("page-{:03}.{ext}",i+1));
+            if let Err(e)=opencorel_formats::save_document(document,&path){
+                self.status=format!("Экспорт остановлен на странице {}: {e}. Ранее созданные файлы остались в {}",
+                    i+1,target.display());
+                return;
+            }
+        }
+        self.status=format!("Экспортированы все {} страниц в {} ({}). Каждый файл — отдельная страница, не единый PDF.",
+            documents.len(),target.display(),ext.to_uppercase());
+    }
+
     fn export_print_sheet_dialog(&mut self){
         let opts=opencorel_core::print_sheet::PrintSheetOptions{
             bleed_mm:self.print_bleed_mm,
@@ -994,8 +1036,13 @@ impl Editor{
                 _=>opencorel_formats::save_document(&self.doc,&path),
             };
             self.status=match result{
-                Ok(())=>format!("Экспортировано: {} ({}).",path.display(),
-                    if ext=="pdf"{"PDF RGB, не PDF/X"}else{"контрольный файл"}),
+                Ok(())=>format!("Экспортировано: {} ({}). {}",
+                    path.display(),
+                    if ext=="pdf"{"PDF RGB, не PDF/X"}else{"контрольный файл"},
+                    if self.doc.page_count()>1{
+                        format!("Экспортирована только активная страница {} из {}.",
+                            self.doc.active_page_index+1,self.doc.page_count())
+                    }else{String::new()}),
                 Err(e)=>format!("Ошибка экспорта: {e}"),
             };
         }
