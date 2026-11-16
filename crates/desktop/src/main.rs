@@ -19,6 +19,7 @@ mod compound_render;
 mod text_preview;
 mod text_edit_ops;
 mod bezier_preview;
+mod bezier_pen;
 use compound_render::CompoundCache;
 use text_preview::TextPreview;
 use bezier_preview::BezierPreviewCache;
@@ -95,6 +96,8 @@ struct Editor{
     drag_start:Option<(Point,u64)>,
     creation_start:Option<(Point,u64)>,
     curve_start:Option<Point>,
+    curve_outgoing:Option<Point>,
+    curve_drag_anchor:Option<Point>,
     curve_draft:Option<u64>,
     active_layer:u64,
     pan:Vec2,
@@ -163,7 +166,8 @@ impl Default for Editor{
         Self{doc,selected:None,multi_selected:Vec::new(),tool:Tool::Select,file:"project.kdr".into(),
             text:"Новый текст".into(),status:"Экспериментальный прототип".into(),
             zoom:1.0,drag_start:None,creation_start:None,
-            curve_start:None,curve_draft:None,active_layer:1,pan:Vec2::ZERO,
+            curve_start:None,curve_draft:None,curve_outgoing:None,curve_drag_anchor:None,
+            active_layer:1,pan:Vec2::ZERO,
             undo:Vec::new(),redo:Vec::new(),
             inspector_tab:InspectorTab::Objects,show_inspector:true,
             show_grid:false,snap_grid:false,
@@ -631,6 +635,7 @@ impl Editor{
             self.status="Слой кривой скрыт или заблокирован".into();return;
         }
         let Some(start)=self.curve_start else {
+            self.curve_outgoing=None;
             self.curve_start=Some(p);
             self.status="Начало кривой: укажите следующую точку".into();
             return;
@@ -641,10 +646,15 @@ impl Editor{
             _=>start,
         };
         let seg=CubicSegment{
-            control1:Point{x:previous.x+(p.x-previous.x)/3.0,y:previous.y+(p.y-previous.y)/3.0},
-            control2:Point{x:previous.x+2.0*(p.x-previous.x)/3.0,
-                           y:previous.y+2.0*(p.y-previous.y)/3.0},
-            end:p
+            control1:self.curve_outgoing.take().unwrap_or(Point{
+                x:previous.x+(p.x-previous.x)/3.0,
+                y:previous.y+(p.y-previous.y)/3.0,
+            }),
+            control2:Point{
+                x:previous.x+2.0*(p.x-previous.x)/3.0,
+                y:previous.y+2.0*(p.y-previous.y)/3.0,
+            },
+            end:p,
         };
         if let Some(id)=self.curve_draft{
             // Keep the entire in-progress curve in one undo transaction.
@@ -668,6 +678,52 @@ impl Editor{
             self.curve_draft=self.add_shape(Shape::Bezier{start,segments:vec![seg],closed:false},style);
         }
         self.status="Точка добавлена; двойной щелчок завершает кривую".into();
+    }
+    /// Dragging an anchor controls its incoming and outgoing Bézier handles.
+    /// One history checkpoint is still taken when the first segment is added.
+    fn curve_drag_to(&mut self,cursor:Point){
+        let Some(anchor)=self.curve_drag_anchor else{return;};
+        let Some((incoming,outgoing))=bezier_pen::symmetric_tangent(anchor,cursor) else{
+            self.status="Касательная выходит за пределы допустимых координат".into();
+            return;
+        };
+        if let Some(id)=self.curve_draft{
+            let Some(object)=self.doc.objects.iter().find(|o|o.id==id) else{return;};
+            if !self.doc.layer(object.layer_id)
+                .is_some_and(|layer|layer.visible&&!layer.locked){return;}
+            let Some(object)=self.doc.get_mut(id) else{return;};
+            if let Shape::Bezier{segments,..}=&mut object.shape{
+                if let Some(last)=segments.last_mut(){
+                    if last.end==anchor {
+                        last.control2=incoming;
+                    }
+                }
+            }
+        }
+        self.curve_outgoing=Some(outgoing);
+    }
+
+    fn curve_finish(&mut self,close:bool){
+        if close{
+            if let Some(id)=self.curve_draft{
+                let editable=self.doc.objects.iter().find(|o|o.id==id)
+                    .is_some_and(|o|self.doc.layer(o.layer_id)
+                        .is_some_and(|l|l.visible&&!l.locked));
+                if editable {
+                    if let Some(obj)=self.doc.get_mut(id){
+                        if let Shape::Bezier{segments,closed,..}=&mut obj.shape{
+                            if segments.len()>=2{*closed=true;}
+                        }
+                    }
+                }
+            }
+        }
+        self.curve_start=None;
+        self.curve_draft=None;
+        self.curve_outgoing=None;
+        self.curve_drag_anchor=None;
+        self.tool=Tool::Select;
+        self.status=if close{"Контур замкнут"}else{"Кривая завершена"}.into();
     }
     fn import_svg(&mut self){self.open();}
     fn save(&mut self){
