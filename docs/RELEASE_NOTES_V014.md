@@ -1,5 +1,44 @@
 # OpenCorel v0.14 Alpha — Typography iteration I06 (in progress)
 
+## Professional path tools — latest iteration
+
+**Persistent Bézier node modes:** the node inspector now stores Corner, Smooth
+or Symmetric mode per interior cubic anchor. Smooth and Symmetric preserve
+coupling while a handle is moved; Corner allows independent handles. A new
+**Free** command unlinks the two handles without changing the curve shape.
+Node modes are stored as optional metadata per object in the native `.kdr`
+format; earlier documents have no such metadata and remain readable.
+
+**Structural editing:** Reverse Direction reverses the control-point order and
+preserves the cubic trace and mode assignments. Close and Open alter only the
+closure flag; no nodes or handles are destroyed. These operations also apply
+to eligible polylines and compound paths (for compound paths, all contours
+change together).
+
+**Topology safety:** when a node is inserted or removed, mode entries are
+reindexed to follow the original anchor. Invalid/duplicate mode addresses
+are rejected by the document validator. Commands on unavailable layers or
+groups are denied. Metadata edits, contour reversal and closure each use
+a single Undo checkpoint. A drag still checks validity before creating its
+first checkpoint.
+
+**Compatibility:** `schema_version=1` remains unchanged; the new
+`node_modes` member is optional and skipped when empty. Legacy files remain
+readable without migration; older builds may discard the newer metadata when
+resaving, so keep backups when exchanging project versions.
+
+**Regressions:** independent core tests verify KDR roundtrips, linked and
+unlinked handles, smooth/symmetric lengths, metadata remapping, exact reversed
+cubic geometry, no-op closure, degenerate inputs and invalid mode references.
+Desktop tests cover persisted mode Undo/Redo and path operation Undo/Redo.
+
+**Limitations:** automatic coupling currently applies only to internal nodes
+with both adjoining cubic handles, not to the initial/end anchor of an open
+path or to the implicit closing segment. There is no full-fledged persistent
+node mode selection across multiple objects. Manual Windows mouse testing is
+still required; cross-platform CI alone does not certify input feel.
+
+
 ## Implemented in PR #23
 - Installed system font families can be selected in the existing editable text inspector.
 - Search-as-you-type filter and virtualized rows improve usability for large font collections.
@@ -108,7 +147,7 @@ Known limitations:
 - Double-click completion does not create an extra point at the second click.
   Use Enter to finish with the current last anchor.
 
-## Professional node editor: tangent geometry and drag performance
+## Earlier node-editor milestone: one-shot tangent geometry (superseded by persistent modes above)
 
 The node inspector now exposes three **one-shot** operations for an interior
 Bézier/compound-path anchor with both incoming and outgoing cubic handles:
