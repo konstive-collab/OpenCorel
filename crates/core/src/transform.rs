@@ -25,7 +25,17 @@ pub fn resize_shape(shape:&mut Shape,target:Bounds)->Result<(),String>{
             for pt in points{map_resize(pt,old,target,sx,sy);}
         }
         Shape::Bezier{start,segments,..}=>{
-            let old=Shape::Bezier{start:*start,segments:segments.clone(),closed:false}.bounds();
+            // Compute bounds by borrowing handles. Cloning every segment on
+            // every pointer frame made resizing long cubic paths stutter.
+            let mut min=*start;
+            let mut max=*start;
+            for segment in segments.iter(){
+                for point in [segment.control1,segment.control2,segment.end]{
+                    min.x=min.x.min(point.x);min.y=min.y.min(point.y);
+                    max.x=max.x.max(point.x);max.y=max.y.max(point.y);
+                }
+            }
+            let old=Bounds{x:min.x,y:min.y,w:max.x-min.x,h:max.y-min.y};
             let (sx,sy)=scales(old,target)?;
             map_resize(start,old,target,sx,sy);
             for seg in segments {
