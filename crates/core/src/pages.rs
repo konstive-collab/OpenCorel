@@ -138,7 +138,7 @@ impl Document{
             let prefix="Копия: ";
             let max_bytes=128usize.saturating_sub(prefix.len());
             let shortened=source.char_indices().take_while(|(i,c)|
-                i+c.len_utf8()<=max_bytes).map(|(_,c)|c).collect::<String>();
+                *i+c.len_utf8()<=max_bytes).map(|(_,c)|c).collect::<String>();
             format!("{prefix}{shortened}")
         }else{format!("Страница {number}")};
         let next=if duplicate{
