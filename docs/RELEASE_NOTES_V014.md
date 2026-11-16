@@ -1,5 +1,39 @@
 # OpenCorel v0.14 Alpha — Typography iteration I06 (in progress)
 
+## Editing experience — selection, resizing and navigation
+
+- **Marquee selection:** draggable selection box on empty canvas, including
+  left-to-right *containment* and right-to-left *crossing* behavior with
+  visual distinction. Shift-additive box selection preserves prior picks.
+  Group members are selected as a unit; locked/hidden group members prevent
+  partial group selection. Implementation avoids quadratic group scans on
+  large object collections.
+- **Lazy movement Undo:** object drag creates a checkpoint only when actual
+  movement occurs. A whole drag, including a multi-object selection, is one
+  Undo step; selected objects on locked layers abort the entire operation.
+  Invalid/out-of-range coordinates are rejected. Geometry caches are
+  invalidated during dragging to avoid stale vector tessellations.
+- **Stable object resizing:** the original bounding box anchors the opposite
+  corner and the Shift aspect ratio throughout a gesture. Candidate geometry
+  is verified before the first checkpoint. Tapping a resize handle creates
+  no history entry; actual edits remain undoable as one gesture.
+- **Pixel-consistent geometric picking:** a new optional core filtered-hit
+  API preserves document lock/visibility, clipping and stacking semantics.
+  The canvas filters precise strokes of open cubic and polyline paths, true
+  filled polygon and ellipse interiors, and outline-only rectangle edges.
+  Empty space inside a curved path bounding rectangle no longer steals
+  clicks intended for objects behind it. Hit tolerance is 6 screen pixels.
+- **Pointer-anchored zoom:** the document position under the pointer remains
+  stable as the wheel zooms; the previous page-center zoom jump is gone.
+- **Tests:** lazy Undo on actual movement, selection direction, shift-add,
+  hidden/locked groups, stable resize, precise stroke picking versus empty
+  cubic bounds, zoom-invariant tolerance and stationary cursor coordinates.
+
+The new geometry picker is still based on finite cubic sampling, so extremely
+sharp micro-features need mouse acceptance. Clipped preview and complex
+typography remain separate validation cases. This is an **alpha quality
+iteration**, not a CorelDRAW parity announcement.
+
 ## Quality stabilization — regression and predictable editing
 
 - **Hidden-guide snap bug fixed:** turning guide visibility off also disables
