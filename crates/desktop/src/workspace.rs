@@ -658,6 +658,11 @@ impl Editor {
                                 .clicked(){
                                 self.apply_tangent_operation(TangentOperation::Symmetric);
                             }
+                            if ui.button("Свободно")
+                                .on_hover_text("Отключить автоматическую связь рычагов без изменения формы")
+                                .clicked(){
+                                self.unlink_active_tangents();
+                            }
                         });
                         ui.small("Гладкий и Симметрия автоматически связывают рычаги при перетаскивании. Режим сохраняется в .kdr.");
                     }
