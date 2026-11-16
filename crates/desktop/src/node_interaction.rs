@@ -219,6 +219,51 @@ impl Editor{
             },
         }
     }
+    /// Reverse editable path direction without modifying its geometry.
+    /// A complete node-mode reindex is part of this undoable transaction.
+    pub(super) fn reverse_selected_path(&mut self){
+        let Some(id)=self.selected else{return;};
+        if !self.node_edit_allowed(id){
+            self.status="Нельзя изменить путь на заблокированном слое".into();
+            return;
+        }
+        let Some(obj)=self.doc.objects.iter().find(|o|o.id==id) else{return;};
+        let mut updated=obj.shape.clone();
+        if let Err(reason)=node_edit::reverse_path(&mut updated){
+            self.status=reason;return;
+        }
+        let mut modes=obj.node_modes.clone();
+        node_edit::modes_after_reverse(&updated,&mut modes);
+        self.checkpoint();
+        if let Some(obj)=self.doc.get_mut(id){
+            obj.shape=updated;obj.node_modes=modes;
+        }
+        self.active_node=None;
+        self.compound_cache.clear();self.bezier_preview.clear();
+        self.fill_cache.entries.clear();
+        self.status="Направление контура изменено (Ctrl+Z — отмена)".into();
+    }
+    /// Open or close a path, retaining anchors and editable handles.
+    pub(super) fn set_selected_path_closed(&mut self,closed:bool){
+        let Some(id)=self.selected else{return;};
+        if !self.node_edit_allowed(id){
+            self.status="Нельзя изменять контур на заблокированном слое".into();
+            return;
+        }
+        let Some(obj)=self.doc.objects.iter().find(|o|o.id==id) else{return;};
+        let mut updated=obj.shape.clone();
+        match node_edit::set_closed(&mut updated,closed){
+            Ok(false)=>self.status="Контур уже находится в этом состоянии".into(),
+            Ok(true)=>{
+                self.checkpoint();
+                if let Some(obj)=self.doc.get_mut(id){obj.shape=updated;}
+                self.compound_cache.clear();self.bezier_preview.clear();
+                self.fill_cache.entries.clear();
+                self.status=if closed{"Контур замкнут"}else{"Контур разомкнут"}.into();
+            },
+            Err(reason)=>self.status=reason,
+        }
+    }
     pub(super) fn remove_active_node(&mut self){
         let Some((id,address))=self.active_node else{
             self.status="Выберите узел кривой перед удалением".into();return;
