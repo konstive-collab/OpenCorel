@@ -1208,7 +1208,12 @@ impl Editor{
                     let guide_started=self.begin_guide_drag(
                         v,response.rect,press,ctx.input(|i|i.modifiers.alt));
                     if !guide_started && v.rect.contains(pos){
-                        let p=self.snapped(v.mm(pos));
+                        let p=if matches!(self.tool,
+                            Tool::Line|Tool::Rect|Tool::Ellipse|Tool::Polygon){
+                            self.snap_canvas_point(v.mm(pos),v.scale,None)
+                        }else{
+                            self.snapped(v.mm(pos))
+                        };
                         match self.tool{
                             Tool::Nodes=>self.begin_node_drag(v,pos),
                             Tool::Freehand=>{
@@ -1280,6 +1285,11 @@ impl Editor{
                     let now=if self.tool==Tool::Nodes &&
                         self.node_drag.is_some_and(|(_,address)|!address.is_handle()){
                         self.snap_canvas_point(v.mm(pos),v.scale,self.selected)
+                    }else if matches!(self.tool,
+                        Tool::Line|Tool::Rect|Tool::Ellipse|Tool::Polygon) &&
+                        self.creation_start.is_some(){
+                        self.snap_canvas_point(v.mm(pos),v.scale,
+                            self.creation_start.map(|(_,id)|id))
                     }else{self.snapped(v.mm(pos))};
                     if self.guide_drag.is_some(){
                         self.update_guide_drag(v.mm(pos));
