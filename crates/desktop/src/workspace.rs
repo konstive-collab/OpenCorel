@@ -684,6 +684,12 @@ impl Editor {
                         }).unwrap_or(0);
                     if editable_kind!=0{
                         ui.separator();
+                        if editable_kind==1 &&
+                            ui.button("Ломаную → Безье (точно)")
+                                .on_hover_text("Без сглаживания: каждый прямой сегмент остаётся геометрически прямым")
+                                .clicked(){
+                            self.convert_selected_polyline_exact();
+                        }
                         ui.label("Упрощение и сглаживание");
                         ui.horizontal(|ui|{
                             ui.label("Допуск, мм");
