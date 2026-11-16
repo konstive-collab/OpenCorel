@@ -275,6 +275,40 @@ impl Editor{
         self.status="Продолжение кривой: добавьте узлы, Enter — завершить, Esc — выйти".into();
     }
 
+    /// Convert a selected polyline into cubic segments without any smoothing
+    /// or approximation. Preserve style, appearance and the original object id.
+    pub(super) fn convert_selected_polyline_exact(&mut self){
+        let Some(id)=self.selected else{
+            self.status="Выберите ломаную для точного преобразования".into();
+            return;
+        };
+        if !self.multi_selected.is_empty() || !self.node_edit_allowed(id){
+            self.status="Выберите одну ломаную на доступном слое".into();
+            return;
+        }
+        let Some(object)=self.doc.objects.iter().find(|o|o.id==id) else{return;};
+        let shape=match node_edit::polyline_to_bezier_exact(&object.shape){
+            Ok(shape)=>shape,
+            Err(reason)=>{
+                self.status=format!("Преобразование отменено: {reason}");
+                return;
+            }
+        };
+        self.checkpoint();
+        if let Some(object)=self.doc.get_mut(id){
+            object.shape=shape;
+            object.node_modes.clear();
+        }
+        self.active_node=None;
+        self.node_drag=None;
+        self.node_drag_checkpointed=false;
+        self.fill_cache.entries.clear();
+        self.vector_cache.clear();
+        self.compound_cache.clear();
+        self.bezier_preview.clear();
+        self.status="Ломаная преобразована в точные кубические сегменты Безье. Ctrl+Z — отмена".into();
+    }
+
     /// Join exactly two selected, same-layer open Bézier objects in one
     /// native path. Refuse mismatched styles, clips, groups and locked layers
     /// rather than silently flattening or dropping object-level properties.
