@@ -1233,6 +1233,64 @@ impl eframe::App for Editor{
 mod tests {
     use super::*;
     #[test]
+    fn inline_text_apply_is_single_undoable_change(){
+        let mut editor=Editor::default();
+        let id=editor.doc.objects[1].id;
+        let original=editor.doc.clone();
+        editor.begin_inline_text_edit(id,Pos2::new(120.0,150.0));
+        let mut session=editor.inline_text.take().expect("text editor must open");
+        session.draft="Новый текст — мир!".into();
+        editor.apply_inline_text_edit(session);
+        assert_ne!(editor.doc,original);
+        assert_eq!(editor.undo.len(),1);
+        editor.undo();
+        assert_eq!(editor.doc,original);
+        editor.redo();
+        let Shape::Text{value,..}=&editor.doc.objects[1].shape else{panic!("text expected")};
+        assert_eq!(value,"Новый текст — мир!");
+    }
+    #[test]
+    fn inline_text_cancel_and_no_op_do_not_create_undo(){
+        let mut editor=Editor::default();
+        let id=editor.doc.objects[1].id;
+        let original=editor.doc.clone();
+        editor.begin_inline_text_edit(id,Pos2::ZERO);
+        let session=editor.inline_text.take().unwrap();
+        // Simulate dismissing the editor: the working draft is dropped.
+        assert_eq!(editor.doc,original);
+        editor.apply_inline_text_edit(session);
+        assert_eq!(editor.doc,original);
+        assert!(editor.undo.is_empty());
+    }
+    #[test]
+    fn inline_text_rechecks_layer_lock_before_commit(){
+        let mut editor=Editor::default();
+        let id=editor.doc.objects[1].id;
+        let before=editor.doc.clone();
+        editor.begin_inline_text_edit(id,Pos2::ZERO);
+        let mut session=editor.inline_text.take().unwrap();
+        session.draft="Заблокировано".into();
+        editor.doc.layers[0].locked=true;
+        editor.apply_inline_text_edit(session);
+        assert_eq!(editor.doc.objects,before.objects);
+        assert!(editor.undo.is_empty());
+    }
+    #[test]
+    fn inline_text_rejects_conflicting_external_edits(){
+        let mut editor=Editor::default();
+        let id=editor.doc.objects[1].id;
+        editor.begin_inline_text_edit(id,Pos2::ZERO);
+        let mut session=editor.inline_text.take().unwrap();
+        session.draft="Draft".into();
+        if let Shape::Text{value,..}=&mut editor.doc.objects[1].shape{
+            *value="Other writer".into();
+        }
+        editor.apply_inline_text_edit(session);
+        assert!(editor.undo.is_empty());
+        let Shape::Text{value,..}=&editor.doc.objects[1].shape else{panic!()};
+        assert_eq!(value,"Other writer");
+    }
+    #[test]
     fn align_does_not_corrupt_group_or_add_undo_entry(){
         let mut editor=Editor::default();
         editor.select_all();
