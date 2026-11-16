@@ -228,6 +228,38 @@ impl Editor {
                     if ui.button("Центрировать по листу").clicked(){
                         self.center_selection_on_page();ui.close_menu();
                     }
+                    ui.menu_button("Выравнивание и распределение",|ui|{
+                        use opencorel_core::{Alignment,Distribution};
+                        let count=self.selection_ids().len();
+                        ui.label("Выравнивание по общему габариту выделения");
+                        ui.add_enabled_ui(count>=2,|ui|{
+                            for (title,mode) in [
+                                ("По левому краю",Alignment::Left),
+                                ("По центру X",Alignment::CenterX),
+                                ("По правому краю",Alignment::Right),
+                                ("По верхнему краю",Alignment::Top),
+                                ("По центру Y",Alignment::CenterY),
+                                ("По нижнему краю",Alignment::Bottom),
+                            ]{
+                                if ui.button(title).clicked(){
+                                    self.align_selection(mode);ui.close_menu();
+                                }
+                            }
+                        });
+                        ui.separator();
+                        ui.label("Равные интервалы между центрами объектов");
+                        ui.add_enabled_ui(count>=3,|ui|{
+                            if ui.button("По горизонтали").clicked(){
+                                self.distribute_selection(Distribution::HorizontalCenters);
+                                ui.close_menu();
+                            }
+                            if ui.button("По вертикали").clicked(){
+                                self.distribute_selection(Distribution::VerticalCenters);
+                                ui.close_menu();
+                            }
+                        });
+                        ui.small("Ctrl+Z отменяет выравнивание одним действием.");
+                    });
                     if ui.button("Группировать       Ctrl+G").clicked(){
                         self.group_selection();ui.close_menu();
                     }
