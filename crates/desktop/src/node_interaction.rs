@@ -148,6 +148,44 @@ impl Editor{
             Err(e)=>self.status=e,
         }
     }
+    /// One-shot tangent commands leave native cubic geometry editable.
+    /// Geometry is validated on a copy so rejected operations do not push
+    /// history or partially mutate the document.
+    pub(super) fn apply_tangent_operation(&mut self,operation:node_edit::TangentOperation){
+        let Some((id,address))=self.active_node else{
+            self.status="Сначала выберите внутренний узел кривой".into();
+            return;
+        };
+        if !self.node_edit_allowed(id){
+            self.status="Слой скрыт, заблокирован или объект сгруппирован".into();
+            return;
+        }
+        let Some(obj)=self.doc.objects.iter().find(|obj|obj.id==id) else{return;};
+        let mut updated=obj.shape.clone();
+        match node_edit::set_tangent(&mut updated,address,operation){
+            Ok(true)=>{
+                self.checkpoint();
+                if let Some(obj)=self.doc.get_mut(id){
+                    obj.shape=updated;
+                }
+                self.compound_cache.clear();
+                self.bezier_preview.clear();
+                self.fill_cache.entries.clear();
+                let command=match operation{
+                    node_edit::TangentOperation::Corner=>"Угловой узел: рычаги сброшены",
+                    node_edit::TangentOperation::Smooth=>"Касательные выровнены",
+                    node_edit::TangentOperation::Symmetric=>"Касательные симметричны",
+                };
+                self.status=format!("{command}. Ctrl+Z — отменить");
+            },
+            Ok(false)=>{
+                self.status="Геометрия касательных уже соответствует операции".into();
+            },
+            Err(reason)=>{
+                self.status=format!("Касательные не изменены: {reason}");
+            },
+        }
+    }
     pub(super) fn remove_active_node(&mut self){
         let Some((id,address))=self.active_node else{
             self.status="Выберите узел кривой перед удалением".into();return;
@@ -173,6 +211,48 @@ impl Editor{
 mod tests{
     use super::*;
     use opencorel_core::{CubicSegment,Style};
+    #[test] fn tangent_command_is_undoable_and_not_repeated_as_noop(){
+        let mut editor=Editor::default();
+        let id=editor.doc.add(Shape::Bezier{
+            start:Point{x:0.,y:0.},
+            segments:vec![
+                CubicSegment{control1:Point{x:1.,y:3.},
+                    control2:Point{x:9.,y:4.},end:Point{x:10.,y:10.}},
+                CubicSegment{control1:Point{x:18.,y:11.},
+                    control2:Point{x:20.,y:15.},end:Point{x:25.,y:20.}},
+            ],closed:false},Style::default());
+        let before=editor.doc.clone();
+        editor.select_object(Some(id),false);
+        editor.tool=Tool::Nodes;
+        editor.active_node=Some((id,NodeAddress::BezierEnd(0)));
+        editor.apply_tangent_operation(node_edit::TangentOperation::Corner);
+        assert_ne!(editor.doc,before);
+        assert_eq!(editor.undo.len(),1);
+        editor.apply_tangent_operation(node_edit::TangentOperation::Corner);
+        assert_eq!(editor.undo.len(),1);
+        editor.undo();
+        assert_eq!(editor.doc,before);
+        editor.redo();
+        editor.doc.validate().unwrap();
+    }
+    #[test] fn tangent_command_rejects_locked_object_without_undo(){
+        let mut editor=Editor::default();
+        let id=editor.doc.add(Shape::Bezier{
+            start:Point{x:0.,y:0.},segments:vec![
+                CubicSegment{control1:Point{x:1.,y:1.},
+                    control2:Point{x:8.,y:5.},end:Point{x:10.,y:10.}},
+                CubicSegment{control1:Point{x:12.,y:15.},
+                    control2:Point{x:20.,y:20.},end:Point{x:22.,y:25.}},
+            ],closed:false},Style::default());
+        editor.selected=Some(id);
+        editor.tool=Tool::Nodes;
+        editor.active_node=Some((id,NodeAddress::BezierEnd(0)));
+        let before=editor.doc.clone();
+        editor.doc.layers[0].locked=true;
+        editor.apply_tangent_operation(node_edit::TangentOperation::Symmetric);
+        assert_eq!(editor.doc.objects,before.objects);
+        assert!(editor.undo.is_empty());
+    }
     #[test] fn node_editor_nudge_and_undo(){
         let mut editor=Editor::default();
         let id=editor.doc.add(Shape::Bezier{
