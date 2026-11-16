@@ -1,5 +1,40 @@
 # OpenCorel v0.14 Alpha — Typography iteration I06 (in progress)
 
+## Persistent guides and editable parallel contours
+
+- **Persistent nonprinting guides:** horizontal/vertical guide positions are
+  added to the optional `.kdr` document metadata. Old projects remain
+  compatible, and saved positions survive reopen and page resizing.
+  Guide values are validated (finite, within ±100,000 mm, max 256).
+- **Interactive rulers:** draw a new vertical guide from the top ruler or
+  a horizontal one from the left ruler. **Alt+drag** an existing guide
+  to move it. Each completed gesture adds exactly one Ctrl+Z checkpoint;
+  numerical editing, single removal and clearing all guides are also undoable.
+- **Guide snapping:** independent X and Y snapping including guide
+  intersections with zoom-consistent pixel tolerance. Visible-object anchors
+  retain priority; grid snap is fallback for any unsnapped axis.
+  Guide rendering is canvas-only, never included in vector/raster exports.
+- **Editable signed contour offsets:** create a new parallel native polyline
+  from a rectangle, ellipse, polyline or Bézier, retaining the original
+  object as well as its style/layer. Offsets range from -1000 to +1000 mm
+  (excluding zero) with sign defined relative to path direction. The result
+  is independently editable; original geometry is not mutated.
+- **Robust bounds:** 4096-point cap, degenerate/reversed segment checks,
+  clamp for long miters on acute turns, finite ±100,000 mm coordinates,
+  no unsupported clipped/grouped/locked edits. For curves, a finite sample
+  approximation is used. Self-intersections are not resolved automatically.
+- **Tests:** guide persistence/legacy compatibility, intersection snapping,
+  invalid values, create/move/delete + undo, ruler drag, signed offset of
+  lines/L-shapes/squares/rectangles/cubic curves, rejected degenerate
+  shapes and copy-with-undo checks.
+
+**Limitations:** guide drags are pointer based rather than a full selection
+tool. Guide metadata is only used in KDR editor documents, not exported.
+Bezier and ellipse parallel offsets are sampled polylines, NOT exact
+geometric offsets or fully featured CorelDRAW contour effects. Colors and
+appearance are copied, but source clipping/group references are not copied.
+Manual Windows acceptance remains necessary.
+
 ## Freehand pen and geometric fitting — next professional toolset
 
 A new **Freehand (H)** tool collects pointer samples during a continuous
