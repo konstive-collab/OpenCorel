@@ -30,6 +30,91 @@ fn combine(p:Point,n:(f64,f64),distance:f64)->Result<Point,String>{
     }
     Ok(Point{x:x as f32,y:y as f32})
 }
+/// Prevent a large inward offset from turning tiny shapes inside out.
+/// Per-edge direction tests catch the common "10 mm square + 6 mm inward"
+/// inversion that winding/area comparisons alone do NOT detect.
+fn validate_offset_topology(original:&[Point],offset:&[Point],closed:bool)
+    ->Result<(),String>{
+    let n=original.len();
+    if n!=offset.len(){return Err("Offset topology count mismatch".into());}
+    let edges=if closed{n}else{n-1};
+    for i in 0..edges{
+        let j=(i+1)%n;
+        let a=(original[j].x as f64-original[i].x as f64,
+               original[j].y as f64-original[i].y as f64);
+        let b=(offset[j].x as f64-offset[i].x as f64,
+               offset[j].y as f64-offset[i].y as f64);
+        let original_len=a.0.hypot(a.1);
+        let projected=a.0*b.0+a.1*b.1;
+        if projected<=original_len*1e-6{
+            return Err("Offset collapses or reverses an edge; reduce distance".into());
+        }
+    }
+    if closed{
+        let area=|points:&[Point]|{
+            let mut sum=0.0f64;
+            for i in 0..points.len(){
+                let a=points[i];let b=points[(i+1)%points.len()];
+                sum+=(a.x as f64*b.y as f64-b.x as f64*a.y as f64);
+            }
+            sum/2.0
+        };
+        let original_area=area(original);
+        let output_area=area(offset);
+        if original_area.abs()<1e-7||
+            output_area.abs()<1e-7||
+            original_area.signum()!=output_area.signum(){
+            return Err("Offset collapses or inverts a closed polygon".into());
+        }
+    }
+    // Reject self-intersections instead of silently returning a malformed
+    // fill polygon. Sweep by x-bounding boxes to avoid O(n²) on smooth rings.
+    #[derive(Clone,Copy)]
+    struct Edge{idx:usize,a:Point,b:Point,x_min:f64,x_max:f64,
+        y_min:f64,y_max:f64}
+    let mut lines=Vec::with_capacity(edges);
+    for i in 0..edges{
+        let a=offset[i];let b=offset[(i+1)%n];
+        lines.push(Edge{idx:i,a,b,x_min:(a.x.min(b.x)) as f64,
+            x_max:(a.x.max(b.x)) as f64,
+            y_min:(a.y.min(b.y)) as f64,
+            y_max:(a.y.max(b.y)) as f64});
+    }
+    lines.sort_by(|a,b|a.x_min.total_cmp(&b.x_min));
+    let mut checks=0usize;
+    for (i,a) in lines.iter().enumerate(){
+        for b in &lines[(i+1)..]{
+            if b.x_min>a.x_max+1e-7{break;}
+            if a.idx.abs_diff(b.idx)<=1||
+                (closed && a.idx.abs_diff(b.idx)==edges-1){
+                continue; // adjacent segments have a shared endpoint
+            }
+            if b.y_min>a.y_max+1e-7||a.y_min>b.y_max+1e-7{continue;}
+            checks+=1;
+            if checks>2_000_000{
+                return Err("Offset too complex for safe topology validation".into());
+            }
+            let orientation=|p:Point,q:Point,r:Point|{
+                (q.x as f64-p.x as f64)*(r.y as f64-p.y as f64)-
+                (q.y as f64-p.y as f64)*(r.x as f64-p.x as f64)
+            };
+            let o1=orientation(a.a,a.b,b.a);
+            let o2=orientation(a.a,a.b,b.b);
+            let o3=orientation(b.a,b.b,a.a);
+            let o4=orientation(b.a,b.b,a.b);
+            // Bounds already overlap. Strictly crossing segments OR a
+            // collinear overlap/touching point can corrupt a filled contour.
+            let crosses=(o1>1e-8&&o2< -1e-8 || o1< -1e-8&&o2>1e-8)
+                && (o3>1e-8&&o4< -1e-8 || o3< -1e-8&&o4>1e-8);
+            let near_zero=o1.abs()<=1e-8||o2.abs()<=1e-8||
+                o3.abs()<=1e-8||o4.abs()<=1e-8;
+            if crosses || near_zero{
+                return Err("Offset contains overlapping or self-intersecting edges".into());
+            }
+        }
+    }
+    Ok(())
+}
 /// Offset a polyline with a limited miter at each vertex. No source point
 /// is mutated. For closed paths, the sign follows the input winding.
 pub fn offset_points(input:&[Point],closed:bool,distance_mm:f32)
@@ -96,6 +181,7 @@ pub fn offset_points(input:&[Point],closed:bool,distance_mm:f32)
         };
         output.push(combine(points[i],direction,d)?);
     }
+    validate_offset_topology(&points,&output,closed)?;
     Ok(output)
 }
 /// Converts supported native geometry to a sampled editable polyline offset.
@@ -173,6 +259,27 @@ mod tests{
         let q=offset_points(&[p(0.,0.),p(10.,0.),p(10.,10.)],
             false,2.).unwrap();
         assert_eq!(q,vec![p(0.,2.),p(8.,2.),p(8.,10.)]);
+    }
+    #[test]
+    fn inward_offset_must_not_collapse_or_invert_square(){
+        let square=[p(0.,0.),p(10.,0.),p(10.,10.),p(0.,10.)];
+        // An old regression silently produced a tiny inside-out 2mm square.
+        assert!(offset_points(&square,true,6.).is_err());
+        assert!(offset_points(&square,true,5.).is_err());
+        assert_eq!(offset_points(&square,true,4.).unwrap(),
+            [p(4.,4.),p(6.,4.),p(6.,6.),p(4.,6.)]);
+        assert!(offset_points(&square,true,-4.).is_ok());
+    }
+    #[test]
+    fn reject_offset_self_intersections_instead_of_corrupt_fills(){
+        let bow=[p(0.,0.),p(12.,12.),p(0.,12.),p(12.,0.)];
+        assert!(offset_points(&bow,true,1.).is_err());
+    }
+    #[test]
+    fn near_zero_open_segments_cannot_be_reversed(){
+        let line=[p(0.,0.),p(1.,0.),p(1.,1.)];
+        assert!(offset_points(&line,false,5.).is_err());
+        assert!(offset_points(&line,false,-1.).is_ok());
     }
     #[test]
     fn rejects_nonfinite_duplicate_overlong_and_uturn(){
