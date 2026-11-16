@@ -19,6 +19,7 @@ const SWATCHES: [&str; 27] = [
 impl Editor {
     pub(super) fn change_tool(&mut self, next: Tool) {
         self.tool=next;
+        self.guide_drag=None;
         if next!=Tool::Freehand{
             self.freehand_samples.clear();self.freehand_overflow=false;
         }
@@ -59,6 +60,7 @@ impl Editor {
         self.curve_outgoing=None;
         self.curve_drag_anchor=None;
         self.freehand_samples.clear();self.freehand_overflow=false;
+        self.guide_drag=None;
         self.file="untitled.kdr".into();
         self.status="Создан новый документ. Выберите инструмент слева или нажмите F1 для помощи.".into();
     }
@@ -113,6 +115,8 @@ impl Editor {
                     if ui.button("Показать всю страницу  F4").clicked(){self.fit_page();ui.close_menu();}
                     ui.checkbox(&mut self.show_grid,"Сетка");
                     ui.checkbox(&mut self.snap_grid,"Привязка к сетке");
+                    ui.checkbox(&mut self.show_guides,"Показать направляющие");
+                    ui.checkbox(&mut self.snap_guides,"Привязка к направляющим");
                     ui.checkbox(&mut self.snap_nodes,"Привязка к узлам объектов");
                     if self.snap_nodes{
                         ui.horizontal(|ui|{
