@@ -104,6 +104,67 @@ pub fn smooth_open_points(points:&[Point],smoothness:f32)->Result<Shape,String>{
     }
     Ok(Shape::Bezier{start:points[0],segments,closed:false})
 }
+/// Fit a closed freehand loop. Each cubic has cyclic Catmull-Rom
+/// tangents, including the closing segment, so there is no sharp seam.
+/// The final endpoint equals the first anchor exactly.
+pub fn fit_closed_stroke(raw:&[Point],tolerance_mm:f32,smoothness:f32)
+    ->Result<Shape,String>{
+    if raw.len()<3{return Err("Closed loop requires at least three samples".into());}
+    if raw.len()>MAX_SAMPLES{return Err("Stroke exceeds 4096 sampled points".into());}
+    if raw.iter().any(|p|!valid(*p)){return Err("Invalid stroke coordinates".into());}
+    if !smoothness.is_finite()||!(0.0..=1.0).contains(&smoothness){
+        return Err("Smoothness must be between 0 and 1".into());
+    }
+    if !tolerance_mm.is_finite()||!(0.0..=100.0).contains(&tolerance_mm){
+        return Err("Simplification tolerance must be between 0 and 100 mm".into());
+    }
+    let mut samples=raw.to_vec();
+    let initial=samples[0];
+    // A near-duplicate final click should not add a tiny closing segment.
+    while samples.len()>3 &&
+        length(initial,*samples.last().unwrap())<=tolerance_mm.max(0.0001) as f64{
+        samples.pop();
+    }
+    let anchors=simplify_points(&samples,tolerance_mm)?;
+    if anchors.len()<3{
+        return Err("Draw a loop containing at least three distinct corners".into());
+    }
+    if anchors.len()>MAX_FITTED_SEGMENTS{
+        return Err("Closed result would exceed 2048 cubic segments".into());
+    }
+    let n=anchors.len();
+    let mut segments=Vec::with_capacity(n);
+    for i in 0..n{
+        let a=anchors[i];
+        let b=anchors[(i+1)%n];
+        let prev=anchors[(i+n-1)%n];
+        let after=anchors[(i+2)%n];
+        let t=smoothness as f64;
+        let straight1=Point{x:a.x+(b.x-a.x)/3.0,y:a.y+(b.y-a.y)/3.0};
+        let straight2=Point{x:a.x+2.0*(b.x-a.x)/3.0,y:a.y+2.0*(b.y-a.y)/3.0};
+        let curved1=Point{
+            x:(a.x as f64+(b.x as f64-prev.x as f64)*t/6.0) as f32,
+            y:(a.y as f64+(b.y as f64-prev.y as f64)*t/6.0) as f32,
+        };
+        let curved2=Point{
+            x:(b.x as f64-(after.x as f64-a.x as f64)*t/6.0) as f32,
+            y:(b.y as f64-(after.y as f64-a.y as f64)*t/6.0) as f32,
+        };
+        let control1=Point{
+            x:straight1.x+(curved1.x-straight1.x)*smoothness,
+            y:straight1.y+(curved1.y-straight1.y)*smoothness,
+        };
+        let control2=Point{
+            x:straight2.x+(curved2.x-straight2.x)*smoothness,
+            y:straight2.y+(curved2.y-straight2.y)*smoothness,
+        };
+        if !valid(control1)||!valid(control2){
+            return Err("Closed curve would exceed safe page coordinates".into());
+        }
+        segments.push(CubicSegment{control1,control2,end:b});
+    }
+    Ok(Shape::Bezier{start:anchors[0],segments,closed:true})
+}
 /// Simplify raw mouse/tablet samples and produce editable cubic segments.
 pub fn fit_stroke(raw:&[Point],tolerance_mm:f32,smoothness:f32)
     ->Result<Shape,String>{
@@ -113,11 +174,12 @@ pub fn fit_stroke(raw:&[Point],tolerance_mm:f32,smoothness:f32)
 /// Convert an existing open polyline into a simplified editable Bézier,
 /// or simplify an existing open cubic by sampling its geometry. This
 /// operation deliberately re-fits the curve; caller must checkpoint Undo.
-pub fn refit_open_path(shape:&Shape,tolerance_mm:f32,smoothness:f32)
+pub fn refit_path(shape:&Shape,tolerance_mm:f32,smoothness:f32)
     ->Result<Shape,String>{
     match shape{
         Shape::Polyline{points,closed:false}=>fit_stroke(points,tolerance_mm,smoothness),
-        Shape::Bezier{start,segments,closed:false} if !segments.is_empty()=>{
+        Shape::Polyline{points,closed:true}=>fit_closed_stroke(points,tolerance_mm,smoothness),
+        Shape::Bezier{start,segments,closed} if !segments.is_empty()=>{
             if segments.len()>500{
                 return Err("Curves with more than 500 segments cannot be refitted".into());
             }
@@ -138,9 +200,13 @@ pub fn refit_open_path(shape:&Shape,tolerance_mm:f32,smoothness:f32)
                 }
                 a=seg.end;
             }
-            fit_stroke(&raw,tolerance_mm,smoothness)
+            if *closed{
+                fit_closed_stroke(&raw,tolerance_mm,smoothness)
+            }else{
+                fit_stroke(&raw,tolerance_mm,smoothness)
+            }
         },
-        _=>Err("Select one open native Bézier or polyline path".into()),
+        _=>Err("Select one editable native Bézier or polyline path".into()),
     }
 }
 #[cfg(test)]
@@ -152,6 +218,37 @@ mod tests{
             Shape::Bezier{start,segments,..}=>(*start,segments.last().unwrap().end),
             _=>panic!("Expected cubic"),
         }
+    }
+    #[test]
+    fn closed_stroke_has_smooth_seam_and_no_duplicate_anchor(){
+        let raw=[p(0.,0.),p(10.,0.),p(10.,10.),p(0.,10.),p(0.1,0.1)];
+        let fitted=fit_closed_stroke(&raw,0.25,1.0).unwrap();
+        let Shape::Bezier{start,segments,closed}=&fitted else{panic!()};
+        assert!(*closed);
+        assert_eq!(*start,segments.last().unwrap().end);
+        assert_eq!(segments.len(),4);
+        let n=segments.len();
+        let incoming=p(start.x-segments[n-1].control2.x,
+            start.y-segments[n-1].control2.y);
+        let outgoing=p(segments[0].control1.x-start.x,
+            segments[0].control1.y-start.y);
+        assert!((incoming.x*outgoing.y-incoming.y*outgoing.x).abs()<0.001);
+    }
+    #[test]
+    fn closed_polyline_refitting_retains_editable_closed_path(){
+        let poly=Shape::Polyline{points:vec![
+            p(0.,0.),p(10.,0.),p(10.,10.),p(0.,10.),
+        ],closed:true};
+        let fitted=refit_path(&poly,0.1,0.85).unwrap();
+        let Shape::Bezier{start,segments,closed}=fitted else{panic!()};
+        assert!(closed);
+        assert_eq!(segments.last().unwrap().end,start);
+    }
+    #[test]
+    fn degenerate_closed_loop_is_rejected_without_geometry(){
+        let raw=[p(0.,0.),p(0.,0.),p(0.,0.),p(0.,0.)];
+        assert!(fit_closed_stroke(&raw,0.2,0.8).is_err());
+        assert!(fit_closed_stroke(&[p(0.,0.),p(1.,0.)],0.2,0.8).is_err());
     }
     #[test]
     fn straight_samples_reduce_to_two_exact_endpoints(){
@@ -217,16 +314,15 @@ mod tests{
         let poly=Shape::Polyline{points:vec![
             p(0.,0.),p(2.,1.),p(4.,2.),p(10.,5.),
         ],closed:false};
-        assert_eq!(end_points(&refit_open_path(&poly,0.5,0.8).unwrap()),
+        assert_eq!(end_points(&refit_path(&poly,0.5,0.8).unwrap()),
             (p(0.,0.),p(10.,5.)));
-        let bez=refit_open_path(&poly,0.5,0.8).unwrap();
-        let bez2=refit_open_path(&bez,0.5,0.5).unwrap();
+        let bez=refit_path(&poly,0.5,0.8).unwrap();
+        let bez2=refit_path(&bez,0.5,0.5).unwrap();
         assert_eq!(end_points(&bez2),(p(0.,0.),p(10.,5.)));
     }
     #[test]
-    fn closed_shapes_cannot_be_refit_without_explicit_opening(){
-        let closed=Shape::Polyline{points:vec![p(0.,0.),p(1.,0.),p(1.,1.)],
-            closed:true};
-        assert!(refit_open_path(&closed,0.5,0.5).is_err());
+    fn unsupported_shapes_do_not_refit(){
+        let closed=Shape::Rectangle{x:0.,y:0.,w:10.,h:10.};
+        assert!(refit_path(&closed,0.5,0.5).is_err());
     }
 }
