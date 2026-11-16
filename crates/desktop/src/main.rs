@@ -593,6 +593,7 @@ impl Editor{
             self.raster_cache.clear();
             self.selected=None;self.multi_selected.clear();
             self.curve_draft=None;self.curve_start=None;
+            self.curve_outgoing=None;self.curve_drag_anchor=None;
             self.resize_drag=None;self.node_drag=None;self.active_node=None;
             self.status="Отменено".into();
         }
@@ -607,6 +608,7 @@ impl Editor{
             self.raster_cache.clear();
             self.selected=None;self.multi_selected.clear();
             self.curve_draft=None;self.curve_start=None;
+            self.curve_outgoing=None;self.curve_drag_anchor=None;
             self.resize_drag=None;self.node_drag=None;self.active_node=None;
             self.status="Повторено".into();
         }
@@ -1305,6 +1307,7 @@ impl eframe::App for Editor{
         if self.inline_text.is_none() && ctx.input(|i|i.key_pressed(egui::Key::Escape)){
             self.curve_start=None;self.curve_draft=None;self.tool=Tool::Select;
             self.resize_drag=None;self.node_drag=None;self.active_node=None;
+            self.curve_outgoing=None;self.curve_drag_anchor=None;
         }
         if ctx.style().visuals.dark_mode==self.light_theme {
             ui_theme::apply(ctx,self.light_theme);
