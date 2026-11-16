@@ -428,6 +428,7 @@ impl Editor {
                             Tool::Nodes=>"F10",
                             Tool::Text=>"F8",
                             Tool::Curve=>"B",
+                            Tool::Freehand=>"H",
                             Tool::Rect=>"F6",
                             Tool::Ellipse=>"F7",
                             Tool::Line=>"L",
