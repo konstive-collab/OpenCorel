@@ -49,6 +49,37 @@
 - Regression tests cover apply/undo/redo, cancel/no-op, layer-lock rejection and conflict rejection.
 - Important limitation: the editable caret lives in a floating text window, **not yet** directly in glyph contours on the canvas. True in-place caret positioning and per-glyph selection remain upcoming work.
 
+## Bezier responsiveness hotfix (post Windows alpha test)
+
+User testing reported that the Bezier tool slowed down during curve drawing.
+Source inspection showed two avoidable workloads:
+- each added anchor made a full `Document` undo snapshot (including large
+  embedded artwork); a growing curve could therefore repeatedly clone
+  unrelated objects and bitmaps;
+- every repaint re-sampled every cubic segment, even during a simple pan or
+  mouse hover.
+
+The working branch now:
+- stores **one undo checkpoint per newly created curve** (from the first
+  actual segment), not one per anchor; Undo during or after drawing removes
+  the whole curve, and Redo restores it;
+- caches adaptive cubic subdivision keyed to control points and zoom scale;
+  keeps at most 32 cached paths and 20,000 sampled points per path;
+- adds a live rubber-band preview between the last anchor and mouse pointer;
+- checks the actual layer containing the draft, including after the active
+  layer changes, so locked or hidden layers cannot be edited accidentally;
+- tests 250-anchor construction, undo/redo, abandoned one-point drafts,
+  layer-lock changes, cache invalidation, budget limits and reuse.
+
+These changes address identified sources of lag. They are **not** a claim
+that Windows interactivity has been benchmarked: latest-head CI and a user
+re-test of the Windows artifact are required before considering the
+regression closed. Drag-to-create smooth handles is a separate upcoming
+Bezier feature; this build is still a click-based curve tool.
+
+The product-level feature order now follows
+[CorelDRAW-workflow parity first](CORELDRAW_PARITY_FIRST.md).
+
 ## Verification
 GitHub Actions Windows and Linux runs must complete against the latest PR head before merge. Early runs for the initial system-font picker passed, but do not imply later additions have passed.
 
