@@ -197,6 +197,35 @@ mod tests{
     use super::*;
     use opencorel_core::{Document,Shape,Style};
     #[test]
+    fn alignment_preserves_other_objects_and_undo(){
+        let mut e=Editor::default();e.doc=Document::default();
+        let a=e.doc.add(Shape::Rectangle{x:10.,y:4.,w:10.,h:8.},Style::default());
+        let b=e.doc.add(Shape::Rectangle{x:50.,y:15.,w:20.,h:8.},Style::default());
+        let untouched=e.doc.add(Shape::Rectangle{x:130.,y:40.,w:12.,h:12.},
+            Style::default());
+        e.selected=Some(a);e.multi_selected=vec![b];
+        let before=e.doc.clone();
+        e.align_selection(opencorel_core::Alignment::Left);
+        assert_eq!(e.doc.objects[0].bounds().x,10.);
+        assert_eq!(e.doc.objects[1].bounds().x,10.);
+        assert_eq!(e.doc.get_mut(untouched).unwrap().bounds().x,130.);
+        assert_eq!(e.undo.len(),1);
+        e.undo();assert_eq!(e.doc,before);
+    }
+    #[test]
+    fn distribution_keeps_endpoints_and_undoes(){
+        let mut e=Editor::default();e.doc=Document::default();
+        let ids:Vec<_>=[0.,11.,50.].into_iter().map(|x|
+            e.doc.add(Shape::Rectangle{x,y:0.,w:10.,h:10.},Style::default())
+        ).collect();
+        e.selected=Some(ids[0]);e.multi_selected=ids[1..].to_vec();
+        e.distribute_selection(opencorel_core::Distribution::HorizontalCenters);
+        assert_eq!(e.doc.objects.iter().map(|o|o.bounds().x).collect::<Vec<_>>(),
+            vec![0.,25.,50.]);
+        assert_eq!(e.undo.len(),1);
+        e.doc.validate().unwrap();
+    }
+    #[test]
     fn repeat_grid_places_objects_in_exact_mm_and_undoes_as_one_action(){
         let mut e=Editor::default();e.doc=Document::default();
         let id=e.doc.add(Shape::Rectangle{x:10.,y:20.,w:30.,h:15.},Style::default());
