@@ -21,6 +21,7 @@ impl Editor {
         self.tool=next;
         if next!=Tool::Curve {
             self.curve_start=None;self.curve_draft=None;
+            self.curve_resumed=false;
             self.curve_outgoing=None;self.curve_drag_anchor=None;
         }
         self.drag_start=None;
@@ -51,6 +52,7 @@ impl Editor {
         self.zoom=1.0;
         self.curve_start=None;
         self.curve_draft=None;
+        self.curve_resumed=false;
         self.curve_outgoing=None;
         self.curve_drag_anchor=None;
         self.file="untitled.kdr".into();
@@ -701,6 +703,16 @@ impl Editor {
             if self.selected.is_some_and(|id|self.node_edit_allowed(id)){
                 ui.separator();
                 ui.label("Операции с контуром");
+                let resumable=self.selected
+                    .and_then(|id|self.doc.objects.iter().find(|o|o.id==id))
+                    .is_some_and(|obj|matches!(&obj.shape,
+                        opencorel_core::Shape::Bezier{segments,closed:false,..}
+                            if !segments.is_empty() && segments.len()<10_000));
+                if resumable && ui.button("Продолжить кривую инструментом B")
+                    .on_hover_text("Добавить новые сегменты к существующей кривой без создания второго объекта")
+                    .clicked(){
+                    self.continue_selected_bezier();
+                }
                 ui.horizontal_wrapped(|ui|{
                     if ui.button("Развернуть направление")
                         .on_hover_text("Поменять начало и конец пути, сохранив форму и типы узлов")
