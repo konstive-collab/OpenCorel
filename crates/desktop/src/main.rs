@@ -969,7 +969,7 @@ impl Editor{
         let stem=std::path::Path::new(&self.file).file_stem()
             .and_then(|v|v.to_str()).unwrap_or("OpenCorel");
         let safe_stem:String=stem.chars()
-            .filter(|c|c.is_alphanumeric()||matches!(c,'-'|'_'|' '))
+            .filter(|c|c.is_alphanumeric()||matches!(*c,'-'|'_'|' '))
             .take(48).collect();
         let folder_name=if safe_stem.trim().is_empty(){
             "OpenCorel - страницы".to_string()
