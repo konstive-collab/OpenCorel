@@ -61,6 +61,7 @@ impl Editor {
         self.curve_drag_anchor=None;
         self.freehand_samples.clear();self.freehand_overflow=false;
         self.guide_drag=None;
+        self.guide_numeric_session=None;
         self.file="untitled.kdr".into();
         self.status="Создан новый документ. Выберите инструмент слева или нажмите F1 для помощи.".into();
     }
@@ -1409,16 +1410,18 @@ impl Editor {
                 };
                 ui.label(format!("{axis} #{}",i+1));
                 let mut coordinate=guide.position_mm;
-                if ui.add(egui::DragValue::new(&mut coordinate)
+                let response=ui.add(egui::DragValue::new(&mut coordinate)
                     .speed(0.2).range(-100_000.0..=100_000.0)
-                    .fixed_decimals(2).suffix(" мм")).changed(){
-                    guide_update=Some((i,coordinate));
+                    .fixed_decimals(2).suffix(" мм"));
+                if response.changed(){guide_update=Some((i,coordinate));}
+                if response.drag_stopped() || response.lost_focus(){
+                    self.guide_numeric_session=None;
                 }
                 if ui.small_button("×").clicked(){guide_remove=Some(i);}
             });
         }
         if let Some(i)=guide_remove{self.remove_guide(i);}
-        else if let Some((i,p))=guide_update{self.move_guide(i,p);}
+        else if let Some((i,p))=guide_update{self.edit_guide_numeric(i,p);}
         ui.checkbox(&mut self.show_safe_area,"Показать безопасную область");
         ui.horizontal(|ui|{
             ui.label("Отступ от края, мм");
