@@ -11,6 +11,7 @@ pub mod transform;
 pub mod node_edit;
 pub mod path_topology;
 pub mod freehand;
+pub mod guides;
 pub mod boolean_ops;
 pub mod appearance;
 use appearance::Appearance;
@@ -256,12 +257,16 @@ pub struct Document {
     pub clip_links: Vec<ClipLink>,
     #[serde(default,skip_serializing_if="BTreeMap::is_empty")]
     pub appearances:BTreeMap<u64,Appearance>,
+    /// Nonprinting horizontal and vertical construction guides in mm.
+    /// Optional field keeps older .kdr documents compatible.
+    #[serde(default,skip_serializing_if="Vec::is_empty")]
+    pub guides:Vec<guides::Guide>,
 }
 impl Default for Document {
     fn default() -> Self {
         Self { schema_version:SCHEMA_VERSION, name:"Новый макет".into(),
             page:Page {width_mm:841.0,height_mm:594.0},objects:Vec::new(),next_id:1,
-            layers:default_layers(),next_layer_id:default_next_layer_id(),clip_links:Vec::new(),appearances:BTreeMap::new() }
+            layers:default_layers(),next_layer_id:default_next_layer_id(),clip_links:Vec::new(),appearances:BTreeMap::new(),guides:Vec::new() }
     }
 }
 
@@ -290,7 +295,8 @@ impl Document {
                 +obj.style.fill.len()+obj.style.stroke.len()+obj.name.len()+shape_bytes
                 +obj.node_modes.len()*std::mem::size_of::<node_edit::NodeModeBinding>());
         }
-        total.saturating_add(self.clip_links.len()*std::mem::size_of::<ClipLink>())
+        total.saturating_add(self.guides.len()*std::mem::size_of::<guides::Guide>())
+            .saturating_add(self.clip_links.len()*std::mem::size_of::<ClipLink>())
             .saturating_add(self.appearances.iter().map(|(_,a)|
                 std::mem::size_of::<Appearance>()+
                 a.dash_array.len()*std::mem::size_of::<f32>()+
@@ -524,6 +530,7 @@ impl Document {
     }
     pub fn validate(&self)->Result<(),String>{
         if self.schema_version!=SCHEMA_VERSION {return Err("Unknown document schema".into());}
+        guides::validate(&self.guides)?;
         if ![self.page.width_mm,self.page.height_mm].iter().all(|v|v.is_finite() && (1.0..=100_000.0).contains(v)) {
             return Err("Invalid page dimensions".into());
         }
