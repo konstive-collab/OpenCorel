@@ -5,6 +5,7 @@ mod workspace;
 mod tool_dock;
 mod ui_theme;
 mod productivity;
+mod array_commands;
 use opencorel_core::transform;
 use opencorel_core::node_edit::{self,NodeAddress};
 mod node_interaction;
@@ -122,6 +123,10 @@ struct Editor{
     freehand_smoothness:f32,
     freehand_closed:bool,
     refit_tolerance_mm:f32,
+    array_columns:u32,
+    array_rows:u32,
+    array_gap_x_mm:f32,
+    array_gap_y_mm:f32,
     active_layer:u64,
     pan:Vec2,
     undo:Vec<Document>,
@@ -209,6 +214,8 @@ impl Default for Editor{
             freehand_precision_px:2.0,freehand_smoothness:0.85,
             freehand_closed:false,
             refit_tolerance_mm:0.8,
+            array_columns:3,array_rows:2,
+            array_gap_x_mm:5.0,array_gap_y_mm:5.0,
             active_layer:1,pan:Vec2::ZERO,
             undo:Vec::new(),redo:Vec::new(),
             inspector_tab:InspectorTab::Objects,show_inspector:true,
