@@ -254,8 +254,13 @@ mod tests{
             JoinMode::Snap{tolerance_mm:1.}).unwrap();
         assert!(report.gap_mm>0.);
         let Shape::Bezier{segments,..}=joined else{panic!()};
-        assert_eq!(segments[1].end,segments[2].control1
-            .let_placeholder_remove_if_present());
+        // Segment 2 belongs to the second original curve. Its first control
+        // handle is shifted by the endpoint delta, while its end is unchanged.
+        assert_eq!(segments[1].end,p(20.,0.));
+        assert_eq!(segments[3].end,p(40.,0.));
+        let original_control=p(20.3+(30.-20.3)/3.,0.4+(0.-0.4)/3.);
+        assert!((segments[2].control1.x-(original_control.x-0.3)).abs()<0.0001);
+        assert!((segments[2].control1.y-(original_control.y-0.4)).abs()<0.0001);
     }
     #[test]
     fn snap_rejects_far_endpoints_without_side_effects(){
