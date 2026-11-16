@@ -18,8 +18,10 @@ mod raster_preview;
 mod compound_render;
 mod text_preview;
 mod text_edit_ops;
+mod bezier_preview;
 use compound_render::CompoundCache;
 use text_preview::TextPreview;
+use bezier_preview::BezierPreviewCache;
 use opencorel_typography::TextOutliner;
 use vector_preview::VectorCache;
 use raster_preview::RasterCache;
@@ -110,6 +112,7 @@ struct Editor{
     vector_cache:VectorCache,
     raster_cache:RasterCache,
     compound_cache:CompoundCache,
+    bezier_preview:BezierPreviewCache,
     masked_canvas:MaskedCanvasCache,
     rotation_degrees:f32,
     skew_x_degrees:f32,
@@ -169,6 +172,7 @@ impl Default for Editor{
             fill_cache:FillCache::default(),vector_cache:VectorCache::default(),
             raster_cache:RasterCache::default(),
             compound_cache:CompoundCache::default(),
+            bezier_preview:BezierPreviewCache::default(),
             masked_canvas:MaskedCanvasCache::default(),
             rotation_degrees:30.0,skew_x_degrees:15.0,skew_y_degrees:0.0,
             scale_x_percent:100.0,scale_y_percent:100.0,
@@ -229,17 +233,10 @@ fn outline(p:&egui::Painter,r:Rect,c:Color32,width:f32){
         p.line_segment([a,b],Stroke::new(width,c));
     }
 }
-fn cubic(p0:Point,p1:Point,p2:Point,p3:Point,t:f32)->Point {
-    let u=1.0-t;
-    let a=u*u*u;
-    let b=3.0*u*u*t;
-    let c=3.0*u*t*t;
-    let d=t*t*t;
-    Point{x:a*p0.x+b*p1.x+c*p2.x+d*p3.x,y:a*p0.y+b*p1.y+c*p2.y+d*p3.y}
-}
 fn paint(p:&egui::Painter,obj:&Object,v:View,cache:&mut FillCache,
     vectors:&mut VectorCache,rasters:&mut RasterCache,
-    compounds:&mut CompoundCache,text_preview:&mut TextPreview,
+    compounds:&mut CompoundCache,bezier_preview:&mut BezierPreviewCache,
+    text_preview:&mut TextPreview,
     text_outliner:&mut TextOutliner,ctx:&egui::Context){
     let fill=color(&obj.style.fill);
     let stroke=if obj.style.stroke=="none" {
@@ -293,21 +290,10 @@ fn paint(p:&egui::Painter,obj:&Object,v:View,cache:&mut FillCache,
             compounds.paint(p,obj.id,contours,v,fill,stroke);
         }
         Shape::Bezier{start,segments,closed}=>{
-            let mut contour=vec![*start];
-            let mut previous=*start;
-            let cap=(20_000usize/segments.len().max(1)).clamp(4,48);
-            for seg in segments {
-                let approx=((seg.end.x-previous.x).hypot(seg.end.y-previous.y)
-                    +(seg.control1.x-previous.x).hypot(seg.control1.y-previous.y)
-                    +(seg.control2.x-seg.end.x).hypot(seg.control2.y-seg.end.y))*v.scale;
-                let steps=((approx/10.0).ceil() as usize).clamp(4,cap);
-                for i in 1..=steps{
-                    contour.push(cubic(previous,seg.control1,seg.control2,seg.end,
-                        i as f32/steps as f32));
-                }
-                previous=seg.end;
-            }
-            if *closed {cache.fill(p,obj.id,&contour,v,fill);}
+            // Pan/hover redraws reuse sampled geometry. Only shape edits or a
+            // zoom-scale change require new adaptive Bezier subdivision.
+            let contour=bezier_preview.points(obj.id,*start,segments,v.scale);
+            if *closed {cache.fill(p,obj.id,contour,v,fill);}
             if stroke.width>0.0 {
                 let mut vertices:Vec<Pos2>=contour.iter().map(|&pt|v.screen(pt)).collect();
                 if *closed{vertices.push(v.screen(*start));}
@@ -599,7 +585,7 @@ impl Editor{
             self.fill_cache.entries.clear();
             self.vector_cache.clear();
             self.compound_cache.clear();
-            self.compound_cache.clear();
+            self.bezier_preview.clear();
             self.raster_cache.clear();
             self.selected=None;self.multi_selected.clear();
             self.curve_draft=None;self.curve_start=None;
@@ -613,6 +599,7 @@ impl Editor{
             trim_history(&mut self.undo);
             self.fill_cache.entries.clear();
             self.vector_cache.clear();
+            self.bezier_preview.clear();
             self.raster_cache.clear();
             self.selected=None;self.multi_selected.clear();
             self.curve_draft=None;self.curve_start=None;
@@ -932,7 +919,8 @@ impl Editor{
                     if v.bounds(obj.bounds()).intersects(v.rect.intersect(response.rect)){
                         paint(&page_painter,obj,v,&mut self.fill_cache,
                             &mut self.vector_cache,&mut self.raster_cache,
-                            &mut self.compound_cache,&mut self.text_preview,
+                            &mut self.compound_cache,&mut self.bezier_preview,
+                            &mut self.text_preview,
                             &mut self.text_outliner,ctx);
                     }
                 }
