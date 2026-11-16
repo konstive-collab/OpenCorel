@@ -1402,6 +1402,7 @@ impl Editor {
         ui.label(format!("Направляющих: {}",self.doc.guides.len()));
         let mut guide_update=None;
         let mut guide_remove=None;
+        let mut guide_edit_finished=false;
         for (i,guide) in self.doc.guides.iter().enumerate(){
             ui.horizontal(|ui|{
                 let axis=match guide.axis{
@@ -1415,13 +1416,14 @@ impl Editor {
                     .fixed_decimals(2).suffix(" мм"));
                 if response.changed(){guide_update=Some((i,coordinate));}
                 if response.drag_stopped() || response.lost_focus(){
-                    self.guide_numeric_session=None;
+                    guide_edit_finished=true;
                 }
                 if ui.small_button("×").clicked(){guide_remove=Some(i);}
             });
         }
         if let Some(i)=guide_remove{self.remove_guide(i);}
         else if let Some((i,p))=guide_update{self.edit_guide_numeric(i,p);}
+        if guide_edit_finished{self.guide_numeric_session=None;}
         ui.checkbox(&mut self.show_safe_area,"Показать безопасную область");
         ui.horizontal(|ui|{
             ui.label("Отступ от края, мм");
