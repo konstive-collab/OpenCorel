@@ -105,6 +105,15 @@ impl Editor {
                     if ui.button("Экспорт SVG...").clicked(){self.export_dialog("svg");ui.close_menu();}
                     if ui.button("Экспорт SVGZ...").clicked(){self.export_dialog("svgz");ui.close_menu();}
                     if ui.button("Экспорт PDF (RGB)...").clicked(){self.export_dialog("pdf");ui.close_menu();}
+                    ui.menu_button("Экспортировать все страницы...",|ui|{
+                        ui.small("В отдельную папку, по одному файлу на страницу");
+                        if ui.button("Все страницы → SVG").clicked(){
+                            self.export_all_pages_dialog("svg");ui.close_menu();
+                        }
+                        if ui.button("Все страницы → PDF (RGB)").clicked(){
+                            self.export_all_pages_dialog("pdf");ui.close_menu();
+                        }
+                    });
                     if ui.button("Печатный SVG с вылетами и метками реза...").clicked(){
                         self.export_print_sheet_dialog();ui.close_menu();
                     }
@@ -1532,6 +1541,14 @@ impl Editor {
                 if ui.button("Отмена").clicked(){self.page_rename_mode=false;}
             });
         }
+        ui.horizontal(|ui|{
+            if ui.small_button("Все SVG").on_hover_text("Экспорт всех страниц в отдельные SVG-файлы").clicked(){
+                self.export_all_pages_dialog("svg");
+            }
+            if ui.small_button("Все PDF").on_hover_text("Экспорт по одному RGB PDF на страницу").clicked(){
+                self.export_all_pages_dialog("pdf");
+            }
+        });
         ui.small("Страницы хранят собственные объекты, слои, направляющие и размеры.");
         ui.separator();
         ui.heading("Параметры листа");
