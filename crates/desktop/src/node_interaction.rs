@@ -236,6 +236,37 @@ impl Editor{
 mod tests{
     use super::*;
     use opencorel_core::{CubicSegment,Style};
+    #[test] fn node_drag_only_records_history_on_first_valid_movement(){
+        let mut editor=Editor::default();
+        let id=editor.doc.add(Shape::Bezier{
+            start:Point{x:10.0,y:20.0},
+            segments:vec![CubicSegment{
+                control1:Point{x:15.0,y:15.0},
+                control2:Point{x:35.0,y:15.0},
+                end:Point{x:40.0,y:20.0},
+            }],closed:false,
+        },Style::default());
+        editor.select_object(Some(id),false);
+        editor.tool=Tool::Nodes;
+        let view=View{
+            rect:egui::Rect::from_min_size(Pos2::ZERO,
+                egui::Vec2::new(200.0,200.0)),
+            scale:1.0,
+        };
+        let original=editor.doc.clone();
+        editor.begin_node_drag(view,view.screen(Point{x:10.0,y:20.0}));
+        assert_eq!(editor.node_drag,Some((id,NodeAddress::BezierStart)));
+        assert!(editor.undo.is_empty());
+        editor.drag_node_to(Point{x:10.0,y:20.0});
+        assert!(editor.undo.is_empty());
+        editor.drag_node_to(Point{x:f32::NAN,y:20.0});
+        assert!(editor.undo.is_empty());
+        editor.drag_node_to(Point{x:12.0,y:23.0});
+        editor.drag_node_to(Point{x:14.0,y:25.0});
+        assert_eq!(editor.undo.len(),1);
+        editor.undo();
+        assert_eq!(editor.doc,original);
+    }
     #[test] fn tangent_command_is_undoable_and_not_repeated_as_noop(){
         let mut editor=Editor::default();
         let id=editor.doc.add(Shape::Bezier{
