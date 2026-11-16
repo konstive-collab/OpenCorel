@@ -242,6 +242,123 @@ impl Editor{
         }
         self.status="Свободные рычаги: геометрия не изменена. Ctrl+Z — отмена".into();
     }
+    /// Join exactly two selected, same-layer open Bézier objects in one
+    /// native path. Refuse mismatched styles, clips, groups and locked layers
+    /// rather than silently flattening or dropping object-level properties.
+    pub(super) fn join_selected_beziers(
+        &mut self,mode:opencorel_core::path_topology::JoinMode
+    ){
+        let ids=self.selection_ids();
+        if ids.len()!=2 || ids[0]==ids[1]{
+            self.status="Выберите ровно две кривые (V + Shift), затем F10".into();
+            return;
+        }
+        let [id_a,id_b]=[ids[0],ids[1]];
+        if !self.node_edit_allowed(id_a) || !self.node_edit_allowed(id_b){
+            self.status="Соединение: объекты должны быть редактируемыми, без групп и блокировок".into();
+            return;
+        }
+        let Some(a)=self.doc.objects.iter().find(|o|o.id==id_a).cloned() else{return;};
+        let Some(b)=self.doc.objects.iter().find(|o|o.id==id_b).cloned() else{return;};
+        if a.layer_id!=b.layer_id || a.style!=b.style ||
+            self.doc.appearances.get(&id_a)!=self.doc.appearances.get(&id_b){
+            self.status="Соединение требует одного слоя и одинаковых заливок, контуров и эффектов".into();
+            return;
+        }
+        if self.doc.clip_links.iter().any(|link|
+            [id_a,id_b].contains(&link.source_id) ||
+            [id_a,id_b].contains(&link.target_id)){
+            self.status="Сначала удалите связи обтравки для соединяемых контуров".into();
+            return;
+        }
+        let (joined,modes,report)=match opencorel_core::path_topology::join_beziers(
+            &a.shape,&a.node_modes,&b.shape,&b.node_modes,mode){
+            Ok(result)=>result,
+            Err(reason)=>{
+                self.status=format!("Соединение отклонено: {reason}");
+                return;
+            }
+        };
+        self.checkpoint();
+        if let Some(object)=self.doc.get_mut(id_a){
+            object.shape=joined;
+            object.node_modes=modes;
+        }
+        self.doc.remove(id_b);
+        self.selected=Some(id_a);
+        self.multi_selected.clear();
+        self.active_node=None;self.node_drag=None;
+        self.node_drag_checkpointed=false;
+        self.fill_cache.entries.clear();self.vector_cache.clear();
+        self.compound_cache.clear();self.bezier_preview.clear();
+        self.status=format!(
+            "Две кривые соединены. Расстояние между концами: {:.2} мм{}; Ctrl+Z — отмена",
+            report.gap_mm,if report.added_connector{", добавлен соединительный сегмент"}else{""});
+    }
+
+    /// Split an open path at an interior selected anchor, keeping the original
+    /// as the first half and creating a new editable object immediately above
+    /// it in z-order. Copy appearance, style and the appropriate node modes.
+    pub(super) fn split_selected_bezier(&mut self){
+        let Some((id,address))=self.active_node else{
+            self.status="Выберите внутренний узел открытой кривой (F10)".into();
+            return;
+        };
+        if !self.node_edit_allowed(id){
+            self.status="Разрезание недоступно: объект или слой заблокирован".into();
+            return;
+        }
+        if self.doc.clip_links.iter().any(|link|
+            link.source_id==id || link.target_id==id){
+            self.status="Сначала удалите связи обтравки с кривой".into();
+            return;
+        }
+        if self.doc.objects.len()>=100_000 || self.doc.next_id>=u64::MAX-1{
+            self.status="Достигнут лимит объектов или идентификаторов".into();
+            return;
+        }
+        let Some(original)=self.doc.objects.iter().find(|o|o.id==id).cloned() else{return;};
+        let ((left,left_modes),(right,right_modes))=
+            match opencorel_core::path_topology::split_bezier(
+                &original.shape,&original.node_modes,address){
+                Ok(result)=>result,
+                Err(reason)=>{
+                    self.status=format!("Разрезание отклонено: {reason}");
+                    return;
+                }
+            };
+        self.checkpoint();
+        if let Some(obj)=self.doc.get_mut(id){
+            obj.shape=left;
+            obj.node_modes=left_modes;
+        }
+        let new_id=self.doc.add_to_layer(right,original.style.clone(),original.layer_id);
+        if let Some(obj)=self.doc.get_mut(new_id){
+            obj.text_format=original.text_format.clone();
+            obj.node_modes=right_modes;
+            // A fresh name avoids duplicate object labels and oversized names.
+            obj.name=String::new();
+        }
+        if let Some(appearance)=self.doc.appearances.get(&id).cloned(){
+            self.doc.appearances.insert(new_id,appearance);
+        }
+        // New segment should appear immediately after its original sibling.
+        if let Some(created)=self.doc.objects.pop(){
+            if let Some(index)=self.doc.objects.iter().position(|o|o.id==id){
+                self.doc.objects.insert(index+1,created);
+            }else{
+                self.doc.objects.push(created);
+            }
+        }
+        self.selected=Some(new_id);
+        self.multi_selected.clear();
+        self.active_node=None;self.node_drag=None;
+        self.node_drag_checkpointed=false;
+        self.fill_cache.entries.clear();self.vector_cache.clear();
+        self.compound_cache.clear();self.bezier_preview.clear();
+        self.status="Контур разделён на две независимые кривые. Ctrl+Z восстановит исходный".into();
+    }
+
     /// Reverse editable path direction without modifying its geometry.
     /// A complete node-mode reindex is part of this undoable transaction.
     pub(super) fn reverse_selected_path(&mut self){
