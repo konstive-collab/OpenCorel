@@ -40,6 +40,15 @@
 - New core tests verify custom bounds, stacking order, layer restrictions and invalid queries.
 - Picking still uses the glyph **bounding envelope**, not a per-pixel inside-glyph winding test. Cache may not be populated for out-of-viewport artwork; exact caret and individual character selection remain pending.
 
+## Canvas-launched text editor
+- Double-click an editable text object with the selection tool to open a multiline editing window near the pointer.
+- Standard egui TextEdit provides text caret, keyboard input, keyboard/mouse selection and platform clipboard while the text is in the editor.
+- Apply commits one document checkpoint so Ctrl+Z undoes the whole text editing session; Cancel, Escape or closing the window drops the draft.
+- The editor rejects changes on locked/hidden layers, changes to deleted objects, oversized text and concurrent modifications to the original text value.
+- The canvas stays visible but input is suspended while a text draft is active. Global shortcuts are also suspended to avoid accidentally changing the document while typing.
+- Regression tests cover apply/undo/redo, cancel/no-op, layer-lock rejection and conflict rejection.
+- Important limitation: the editable caret lives in a floating text window, **not yet** directly in glyph contours on the canvas. True in-place caret positioning and per-glyph selection remain upcoming work.
+
 ## Verification
 GitHub Actions Windows and Linux runs must complete against the latest PR head before merge. Early runs for the initial system-font picker passed, but do not imply later additions have passed.
 
