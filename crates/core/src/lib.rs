@@ -12,6 +12,7 @@ pub mod node_edit;
 pub mod path_topology;
 pub mod freehand;
 pub mod guides;
+pub mod offset;
 pub mod boolean_ops;
 pub mod appearance;
 use appearance::Appearance;
