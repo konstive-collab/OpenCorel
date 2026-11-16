@@ -320,6 +320,55 @@ pub fn polyline_to_bezier_exact(shape:&Shape)->Result<Shape,String>{
     Ok(Shape::Bezier{start:points[0],segments,closed:*closed})
 }
 
+#[cfg(test)]
+mod exact_conversion_tests {
+    use super::*;
+    fn pt(x:f32,y:f32)->Point{Point{x,y}}
+    fn approx(a:f32,b:f32)->bool{(a-b).abs()<0.002}
+    #[test]
+    fn exact_polyline_conversion_keeps_line_segments_exact(){
+        let input=Shape::Polyline{
+            points:vec![pt(0.,0.),pt(12.,6.),pt(16.,-4.)],closed:false,
+        };
+        let shape=polyline_to_bezier_exact(&input).unwrap();
+        let Shape::Bezier{start,segments,closed:false}=shape else{panic!("cubic")};
+        assert_eq!(start,pt(0.,0.));
+        assert_eq!(segments.len(),2);
+        assert_eq!(segments[0].end,pt(12.,6.));
+        assert_eq!(segments[1].end,pt(16.,-4.));
+        for (a,s) in [(start,&segments[0]),(segments[0].end,&segments[1])]{
+            for (t,p) in [(1./3.,s.control1),(2./3.,s.control2)]{
+                assert!(approx(p.x,a.x+(s.end.x-a.x)*t));
+                assert!(approx(p.y,a.y+(s.end.y-a.y)*t));
+            }
+        }
+        assert_eq!(input,Shape::Polyline{
+            points:vec![pt(0.,0.),pt(12.,6.),pt(16.,-4.)],closed:false,
+        });
+    }
+    #[test]
+    fn exact_polyline_conversion_preserves_closed_flag(){
+        let shape=polyline_to_bezier_exact(&Shape::Polyline{
+            points:vec![pt(0.,0.),pt(10.,0.),pt(10.,10.)],closed:true,
+        }).unwrap();
+        let Shape::Bezier{segments,closed,..}=shape else{panic!()};
+        assert!(closed);
+        assert_eq!(segments.len(),2);
+    }
+    #[test]
+    fn exact_polyline_conversion_rejects_invalid_inputs(){
+        for input in [
+            Shape::Polyline{points:vec![pt(1.,1.)],closed:false},
+            Shape::Polyline{points:vec![pt(1.,1.),pt(2.,2.)],closed:true},
+            Shape::Polyline{points:vec![pt(1.,1.),pt(f32::NAN,2.)],closed:false},
+            Shape::Polyline{points:vec![pt(1.,1.),pt(100_001.,2.)],closed:false},
+            Shape::Rectangle{x:0.,y:0.,w:2.,h:2.},
+        ]{
+            assert!(polyline_to_bezier_exact(&input).is_err());
+        }
+    }
+}
+
 /// Reverse a path in-place while preserving every cubic's geometric trace.
 /// Cubic controls swap order; for compound shapes every contour is reversed.
 pub fn reverse_path(shape:&mut Shape)->Result<(),String>{
