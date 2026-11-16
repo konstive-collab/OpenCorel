@@ -655,9 +655,21 @@ impl Editor{
             end:p
         };
         if let Some(id)=self.curve_draft{
-            self.checkpoint();
-            if let Some(obj)=self.doc.get_mut(id){
-                if let Shape::Bezier{segments,..}=&mut obj.shape{segments.push(seg);}
+            // Keep the entire in-progress curve in one undo transaction.
+            // A full document checkpoint on every vertex made long paths
+            // increasingly slow, especially with embedded bitmap assets.
+            // add_shape() already checkpoints when the first segment is made.
+            let Some(obj)=self.doc.get_mut(id) else{
+                self.curve_start=None;self.curve_draft=None;
+                self.status="Кривая больше не существует: начните новую".into();
+                return;
+            };
+            if let Shape::Bezier{segments,..}=&mut obj.shape{
+                segments.push(seg);
+            }else{
+                self.curve_start=None;self.curve_draft=None;
+                self.status="Тип кривой изменился: начните новую".into();
+                return;
             }
         }else{
             let style=Style{fill:"#000000".into(),stroke:"#202020".into(),stroke_width_mm:0.8};
