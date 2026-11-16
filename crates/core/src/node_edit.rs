@@ -514,6 +514,11 @@ mod tests{
     #[test]
     fn collapsed_corner_can_become_smooth_and_symmetric_again(){
         let mut shape=two_cubics();
+        // Use unequal adjacent spans: the Smooth command must regenerate
+        // nonzero handles, and Symmetric must then equalize their lengths.
+        if let Shape::Bezier{segments,..}=&mut shape{
+            segments[1].end=Point{x:35.0,y:20.0};
+        }
         set_tangent(&mut shape,NodeAddress::BezierEnd(0),
             TangentOperation::Corner).unwrap();
         assert!(set_tangent(&mut shape,NodeAddress::BezierEnd(0),
