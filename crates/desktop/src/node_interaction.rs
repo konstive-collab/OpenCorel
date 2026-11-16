@@ -494,6 +494,37 @@ mod tests{
         assert_eq!(segments.len(),4);
     }
     #[test]
+    fn resume_tangent_from_existing_last_anchor_creates_no_zero_segment(){
+        let mut e=Editor::default();
+        let id=e.doc.add(topology_curve(0.,10.,20.),Style::default());
+        e.selected=Some(id);
+        e.tool=Tool::Nodes;
+        let before=e.doc.clone();
+        e.continue_selected_bezier();
+        let last=Point{x:20.,y:10.};
+        e.curve_click(last);
+        assert!(e.undo.is_empty());
+        let Shape::Bezier{segments,..}=&e.doc.get_mut(id).unwrap().shape
+            else{panic!()};
+        assert_eq!(segments.len(),2);
+        e.curve_drag_anchor=Some(last);
+        e.curve_drag_to(Point{x:23.,y:15.});
+        assert_eq!(e.undo.len(),1);
+        assert!(!e.curve_resumed);
+        assert_eq!(e.curve_outgoing,Some(Point{x:23.,y:15.}));
+        let Shape::Bezier{segments,..}=&e.doc.get_mut(id).unwrap().shape
+            else{panic!()};
+        assert_eq!(segments.len(),2);
+        assert_eq!(segments[1].control2,Point{x:17.,y:5.});
+        e.curve_drag_anchor=None;
+        e.curve_click(Point{x:30.,y:10.});
+        assert_eq!(e.undo.len(),1);
+        e.curve_finish(false);
+        e.doc.validate().unwrap();
+        e.undo();
+        assert_eq!(e.doc,before);
+    }
+    #[test]
     fn continuing_path_without_changes_does_not_create_undo(){
         let mut e=Editor::default();
         let id=e.doc.add(topology_curve(0.,10.,20.),Style::default());
