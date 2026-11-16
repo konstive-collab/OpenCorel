@@ -345,6 +345,32 @@ mod tests{
         editor.undo();
         assert_eq!(editor.doc,original);
     }
+    #[test] fn free_mode_preserves_path_and_undo_restores_coupling(){
+        let mut editor=Editor::default();
+        let id=editor.doc.add(Shape::Bezier{
+            start:Point{x:0.,y:0.},segments:vec![
+                CubicSegment{control1:Point{x:3.,y:4.},
+                    control2:Point{x:8.,y:7.},end:Point{x:10.,y:10.}},
+                CubicSegment{control1:Point{x:13.,y:18.},
+                    control2:Point{x:20.,y:18.},end:Point{x:30.,y:10.}},
+            ],closed:false},Style::default());
+        editor.selected=Some(id);
+        editor.tool=Tool::Nodes;
+        editor.active_node=Some((id,NodeAddress::BezierEnd(0)));
+        editor.apply_tangent_operation(node_edit::TangentOperation::Smooth);
+        let shape_before=editor.doc.get_mut(id).unwrap().shape.clone();
+        assert_eq!(editor.undo.len(),1);
+        editor.unlink_active_tangents();
+        assert!(editor.doc.get_mut(id).unwrap().node_modes.is_empty());
+        assert_eq!(editor.doc.get_mut(id).unwrap().shape,shape_before);
+        assert_eq!(editor.undo.len(),2);
+        editor.unlink_active_tangents();
+        assert_eq!(editor.undo.len(),2);
+        editor.undo();
+        assert_eq!(node_edit::mode_at(&editor.doc.get_mut(id).unwrap().node_modes,
+            NodeAddress::BezierEnd(0)),Some(node_edit::TangentOperation::Smooth));
+        assert_eq!(editor.doc.get_mut(id).unwrap().shape,shape_before);
+    }
     #[test] fn persistent_smooth_mode_survives_undo_redo_and_subsequent_drag(){
         let mut editor=Editor::default();
         let id=editor.doc.add(Shape::Bezier{
