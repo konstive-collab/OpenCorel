@@ -606,6 +606,24 @@ impl Editor {
         if self.tool==Tool::Nodes{
             ui.heading("Редактирование узлов");
             ui.label("Клик по кривой — выбор. Двойной клик по сегменту — новый узел.");
+            if self.selection_ids().len()==2{
+                use opencorel_core::path_topology::JoinMode;
+                ui.separator();
+                ui.label("Соединить две выделенные кривые");
+                ui.small("V → Shift+щелчок по второй кривой → F10");
+                ui.horizontal_wrapped(|ui|{
+                    if ui.button("Сшить концы (до 2 мм)")
+                        .on_hover_text("Автоматически подберёт ближайшие концы и сведёт их в одну точку")
+                        .clicked(){
+                        self.join_selected_beziers(JoinMode::Snap{tolerance_mm:2.0});
+                    }
+                    if ui.button("Соединить мостиком")
+                        .on_hover_text("Добавит прямой сегмент между ближайшими концами, не сдвигая исходные точки")
+                        .clicked(){
+                        self.join_selected_beziers(JoinMode::Bridge);
+                    }
+                });
+            }
             if let Some((id,address))=self.active_node{
                 ui.label(format!("Узел: {address:?}"));
                 let location=self.doc.objects.iter().find(|o|o.id==id)
@@ -626,6 +644,16 @@ impl Editor {
                     if changed{self.nudge_active_node(x-p.x,y-p.y);}
                     if ui.button("Удалить выбранный узел  Del").clicked(){
                         self.remove_active_node();
+                    }
+                    let can_split=self.doc.objects.iter().find(|o|o.id==id)
+                        .is_some_and(|o|matches!((&o.shape,address),
+                            (opencorel_core::Shape::Bezier{segments,closed:false},
+                             opencorel_core::node_edit::NodeAddress::BezierEnd(i))
+                                if i+1<segments.len()));
+                    if can_split && ui.button("Разрезать кривую в этом узле")
+                        .on_hover_text("Создаёт два отдельных открытых контура с общей конечной точкой")
+                        .clicked(){
+                        self.split_selected_bezier();
                     }
                     let has_pair=self.doc.objects.iter().find(|o|o.id==id)
                         .is_some_and(|o|
