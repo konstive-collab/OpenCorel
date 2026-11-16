@@ -132,6 +132,8 @@ struct Editor{
     show_guides:bool,
     snap_guides:bool,
     guide_drag:Option<GuideDrag>,
+    /// Coalesces rapid numeric guide edits into one undo step.
+    guide_numeric_session:Option<usize>,
     offset_distance_mm:f32,
     grid_mm:f32,
     show_rulers:bool,
@@ -206,6 +208,7 @@ impl Default for Editor{
             snap_nodes:true,snap_tolerance_px:10.0,
             join_tolerance_mm:2.0,
             show_guides:true,snap_guides:true,guide_drag:None,
+            guide_numeric_session:None,
             offset_distance_mm:2.0,
             grid_mm:10.0,
             show_rulers:true,light_theme:false,cursor_mm:None,
@@ -615,6 +618,7 @@ impl Editor{
         true
     }
     fn checkpoint(&mut self){
+        self.guide_numeric_session=None;
         self.undo.push(self.doc.clone());
         trim_history(&mut self.undo);
         self.redo.clear();
@@ -634,6 +638,7 @@ impl Editor{
             self.curve_outgoing=None;self.curve_drag_anchor=None;
             self.freehand_samples.clear();self.freehand_overflow=false;
             self.guide_drag=None;
+            self.guide_numeric_session=None;
             self.resize_drag=None;self.node_drag=None;self.active_node=None;
             self.node_drag_checkpointed=false;
             self.status="Отменено".into();
@@ -653,6 +658,7 @@ impl Editor{
             self.curve_outgoing=None;self.curve_drag_anchor=None;
             self.freehand_samples.clear();self.freehand_overflow=false;
             self.guide_drag=None;
+            self.guide_numeric_session=None;
             self.resize_drag=None;self.node_drag=None;self.active_node=None;
             self.node_drag_checkpointed=false;
             self.status="Повторено".into();
