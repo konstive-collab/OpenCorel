@@ -971,6 +971,9 @@ impl Editor{
             if self.tool==Tool::Nodes{
                 self.paint_node_handles(&page_painter,v);
             }
+            // A draft is open: prevent clicks behind the popup from modifying
+            // the document, while the canvas continues to render.
+            if self.inline_text.is_some(){return;}
             if response.drag_started_by(egui::PointerButton::Primary){
                 if let Some(pos)=response.interact_pointer_pos(){
                     if v.rect.contains(pos){
@@ -1126,10 +1129,12 @@ impl eframe::App for Editor{
         }
         let save_as=ctx.input(|i|i.modifiers.command&&i.modifiers.shift
             && i.key_pressed(egui::Key::S));
-        if save_as{self.save_as_picker();}
-        else if ctx.input(|i|i.modifiers.command&&i.key_pressed(egui::Key::S)){self.save();}
-        if ctx.input(|i|i.modifiers.command&&i.key_pressed(egui::Key::O)){self.open_picker();}
-        if !ctx.wants_keyboard_input(){
+        if self.inline_text.is_none(){
+            if save_as{self.save_as_picker();}
+            else if ctx.input(|i|i.modifiers.command&&i.key_pressed(egui::Key::S)){self.save();}
+            if ctx.input(|i|i.modifiers.command&&i.key_pressed(egui::Key::O)){self.open_picker();}
+        }
+        if self.inline_text.is_none() && !ctx.wants_keyboard_input(){
             let dropped=ctx.input(|i|i.raw.dropped_files.clone());
             for file in dropped{
                 if let Some(path)=file.path {
@@ -1145,7 +1150,7 @@ impl eframe::App for Editor{
                 }
             }
         }
-        if !ctx.wants_keyboard_input(){
+        if self.inline_text.is_none() && !ctx.wants_keyboard_input(){
             let ctrl=ctx.input(|i|i.modifiers.command);
             if ctrl&&ctx.input(|i|i.key_pressed(egui::Key::C)){self.copy_selection();}
             if ctrl&&ctx.input(|i|i.key_pressed(egui::Key::X)){self.cut_selection();}
@@ -1167,11 +1172,11 @@ impl eframe::App for Editor{
             }
         }
         if ctx.input(|i|i.key_pressed(egui::Key::F1)){self.show_welcome=true;}
-        if !ctx.wants_keyboard_input() &&
+        if self.inline_text.is_none() && !ctx.wants_keyboard_input() &&
             ctx.input(|i|i.key_pressed(egui::Key::F9)){
             self.show_inspector=!self.show_inspector;
         }
-        if !ctx.wants_keyboard_input() && ctx.input(|i|i.key_pressed(egui::Key::Delete)){
+        if self.inline_text.is_none() && !ctx.wants_keyboard_input() && ctx.input(|i|i.key_pressed(egui::Key::Delete)){
             if self.tool==Tool::Nodes {self.remove_active_node();}
             else{self.delete_selection();}
         }
@@ -1182,7 +1187,7 @@ impl eframe::App for Editor{
         if ctx.style().visuals.dark_mode==self.light_theme {
             ui_theme::apply(ctx,self.light_theme);
         }
-        if !ctx.wants_keyboard_input(){
+        if self.inline_text.is_none() && !ctx.wants_keyboard_input(){
             if ctx.input(|i|i.modifiers.command&&i.key_pressed(egui::Key::A)){self.select_all();}
             if ctx.input(|i|i.modifiers.command&&i.key_pressed(egui::Key::N)){self.new_document();}
             if ctx.input(|i|i.modifiers.command&&i.key_pressed(egui::Key::D)){self.duplicate_selection();}
@@ -1205,8 +1210,7 @@ impl eframe::App for Editor{
         self.color_palette(ctx);
         if self.show_inspector{self.inspector(ctx);}
         self.workspace_footer(ctx);
-        if self.inline_text.is_none(){self.canvas(ctx);}
-        else{self.canvas(ctx);}
+        self.canvas(ctx);
         self.inline_text_window(ctx);
         self.welcome_window(ctx);
         if self.show_preflight{
