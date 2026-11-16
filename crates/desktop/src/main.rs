@@ -154,6 +154,7 @@ struct Editor{
     object_filter:String,
     active_node:Option<(u64,NodeAddress)>,
     node_drag:Option<(u64,NodeAddress)>,
+    node_drag_checkpointed:bool,
 }
 impl Default for Editor{
     fn default()->Self{
@@ -193,7 +194,8 @@ impl Default for Editor{
             show_safe_area:false,safe_margin_mm:5.0,
             internal_clipboard:Vec::new(),paste_number:0,
             show_welcome:true,toolbox_expanded:false,resize_drag:None,
-            object_filter:String::new(),active_node:None,node_drag:None}
+            object_filter:String::new(),active_node:None,node_drag:None,
+            node_drag_checkpointed:false}
     }
 }
 #[derive(Clone,Copy)]
@@ -595,6 +597,7 @@ impl Editor{
             self.curve_draft=None;self.curve_start=None;
             self.curve_outgoing=None;self.curve_drag_anchor=None;
             self.resize_drag=None;self.node_drag=None;self.active_node=None;
+            self.node_drag_checkpointed=false;
             self.status="Отменено".into();
         }
     }
@@ -610,6 +613,7 @@ impl Editor{
             self.curve_draft=None;self.curve_start=None;
             self.curve_outgoing=None;self.curve_drag_anchor=None;
             self.resize_drag=None;self.node_drag=None;self.active_node=None;
+            self.node_drag_checkpointed=false;
             self.status="Повторено".into();
         }
     }
@@ -840,6 +844,7 @@ impl Editor{
                 self.doc=result.document;
                 self.selected=None;self.multi_selected.clear();self.active_layer=1;
                 self.resize_drag=None;self.node_drag=None;self.active_node=None;
+            self.node_drag_checkpointed=false;
                 self.fill_cache.entries.clear();self.vector_cache.clear();
                 self.compound_cache.clear();
                 self.raster_cache.clear();
@@ -1180,6 +1185,7 @@ impl Editor{
                 self.curve_drag_anchor=None;
                 self.drag_start=None;self.creation_start=None;
                 self.resize_drag=None;self.node_drag=None;
+                self.node_drag_checkpointed=false;
             }
             if response.double_clicked(){
                 if self.tool==Tool::Select{
@@ -1320,6 +1326,7 @@ impl eframe::App for Editor{
         if self.inline_text.is_none() && ctx.input(|i|i.key_pressed(egui::Key::Escape)){
             self.curve_start=None;self.curve_draft=None;self.tool=Tool::Select;
             self.resize_drag=None;self.node_drag=None;self.active_node=None;
+            self.node_drag_checkpointed=false;
             self.curve_outgoing=None;self.curve_drag_anchor=None;
         }
         if ctx.style().visuals.dark_mode==self.light_theme {
