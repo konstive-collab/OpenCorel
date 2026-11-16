@@ -8,7 +8,7 @@ const MAX_NEW_OBJECTS:usize=2000;
 const MAX_NEW_ESTIMATED_BYTES:usize=96*1024*1024;
 
 impl Editor{
-    pub(super) fn align_selection(&mut self,alignment:opencorel_core::Alignment){
+    pub(super) fn align_selection_precise(&mut self,alignment:opencorel_core::Alignment){
         let ids=self.selection_ids();
         if ids.len()<2{
             self.status="Для выравнивания выберите не менее двух объектов".into();return;
@@ -28,7 +28,7 @@ impl Editor{
         self.status=format!("Выровнено объектов: {}. Ctrl+Z — отмена",ids.len());
     }
 
-    pub(super) fn distribute_selection(&mut self,dir:opencorel_core::Distribution){
+    pub(super) fn distribute_selection_precise(&mut self,dir:opencorel_core::Distribution){
         let ids=self.selection_ids();
         if ids.len()<3{
             self.status="Для распределения нужно хотя бы три объекта".into();return;
@@ -205,7 +205,7 @@ mod tests{
             Style::default());
         e.selected=Some(a);e.multi_selected=vec![b];
         let before=e.doc.clone();
-        e.align_selection(opencorel_core::Alignment::Left);
+        e.align_selection_precise(opencorel_core::Alignment::Left);
         assert_eq!(e.doc.objects[0].bounds().x,10.);
         assert_eq!(e.doc.objects[1].bounds().x,10.);
         assert_eq!(e.doc.get_mut(untouched).unwrap().bounds().x,130.);
@@ -219,7 +219,7 @@ mod tests{
             e.doc.add(Shape::Rectangle{x,y:0.,w:10.,h:10.},Style::default())
         ).collect();
         e.selected=Some(ids[0]);e.multi_selected=ids[1..].to_vec();
-        e.distribute_selection(opencorel_core::Distribution::HorizontalCenters);
+        e.distribute_selection_precise(opencorel_core::Distribution::HorizontalCenters);
         assert_eq!(e.doc.objects.iter().map(|o|o.bounds().x).collect::<Vec<_>>(),
             vec![0.,25.,50.]);
         assert_eq!(e.undo.len(),1);
