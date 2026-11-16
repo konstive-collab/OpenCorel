@@ -5,6 +5,7 @@ mod workspace;
 mod tool_dock;
 mod ui_theme;
 mod productivity;
+mod starter_templates;
 mod array_commands;
 use opencorel_core::transform;
 use opencorel_core::node_edit::{self,NodeAddress};
