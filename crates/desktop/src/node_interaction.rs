@@ -304,8 +304,18 @@ impl Editor{
             self.status="Сначала удалите связи обтравки для соединяемых контуров".into();
             return;
         }
-        let (joined,modes,report)=match opencorel_core::path_topology::join_beziers(
-            &a.shape,&a.node_modes,&b.shape,&b.node_modes,mode){
+        // Keep polylines as polylines. Converting straight-line artwork to
+        // cubics would silently change its editable object type.
+        let result=match (&a.shape,&b.shape){
+            (Shape::Polyline{..},Shape::Polyline{..})=>
+                opencorel_core::path_topology::join_polylines(
+                    &a.shape,&b.shape,mode).map(|(shape,report)|{
+                    (shape,Vec::new(),report)
+                }),
+            _=>opencorel_core::path_topology::join_beziers(
+                &a.shape,&a.node_modes,&b.shape,&b.node_modes,mode),
+        };
+        let (joined,modes,report)=match result{
             Ok(result)=>result,
             Err(reason)=>{
                 self.status=format!("Соединение отклонено: {reason}");
