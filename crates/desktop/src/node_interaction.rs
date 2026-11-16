@@ -464,6 +464,89 @@ impl Editor{
 mod tests{
     use super::*;
     use opencorel_core::{CubicSegment,Style};
+    #[test]
+    fn continuing_existing_bezier_is_single_undo_step(){
+        let mut e=Editor::default();
+        let id=e.doc.add(topology_curve(0.,10.,20.),Style::default());
+        e.selected=Some(id);
+        e.tool=Tool::Nodes;
+        let before=e.doc.clone();
+        e.continue_selected_bezier();
+        assert!(e.tool==Tool::Curve);
+        assert_eq!(e.curve_draft,Some(id));
+        assert!(e.curve_resumed);
+        assert!(e.undo.is_empty(),"Entering continue mode is not a document change");
+        e.curve_click(Point{x:30.,y:10.});
+        e.curve_click(Point{x:40.,y:10.});
+        assert!(!e.curve_resumed);
+        assert_eq!(e.undo.len(),1,"Two appended nodes are one gesture in undo");
+        let Shape::Bezier{segments,..}=&e.doc.get_mut(id).unwrap().shape
+            else{panic!()};
+        assert_eq!(segments.len(),4);
+        e.curve_finish(false);
+        assert!(e.tool==Tool::Select);
+        e.doc.validate().unwrap();
+        e.undo();
+        assert_eq!(e.doc,before);
+        e.redo();
+        let Shape::Bezier{segments,..}=&e.doc.get_mut(id).unwrap().shape
+            else{panic!()};
+        assert_eq!(segments.len(),4);
+    }
+    #[test]
+    fn continuing_path_without_changes_does_not_create_undo(){
+        let mut e=Editor::default();
+        let id=e.doc.add(topology_curve(0.,10.,20.),Style::default());
+        e.selected=Some(id);
+        e.tool=Tool::Nodes;
+        let before=e.doc.clone();
+        e.continue_selected_bezier();
+        e.curve_finish(false);
+        assert_eq!(e.doc,before);
+        assert!(e.undo.is_empty());
+        assert!(!e.curve_resumed);
+    }
+    #[test]
+    fn resuming_then_closing_uses_one_undo_step(){
+        let mut e=Editor::default();
+        let id=e.doc.add(topology_curve(0.,10.,20.),Style::default());
+        e.selected=Some(id);
+        e.tool=Tool::Nodes;
+        let before=e.doc.clone();
+        e.continue_selected_bezier();
+        e.curve_finish(true);
+        assert_eq!(e.undo.len(),1);
+        let Shape::Bezier{closed,..}=&e.doc.get_mut(id).unwrap().shape
+            else{panic!()};
+        assert!(*closed);
+        e.undo();
+        assert_eq!(e.doc,before);
+    }
+    #[test]
+    fn continuing_rejects_closed_path_and_locked_layer(){
+        let mut e=Editor::default();
+        let id=e.doc.add(topology_curve(0.,10.,20.),Style::default());
+        e.selected=Some(id);
+        e.tool=Tool::Nodes;
+        if let Shape::Bezier{closed,..}=&mut e.doc.get_mut(id).unwrap().shape{
+            *closed=true;
+        }
+        let old=e.doc.clone();
+        e.continue_selected_bezier();
+        assert!(e.tool==Tool::Nodes);
+        assert_eq!(e.doc,old);
+        assert!(!e.curve_resumed);
+        if let Shape::Bezier{closed,..}=&mut e.doc.get_mut(id).unwrap().shape{
+            *closed=false;
+        }
+        e.doc.layers[0].locked=true;
+        let old=e.doc.clone();
+        e.continue_selected_bezier();
+        assert!(e.tool==Tool::Nodes);
+        assert_eq!(e.doc,old);
+        assert!(e.undo.is_empty());
+    }
+
     fn topology_curve(x0:f32,x1:f32,x2:f32)->Shape{
         let segment=|a:f32,b:f32|opencorel_core::CubicSegment{
             control1:Point{x:a+(b-a)/3.,y:10.},
