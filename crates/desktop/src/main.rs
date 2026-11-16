@@ -21,6 +21,7 @@ mod text_edit_ops;
 mod bezier_preview;
 mod bezier_pen;
 mod snap_targets;
+mod freehand_interaction;
 use compound_render::CompoundCache;
 use text_preview::TextPreview;
 use bezier_preview::BezierPreviewCache;
@@ -1134,6 +1135,12 @@ impl Editor{
                     }
                 }
             }
+            if self.tool==Tool::Freehand && self.freehand_samples.len()>=2 {
+                let vertices:Vec<Pos2>=self.freehand_samples.iter()
+                    .map(|p|v.screen(*p)).collect();
+                page_painter.add(egui::Shape::line(vertices,
+                    Stroke::new(1.5,Color32::from_rgb(23,177,161))));
+            }
             // A small diamond marks the actual snapped anchor so mouse input
             // has visible feedback at any zoom. Hidden layers are ignored.
             if self.snap_nodes && matches!(self.tool,Tool::Curve|Tool::Nodes){
@@ -1169,6 +1176,14 @@ impl Editor{
                         let p=self.snapped(v.mm(pos));
                         match self.tool{
                             Tool::Nodes=>self.begin_node_drag(v,pos),
+                            Tool::Freehand=>{
+                                let press=ctx.input(|i|i.pointer.press_origin())
+                                    .unwrap_or(pos);
+                                let start=self.snap_canvas_point(v.mm(press),
+                                    v.scale,None);
+                                self.freehand_begin(start);
+                                self.freehand_extend(v.mm(pos),v.scale);
+                            },
                             Tool::Curve=>{
                                 let press=ctx.input(|i|i.pointer.press_origin())
                                     .unwrap_or(pos);
@@ -1231,7 +1246,9 @@ impl Editor{
                         self.node_drag.is_some_and(|(_,address)|!address.is_handle()){
                         self.snap_canvas_point(v.mm(pos),v.scale,self.selected)
                     }else{self.snapped(v.mm(pos))};
-                    if self.tool==Tool::Curve && self.curve_drag_anchor.is_some(){
+                    if self.tool==Tool::Freehand {
+                        self.freehand_extend(v.mm(pos),v.scale);
+                    }else if self.tool==Tool::Curve && self.curve_drag_anchor.is_some(){
                         self.curve_drag_to(now);
                     }else if self.node_drag.is_some(){
                         self.drag_node_to(now);
@@ -1273,6 +1290,11 @@ impl Editor{
                 }
             }
             if response.drag_stopped_by(egui::PointerButton::Primary){
+                if self.tool==Tool::Freehand {
+                    let last=response.interact_pointer_pos().map(|pos|
+                        self.snap_canvas_point(v.mm(pos),v.scale,None));
+                    self.freehand_finish(last,v.scale);
+                }
                 if self.tool==Tool::Curve && self.curve_drag_anchor.is_some(){
                     if let Some(pos)=response.interact_pointer_pos(){
                         self.curve_drag_to(self.snapped(v.mm(pos)));
@@ -1308,6 +1330,7 @@ impl Editor{
                         let p=self.snapped(v.mm(pos));
                         let shape=match self.tool{
                             Tool::Nodes=>{self.select_node_near(v,pos);return;},
+                            Tool::Freehand=>{return;},
                             Tool::Select=>{
                                 let id=self.hit_test_at(v.mm(pos),2.0);
                                 let shift=ctx.input(|i|i.modifiers.shift);
@@ -1427,6 +1450,7 @@ impl eframe::App for Editor{
             self.resize_drag=None;self.node_drag=None;self.active_node=None;
             self.node_drag_checkpointed=false;
             self.curve_outgoing=None;self.curve_drag_anchor=None;
+            self.freehand_samples.clear();self.freehand_overflow=false;
         }
         if ctx.style().visuals.dark_mode==self.light_theme {
             ui_theme::apply(ctx,self.light_theme);
@@ -1446,6 +1470,7 @@ impl eframe::App for Editor{
             if ctx.input(|i|i.key_pressed(egui::Key::F10)){self.change_tool(Tool::Nodes);}
             if ctx.input(|i|i.key_pressed(egui::Key::V)){self.change_tool(Tool::Select);}
             if ctx.input(|i|i.key_pressed(egui::Key::B)){self.change_tool(Tool::Curve);}
+            if ctx.input(|i|i.key_pressed(egui::Key::H)){self.change_tool(Tool::Freehand);}
             if ctx.input(|i|i.key_pressed(egui::Key::L)){self.change_tool(Tool::Line);}
             if ctx.input(|i|i.key_pressed(egui::Key::P)){self.change_tool(Tool::Polygon);}
         }
