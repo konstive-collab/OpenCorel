@@ -1,5 +1,36 @@
 # OpenCorel v0.14 Alpha — Typography iteration I06 (in progress)
 
+## Path connectivity — join / bridge / split (new)
+
+Two separate **open native Bézier** paths can now be combined into one path
+without flattening:
+- Nearest-endpoint **Snap Join** (up to 2 mm tolerance): automatically
+  chooses path direction, aligns the closest endpoints and shifts the
+  second path's first control point with its starting anchor.
+- **Bridge Join**: automatically selects nearest endpoints, preserves
+  original geometry and inserts one linear cubic between them.
+- Existing interior-node tangent modes from both paths are preserved and
+  their indices are remapped into the combined document object.
+- **Split at Anchor**: an open cubic can be split at a selected interior
+  endpoint into two editable objects. Styles and object appearances are
+  copied; tangent modes are partitioned and renumbered correctly.
+- Undo restores the original object graph in **one** step. Redo restores
+  the joined or split result.
+
+**Fail safely:** operations reject locked/hidden layers, grouped objects,
+clipping links, mismatched style/appearance/layer, closed/unsupported paths,
+invalid anchors, out-of-range snapping tolerance, unsafe coordinates and
+large post-join path sizes. They do not silently delete clipping links or
+lose individual path effects.
+
+**Limits:** snap tolerance is currently fixed to 2 mm; split only applies
+to open cubic paths and a previously existing interior anchor; native
+polyline and compound-path connection is not yet included. Bridge join
+adds one straight control segment and does not produce automatic smoothness
+across that seam. The first selected object retains identity/style/name,
+while the second object's independent label is discarded on joining.
+Manual Windows GUI acceptance remains required.
+
 ## Professional path tools — latest iteration
 
 **Persistent Bézier node modes:** the node inspector now stores Corner, Smooth
