@@ -242,6 +242,39 @@ impl Editor{
         }
         self.status="Свободные рычаги: геометрия не изменена. Ctrl+Z — отмена".into();
     }
+    /// Continue an existing open Bézier path in-place. No checkpoint is made
+    /// until the user actually appends a segment (or closes the path), so
+    /// entering/exiting this mode without editing does not pollute Undo.
+    pub(super) fn continue_selected_bezier(&mut self){
+        let Some(id)=self.selected else{
+            self.status="Сначала выделите открытую кривую".into();
+            return;
+        };
+        if !self.multi_selected.is_empty() || !self.node_edit_allowed(id){
+            self.status="Продолжить можно только один редактируемый контур".into();
+            return;
+        }
+        let Some(obj)=self.doc.objects.iter().find(|o|o.id==id) else{return;};
+        let Shape::Bezier{start,segments,closed:false}=&obj.shape else{
+            self.status="Продолжить можно только открытую кривую Безье".into();
+            return;
+        };
+        if segments.is_empty() || segments.len()>=10_000{
+            self.status="Кривая пуста или достигнут предел 10 000 сегментов".into();
+            return;
+        }
+        let first=*start;
+        self.tool=Tool::Curve;
+        self.curve_draft=Some(id);
+        self.curve_start=Some(first);
+        self.curve_resumed=true;
+        self.curve_outgoing=None;
+        self.curve_drag_anchor=None;
+        self.active_node=None;self.node_drag=None;
+        self.node_drag_checkpointed=false;
+        self.status="Продолжение кривой: добавьте узлы, Enter — завершить, Esc — выйти".into();
+    }
+
     /// Join exactly two selected, same-layer open Bézier objects in one
     /// native path. Refuse mismatched styles, clips, groups and locked layers
     /// rather than silently flattening or dropping object-level properties.
