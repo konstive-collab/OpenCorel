@@ -219,6 +219,10 @@ pub struct Object {
     /// Flat group membership. Zero/None means ungrouped; no nested groups.
     #[serde(default,skip_serializing_if="Option::is_none")]
     pub group_id:Option<u64>,
+    /// Persisted interior cubic node tangent modes. Absent in legacy KDR files.
+    /// Index remapping on node insertion/removal is handled by node_edit.
+    #[serde(default,skip_serializing_if="Vec::is_empty")]
+    pub node_modes:Vec<node_edit::NodeModeBinding>,
 }
 impl Object{
     pub fn bounds(&self)->Bounds{
@@ -281,7 +285,8 @@ impl Document {
                 _=>0,
             };
             total=total.saturating_add(std::mem::size_of::<Object>()
-                +obj.style.fill.len()+obj.style.stroke.len()+obj.name.len()+shape_bytes);
+                +obj.style.fill.len()+obj.style.stroke.len()+obj.name.len()+shape_bytes
+                +obj.node_modes.len()*std::mem::size_of::<node_edit::NodeModeBinding>());
         }
         total.saturating_add(self.clip_links.len()*std::mem::size_of::<ClipLink>())
             .saturating_add(self.appearances.iter().map(|(_,a)|
@@ -353,7 +358,8 @@ impl Document {
         let id=self.next_id;
         self.next_id+=1;
         self.objects.push(Object{id,shape,style,layer_id,
-            text_format:TextFormat::default(),name:String::new(),group_id:None});
+            text_format:TextFormat::default(),name:String::new(),group_id:None,
+            node_modes:Vec::new()});
         id
     }
     /// Create a flat, persistent group without changing the individual objects'
@@ -584,6 +590,7 @@ impl Document {
                 return Err("Invalid style".into());
             }
             o.text_format.validate()?;
+            node_edit::validate_modes(&o.shape,&o.node_modes)?;
             let b=o.bounds();
             if ![b.x,b.y,b.w,b.h].iter().all(|v|v.is_finite()) || b.w<0.0 || b.h<0.0 {
                 return Err("Invalid shape geometry".into());
