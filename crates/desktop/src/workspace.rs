@@ -1358,6 +1358,41 @@ impl Editor {
                 .speed(0.5).range(0.5..=1000.0));
         });
         ui.checkbox(&mut self.show_rulers,"Показать линейки");
+        ui.checkbox(&mut self.show_guides,"Показать направляющие");
+        ui.checkbox(&mut self.snap_guides,"Привязка к направляющим");
+        ui.small("Тяните из линеек для создания направляющих; Alt+перетаскивание — перемещение.");
+        ui.horizontal_wrapped(|ui|{
+            if ui.button("+ Вертикальная").clicked(){
+                self.add_guide(opencorel_core::guides::GuideAxis::Vertical,
+                    self.doc.page.width_mm/2.0);
+            }
+            if ui.button("+ Горизонтальная").clicked(){
+                self.add_guide(opencorel_core::guides::GuideAxis::Horizontal,
+                    self.doc.page.height_mm/2.0);
+            }
+            if ui.button("Удалить все").clicked(){self.clear_guides();}
+        });
+        ui.label(format!("Направляющих: {}",self.doc.guides.len()));
+        let mut guide_update=None;
+        let mut guide_remove=None;
+        for (i,guide) in self.doc.guides.iter().enumerate(){
+            ui.horizontal(|ui|{
+                let axis=match guide.axis{
+                    opencorel_core::guides::GuideAxis::Horizontal=>"Г",
+                    opencorel_core::guides::GuideAxis::Vertical=>"В",
+                };
+                ui.label(format!("{axis} #{}",i+1));
+                let mut coordinate=guide.position_mm;
+                if ui.add(egui::DragValue::new(&mut coordinate)
+                    .speed(0.2).range(-100_000.0..=100_000.0)
+                    .fixed_decimals(2).suffix(" мм")).changed(){
+                    guide_update=Some((i,coordinate));
+                }
+                if ui.small_button("×").clicked(){guide_remove=Some(i);}
+            });
+        }
+        if let Some(i)=guide_remove{self.remove_guide(i);}
+        else if let Some((i,p))=guide_update{self.move_guide(i,p);}
         ui.checkbox(&mut self.show_safe_area,"Показать безопасную область");
         ui.horizontal(|ui|{
             ui.label("Отступ от края, мм");
