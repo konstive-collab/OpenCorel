@@ -762,10 +762,10 @@ impl Editor {
                         .is_some_and(|o|match (&o.shape,address){
                             (opencorel_core::Shape::Bezier{segments,closed:false,..},
                              opencorel_core::node_edit::NodeAddress::BezierEnd(i))=>
-                                i+1<segments.len(),
+                                i.checked_add(1).is_some_and(|n|n<segments.len()),
                             (opencorel_core::Shape::Polyline{points,closed:false},
                              opencorel_core::node_edit::NodeAddress::Polyline(i))=>
-                                i>0 && i+1<points.len(),
+                                i>0 && i.checked_add(1).is_some_and(|n|n<points.len()),
                             _=>false,
                         });
                     if can_split && ui.button("Разрезать контур в этом узле")
