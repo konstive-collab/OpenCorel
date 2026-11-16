@@ -30,7 +30,7 @@ use raster_preview::RasterCache;
 use workspace::InspectorTab;
 
 #[derive(Clone,Copy,PartialEq)]
-enum Tool { Select, Nodes, Rect, Ellipse, Text, Curve, Line, Polygon }
+enum Tool { Select, Nodes, Rect, Ellipse, Text, Curve, Freehand, Line, Polygon }
 #[derive(Clone,Copy,Debug,PartialEq,Eq)]
 enum ResizeCorner{TopLeft,TopRight,BottomLeft,BottomRight}
 impl ResizeCorner{
@@ -102,6 +102,12 @@ struct Editor{
     curve_draft:Option<u64>,
     /// True only while resuming an existing curve before its first new segment.
     curve_resumed:bool,
+    // In-progress pointer samples: no document snapshots during drawing.
+    freehand_samples:Vec<Point>,
+    freehand_overflow:bool,
+    freehand_precision_px:f32,
+    freehand_smoothness:f32,
+    refit_tolerance_mm:f32,
     active_layer:u64,
     pan:Vec2,
     undo:Vec<Document>,
@@ -175,6 +181,9 @@ impl Default for Editor{
             zoom:1.0,drag_start:None,creation_start:None,
             curve_start:None,curve_draft:None,curve_outgoing:None,curve_drag_anchor:None,
             curve_resumed:false,
+            freehand_samples:Vec::new(),freehand_overflow:false,
+            freehand_precision_px:2.0,freehand_smoothness:0.85,
+            refit_tolerance_mm:0.8,
             active_layer:1,pan:Vec2::ZERO,
             undo:Vec::new(),redo:Vec::new(),
             inspector_tab:InspectorTab::Objects,show_inspector:true,
@@ -606,6 +615,7 @@ impl Editor{
             self.curve_draft=None;self.curve_start=None;
             self.curve_resumed=false;
             self.curve_outgoing=None;self.curve_drag_anchor=None;
+            self.freehand_samples.clear();self.freehand_overflow=false;
             self.resize_drag=None;self.node_drag=None;self.active_node=None;
             self.node_drag_checkpointed=false;
             self.status="Отменено".into();
@@ -623,6 +633,7 @@ impl Editor{
             self.curve_draft=None;self.curve_start=None;
             self.curve_resumed=false;
             self.curve_outgoing=None;self.curve_drag_anchor=None;
+            self.freehand_samples.clear();self.freehand_overflow=false;
             self.resize_drag=None;self.node_drag=None;self.active_node=None;
             self.node_drag_checkpointed=false;
             self.status="Повторено".into();
