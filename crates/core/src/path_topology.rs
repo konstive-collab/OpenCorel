@@ -159,7 +159,7 @@ pub fn join_beziers(
 pub fn join_polylines(
     first:&Shape,second:&Shape,mode:JoinMode
 )->Result<(Shape,JoinReport),String>{
-    let vertices=|shape:&Shape|->Result<&[Point],String>{
+    fn vertices(shape:&Shape)->Result<&[Point],String>{
         match shape{
             Shape::Polyline{points,closed:false} if points.len()>=2=>{
                 if points.iter().any(|p|!valid(*p)){
@@ -169,7 +169,7 @@ pub fn join_polylines(
             },
             _=>Err("Select two open polylines with at least two vertices each".into())
         }
-    };
+    }
     let a=vertices(first)?;
     let b=vertices(second)?;
     let tolerance=match mode{
