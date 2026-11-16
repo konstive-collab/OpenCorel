@@ -6,6 +6,7 @@ mod tool_dock;
 mod ui_theme;
 mod productivity;
 mod starter_templates;
+mod page_commands;
 mod array_commands;
 use opencorel_core::transform;
 use opencorel_core::node_edit::{self,NodeAddress};
@@ -180,6 +181,8 @@ struct Editor{
     proof_dpi:u32,
     keep_bitmap_ratio:bool,
     show_preflight:bool,
+    page_name_edit:String,
+    page_rename_mode:bool,
     preflight_lines:Vec<String>,
     minimum_image_dpi:f32,
     show_safe_area:bool,
@@ -246,6 +249,7 @@ impl Default for Editor{
             text_outliner:TextOutliner::new(),text_preview:TextPreview::default(),font_search:String::new(),text_find:String::new(),text_replacement:String::new(),inline_text:None,proof_dpi:96,
             keep_bitmap_ratio:true,
             show_preflight:false,preflight_lines:Vec::new(),
+            page_name_edit:String::new(),page_rename_mode:false,
             minimum_image_dpi:150.0,
             show_safe_area:false,safe_margin_mm:5.0,
             print_bleed_mm:3.0,print_crop_marks:true,
@@ -688,7 +692,8 @@ impl Editor{
             self.compound_cache.clear();
             self.bezier_preview.clear();
             self.raster_cache.clear();
-            self.selected=None;self.multi_selected.clear();
+            self.selected=None;self.multi_selected.clear();self.active_layer=1;
+            self.page_rename_mode=false;
             self.curve_draft=None;self.curve_start=None;
             self.curve_resumed=false;
             self.curve_outgoing=None;self.curve_drag_anchor=None;
@@ -711,7 +716,8 @@ impl Editor{
             self.vector_cache.clear();
             self.bezier_preview.clear();
             self.raster_cache.clear();
-            self.selected=None;self.multi_selected.clear();
+            self.selected=None;self.multi_selected.clear();self.active_layer=1;
+            self.page_rename_mode=false;
             self.curve_draft=None;self.curve_start=None;
             self.curve_resumed=false;
             self.curve_outgoing=None;self.curve_drag_anchor=None;
