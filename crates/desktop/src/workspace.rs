@@ -665,6 +665,27 @@ impl Editor {
             }else{
                 ui.label("Выберите опорную точку для точного позиционирования.");
             }
+            if self.selected.is_some_and(|id|self.node_edit_allowed(id)){
+                ui.separator();
+                ui.label("Операции с контуром");
+                ui.horizontal_wrapped(|ui|{
+                    if ui.button("Развернуть направление")
+                        .on_hover_text("Поменять начало и конец пути, сохранив форму и типы узлов")
+                        .clicked(){
+                        self.reverse_selected_path();
+                    }
+                    if ui.button("Замкнуть")
+                        .on_hover_text("Соединить начало и конец контура")
+                        .clicked(){
+                        self.set_selected_path_closed(true);
+                    }
+                    if ui.button("Разомкнуть")
+                        .on_hover_text("Убрать замыкающий сегмент")
+                        .clicked(){
+                        self.set_selected_path_closed(false);
+                    }
+                });
+            }
             ui.small("F10 — узлы. Стрелки — сдвиг. Ctrl+Z — отмена.");
             ui.separator();
         }
