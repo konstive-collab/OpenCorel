@@ -1457,7 +1457,9 @@ impl Editor{
                                 let id=self.hit_test_at(v.mm(pos),2.0);
                                 let shift=ctx.input(|i|i.modifiers.shift);
                                 if shift{self.select_object(id,true);}
-                                else if !id.map(|id|self.is_selected(id)).unwrap_or(false){
+                                else{
+                                    // Plain click collapses a previous multi-selection;
+                                    // drag on a selected object still moves the group.
                                     self.select_object(id,false);
                                 }
                                 return;
