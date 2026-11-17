@@ -922,11 +922,9 @@ impl Editor {
                                 .clicked(){self.object_lock(row.id,!row.locked);}
                             let layer_id=self.doc.objects.iter().find(|o|o.id==row.id)
                                 .map(|o|o.layer_id).unwrap_or(self.active_layer);
-                            if ui.add_enabled(row.visible&&self.doc.layer(layer_id)
-                                .is_some_and(|l|l.visible),
-                                egui::Button::new(&row.label)
-                                    .selected(self.is_selected(row.id))
-                                    .min_size(Vec2::new(ui.available_width(),23.0)))
+                            if ui.add(egui::Button::new(&row.label)
+                                .selected(self.is_selected(row.id))
+                                .min_size(Vec2::new(ui.available_width(),23.0)))
                                 .on_hover_text(format!("Объект #{} · слой {}",row.id,layer_id))
                                 .clicked(){
                                 let shift=ui.input(|i|i.modifiers.shift);
