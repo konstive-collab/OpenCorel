@@ -78,8 +78,8 @@ impl Editor{
         if ids.is_empty(){return;}
         let mut candidate=self.doc.clone();
         if candidate.objects.iter().any(|o|ids.contains(&o.id)&&
-            (!o.visible||o.locked||!candidate.layer(o.layer_id)
-                .is_some_and(|l|l.visible&&!l.locked))){
+            (o.locked||!candidate.layer(o.layer_id)
+                .is_some_and(|l|!l.locked))){
             self.status="Удаление отменено: в выделении есть скрытый или заблокированный объект".into();
             return;
         }
