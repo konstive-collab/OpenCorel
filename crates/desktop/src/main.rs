@@ -27,6 +27,7 @@ mod pattern_studio;
 mod vector_effects;
 mod color_studio;
 mod smart_shape_studio;
+mod text_path_commands;
 mod bezier_preview;
 mod bezier_pen;
 mod snap_targets;
@@ -164,6 +165,9 @@ struct Editor{
     smart_rotation_degrees:f32,
     smart_width_mm:f32,
     smart_height_mm:f32,
+    text_path_start_mm:f32,
+    text_path_shift_mm:f32,
+    text_path_reverse:bool,
     active_layer:u64,
     pan:Vec2,
     undo:Vec<Document>,
@@ -276,6 +280,7 @@ impl Default for Editor{
             smart_search:String::new(),
             smart_inset:0.42,smart_detail:8,smart_rotation_degrees:0.0,
             smart_width_mm:60.0,smart_height_mm:60.0,
+            text_path_start_mm:0.0,text_path_shift_mm:0.0,text_path_reverse:false,
             active_layer:1,pan:Vec2::ZERO,
             undo:Vec::new(),redo:Vec::new(),
             inspector_tab:InspectorTab::Objects,show_inspector:true,
