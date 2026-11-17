@@ -27,6 +27,7 @@ mod pattern_studio;
 mod vector_effects;
 mod color_studio;
 mod smart_shape_studio;
+mod smart_shape_catalog;
 mod text_path_commands;
 mod bezier_preview;
 mod bezier_pen;
