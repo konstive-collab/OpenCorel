@@ -106,8 +106,15 @@ mod tests{
         assert_eq!(pdf.get_pages().len(),3);
         for (i,(w,h)) in [(210.,297.),(90.,50.),(300.,100.)].iter().enumerate(){
             let page_id=pdf.get_pages()[&((i+1) as u32)];
-            let dims=pdf.get_page_media_box(page_id).unwrap();
-            let coordinates=dims.as_array().unwrap();
+            let page=pdf.get_object(page_id).unwrap().as_dict().unwrap();
+            let mediabox=if let Ok(mb)=page.get(b"MediaBox"){
+                mb
+            }else{
+                let parent=page.get(b"Parent").unwrap().as_reference().unwrap();
+                pdf.get_object(parent).unwrap().as_dict().unwrap()
+                    .get(b"MediaBox").unwrap()
+            };
+            let coordinates=mediabox.as_array().unwrap();
             let width=coordinates[2].as_float().unwrap_or_else(|_|
                 coordinates[2].as_i64().unwrap() as f32);
             let height=coordinates[3].as_float().unwrap_or_else(|_|
