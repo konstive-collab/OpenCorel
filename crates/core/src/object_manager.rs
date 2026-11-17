@@ -401,6 +401,31 @@ mod tests{
         doc.validate().unwrap();
     }
     #[test]
+    fn object_visibility_and_lock_flags_survive_native_kdr_roundtrip(){
+        let mut doc=Document::default();
+        let id=doc.add(Shape::Rectangle{x:1.,y:2.,w:10.,h:10.},Style::default());
+        let object=doc.get_mut(id).unwrap();
+        object.visible=false;object.locked=true;
+        let dir=tempfile::tempdir().unwrap();
+        let path=dir.path().join("object-state.kdr");
+        doc.write(&path).unwrap();
+        let restored=Document::read(&path).unwrap();
+        let object=restored.objects.iter().find(|o|o.id==id).unwrap();
+        assert!(!object.visible&&object.locked);
+        restored.validate().unwrap();
+    }
+    #[test]
+    fn deleting_layer_uses_unlocked_fallback_if_primary_is_locked(){
+        let mut doc=Document::default();
+        let source=doc.add_layer("Source".into());
+        let fallback=doc.add_layer("Fallback".into());
+        let object=doc.add_to_layer(Shape::Rectangle{x:1.,y:1.,w:5.,h:5.},Style::default(),source);
+        doc.layers.iter_mut().find(|l|l.id==1).unwrap().locked=true;
+        assert_eq!(doc.delete_layer(source).unwrap(),fallback);
+        assert_eq!(doc.objects.iter().find(|o|o.id==object).unwrap().layer_id,fallback);
+        doc.validate().unwrap();
+    }
+    #[test]
     fn layer_mutations_reject_locked_layers_without_partial_changes(){
         let mut doc=Document::default();
         let id=doc.add_layer("Locked".into());
