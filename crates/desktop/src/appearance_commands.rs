@@ -90,7 +90,7 @@ impl Editor{
             Some(o)=>o,
             None=>return
         };
-        if !self.doc.layer(dest.layer_id).is_some_and(|l|l.visible&&!l.locked){
+        if !self.doc.is_object_editable(dest.id){
             self.status="Цель пипетки находится на заблокированном слое".into();
             return;
         }
