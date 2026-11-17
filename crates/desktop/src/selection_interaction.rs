@@ -50,8 +50,7 @@ impl Editor{
         let mut valid_count=0;
         for o in &self.doc.objects{
             if !ids.contains(&o.id){continue;}
-            if !self.doc.layer(o.layer_id)
-                .is_some_and(|layer|layer.visible&&!layer.locked){
+            if !self.doc.is_object_editable(o.id){
                 self.status="Перемещение невозможно: выделение содержит заблокированный слой".into();
                 return;
             }
@@ -104,9 +103,7 @@ impl Editor{
         // Two linear passes rather than group_members() inside each object
         // (which was quadratic on documents with thousands of objects).
         let editable=|o:&opencorel_core::Object|{
-            self.doc.layer(o.layer_id)
-                .is_some_and(|layer|layer.visible&&!layer.locked) &&
-            !clip_sources.contains(&o.id)
+            self.doc.is_object_editable(o.id)&&!clip_sources.contains(&o.id)
         };
         let mut direct=HashSet::new();
         let mut groups=HashSet::new();
