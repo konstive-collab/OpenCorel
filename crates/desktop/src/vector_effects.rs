@@ -217,7 +217,7 @@ fn generate_effect(doc:&mut Document,ids:&[u64],opts:&EffectOptions)->Result<Vec
     let extra=layers.len().checked_mul(originals.len())
         .ok_or("Ошибка количества эффектов")?;
     if extra>MAX_EFFECT_OBJECTS||doc.objects.len().saturating_add(extra)>100_000
-        ||doc.next_id.checked_add(extra as u64).is_none_or(|id|id>=u64::MAX){
+        ||doc.next_id.checked_add(extra as u64).is_none_or(|id|id==u64::MAX){
         return Err("Слишком много векторных копий эффекта".into());
     }
     let bytes:usize=originals.iter().map(|o|
