@@ -17,6 +17,7 @@ pub(super) fn tool_label(tool:Tool)->&'static str{
         Tool::Freehand=>"Свободное рисование",
         Tool::Line=>"Линия",
         Tool::Polygon=>"Шестиугольник",
+        Tool::Smart=>"Профессиональные фигуры", 
     }
 }
 pub(super) fn tool_hint(tool:Tool)->&'static str{
@@ -30,6 +31,7 @@ pub(super) fn tool_hint(tool:Tool)->&'static str{
         Tool::Freehand=>"Удерживайте кнопку мыши и рисуйте свободную линию. После отпускания она станет редактируемой кривой Безье. Точность и сглаживание — справа.",
         Tool::Line=>"Протяните курсор от начала до конца линии. Линии можно назначить толщину и цвет обводки.",
         Tool::Polygon=>"Протяните мышь по листу, чтобы создать шестиугольник. Цвет и размеры изменяются после выделения.",
+        Tool::Smart=>"93 редактируемые векторные фигуры. Выберите вариант в панели справа, затем протяните по холсту или добавьте в центр листа.",
     }
 }
 fn object_bytes(object:&Object)->usize{
@@ -420,6 +422,13 @@ impl Editor{
                     if ui.button("Баннер 3 × 2 м").clicked(){action=3;}
                     if ui.button("Открыть файл...").clicked(){action=4;}
                 });
+                ui.label(RichText::new("Быстрый старт из шаблона").strong());
+                ui.horizontal_wrapped(|ui|{
+                    if ui.button("Визитка").clicked(){action=6;}
+                    if ui.button("Листовка A5").clicked(){action=7;}
+                    if ui.button("Постер").clicked(){action=8;}
+                    if ui.button("24 этикетки A4").clicked(){action=9;}
+                });
                 ui.separator();
                 ui.label(RichText::new("Быстрая инструкция").strong());
                 ui.label("1. Выберите слева «Прямоугольник», «Эллипс» или «Текст».");
@@ -463,6 +472,10 @@ impl Editor{
             3=>self.blank_page(3000.0,2000.0),
             4=>{self.show_welcome=false;self.open_picker();},
             5=>self.show_welcome=false,
+            6=>self.create_starter_template(super::starter_templates::StarterTemplate::BusinessCard),
+            7=>self.create_starter_template(super::starter_templates::StarterTemplate::FlyerA5),
+            8=>self.create_starter_template(super::starter_templates::StarterTemplate::SocialSquare),
+            9=>self.create_starter_template(super::starter_templates::StarterTemplate::LabelSheetA4),
             _=>{},
         }
     }

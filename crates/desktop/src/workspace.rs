@@ -36,7 +36,7 @@ impl Editor {
         self.resize_drag_base=None;self.resize_drag_checkpointed=false;
         self.node_drag_checkpointed=false;
         if next!=Tool::Nodes{self.active_node=None;}
-        if matches!(next,Tool::Text|Tool::Nodes|Tool::Freehand){
+        if matches!(next,Tool::Text|Tool::Nodes|Tool::Freehand|Tool::Smart){
             self.inspector_tab=InspectorTab::Properties;
             self.show_inspector=true;
         }
@@ -86,6 +86,15 @@ impl Editor {
                     if ui.button("Новый лист A3").clicked(){self.blank_page(297.0,420.0);ui.close_menu();}
                     if ui.button("Новый баннер 3×2 м").clicked(){self.blank_page(3000.0,2000.0);ui.close_menu();}
                     if ui.button("Пример готового макета").clicked(){self.sample_design();ui.close_menu();}
+                    ui.menu_button("Создать из шаблона",|ui|{
+                        ui.small("Готовые редактируемые макеты — без растровой подложки");
+                        for kind in super::starter_templates::StarterTemplate::ALL{
+                            if ui.button(kind.title()).clicked(){
+                                self.create_starter_template(kind);
+                                ui.close_menu();
+                            }
+                        }
+                    });
                     ui.separator();
                     if ui.button("Новый документ       Ctrl+N").clicked(){self.new_document();ui.close_menu();}
                     if ui.button("Открыть...         Ctrl+O").clicked(){self.open_picker();ui.close_menu();}
@@ -95,7 +104,19 @@ impl Editor {
                     if ui.button("Сохранить как...  Ctrl+Shift+S").clicked(){self.save_as_picker();ui.close_menu();}
                     if ui.button("Экспорт SVG...").clicked(){self.export_dialog("svg");ui.close_menu();}
                     if ui.button("Экспорт SVGZ...").clicked(){self.export_dialog("svgz");ui.close_menu();}
-                    if ui.button("Экспорт PDF (RGB)...").clicked(){self.export_dialog("pdf");ui.close_menu();}
+                    if ui.button("Экспорт PDF (все страницы, RGB)...").clicked(){self.export_dialog("pdf");ui.close_menu();}
+                    ui.menu_button("Экспортировать все страницы...",|ui|{
+                        ui.small("В отдельную папку, по одному файлу на страницу");
+                        if ui.button("Все страницы → SVG").clicked(){
+                            self.export_all_pages_dialog("svg");ui.close_menu();
+                        }
+                        if ui.button("Все страницы → PDF (RGB)").clicked(){
+                            self.export_all_pages_dialog("pdf");ui.close_menu();
+                        }
+                    });
+                    if ui.button("Печатный SVG с вылетами и метками реза...").clicked(){
+                        self.export_print_sheet_dialog();ui.close_menu();
+                    }
                     ui.separator();
                     ui.horizontal(|ui|{
                         ui.label("DPI");
@@ -110,6 +131,31 @@ impl Editor {
                     if ui.add_enabled(!self.undo.is_empty(),egui::Button::new("Отменить      Ctrl+Z")).clicked(){self.undo();ui.close_menu();}
                     if ui.add_enabled(!self.redo.is_empty(),egui::Button::new("Повторить     Ctrl+Y")).clicked(){self.redo();ui.close_menu();}
                     if ui.button("Дублировать     Ctrl+D").clicked(){self.duplicate_preserving_styles();ui.close_menu();}
+                    ui.menu_button("Массив копий / сетка...",|ui|{
+                        ui.label("Размножить выделенные объекты по строкам и столбцам");
+                        ui.horizontal(|ui|{
+                            ui.label("Столбцы");
+                            ui.add(egui::DragValue::new(&mut self.array_columns).range(1..=50));
+                            ui.label("Строки");
+                            ui.add(egui::DragValue::new(&mut self.array_rows).range(1..=50));
+                        });
+                        ui.horizontal(|ui|{
+                            ui.label("Зазор X, мм");
+                            ui.add(egui::DragValue::new(&mut self.array_gap_x_mm)
+                                .range(-9999.0..=10000.0).speed(0.5));
+                        });
+                        ui.horizontal(|ui|{
+                            ui.label("Зазор Y, мм");
+                            ui.add(egui::DragValue::new(&mut self.array_gap_y_mm)
+                                .range(-9999.0..=10000.0).speed(0.5));
+                        });
+                        ui.small("Первая ячейка — исходные объекты; не более 2000 новых объектов.");
+                        if ui.add_enabled(!self.selection_ids().is_empty(),
+                            egui::Button::new("Создать сетку")).clicked(){
+                            self.repeat_selection_as_grid();
+                            ui.close_menu();
+                        }
+                    });
                     ui.separator();
                     if ui.button("Копировать      Ctrl+C").clicked(){self.copy_selection();ui.close_menu();}
                     if ui.button("Вырезать        Ctrl+X").clicked(){self.cut_selection();ui.close_menu();}
@@ -135,7 +181,86 @@ impl Editor {
                     ui.checkbox(&mut self.show_rulers,"Линейки");
                     ui.checkbox(&mut self.light_theme,"Светлая тема");
                 });
+                ui.menu_button("Текст",|ui|{
+                    ui.label(RichText::new("ТЕКСТОВАЯ МАСТЕРСКА").strong());
+                    ui.small("23 массовые операции и 7 стилевых пресетов");
+                    ui.horizontal(|ui|{
+                        ui.label("Перенос");
+                        ui.add(egui::DragValue::new(&mut self.text_studio_wrap_columns)
+                            .range(8..=160).suffix(" зн."));
+                    });
+                    ui.menu_button("Регистр и слова",|ui|{
+                        for action in super::text_studio::TextAction::ALL.iter().take(6){
+                            if ui.button(action.label()).clicked(){
+                                self.run_text_action(*action);ui.close_menu();
+                            }
+                        }
+                    });
+                    ui.menu_button("Абзацы и списки",|ui|{
+                        for action in super::text_studio::TextAction::ALL.iter().skip(6){
+                            if ui.button(action.label()).clicked(){
+                                self.run_text_action(*action);ui.close_menu();
+                            }
+                        }
+                    });
+                    ui.menu_button("Текст по кривой...",|ui|{
+                        ui.set_min_width(315.0);
+                        self.text_path_controls(ui);
+                    });
+                    ui.separator();
+                    ui.menu_button("Стили типографики",|ui|{
+                        for preset in [
+                            super::text_studio::TextPreset::Display,
+                            super::text_studio::TextPreset::Heading,
+                            super::text_studio::TextPreset::Subheading,
+                            super::text_studio::TextPreset::Body,
+                            super::text_studio::TextPreset::Caption,
+                            super::text_studio::TextPreset::Technical,
+                            super::text_studio::TextPreset::Quote,
+                        ]{
+                            if ui.button(preset.label()).clicked(){
+                                self.run_text_preset(preset);ui.close_menu();
+                            }
+                        }
+                    });
+                });
+                ui.menu_button("Композиции",|ui|{
+                    ui.set_min_width(275.0);
+                    self.pattern_studio_panel(ui);
+                });
+                ui.menu_button("Эффекты",|ui|{
+                    ui.set_min_width(285.0);
+                    self.vector_effects_panel(ui);
+                });
+                ui.menu_button("Цвет",|ui|{
+                    ui.set_min_width(330.0);
+                    egui::ScrollArea::vertical().max_height(590.0).show(ui,|ui|{
+                        self.color_studio_panel(ui);
+                    });
+                });
                 ui.menu_button("Макет",|ui|{
+                    ui.menu_button("Страницы документа",|ui|{
+                        ui.label(format!("Страниц: {} / максимум 64",self.doc.page_count()));
+                        for index in 0..self.doc.page_count(){
+                            let name=self.doc.page_title(index).unwrap_or("Страница").to_string();
+                            if ui.selectable_label(index==self.doc.active_page_index,
+                                format!("{} — {}",index+1,name)).clicked(){
+                                self.navigate_page(index);ui.close_menu();
+                            }
+                        }
+                        ui.separator();
+                        if ui.button("+ Пустая страница").clicked(){
+                            self.create_page(false);ui.close_menu();
+                        }
+                        if ui.button("Дублировать текущую страницу").clicked(){
+                            self.create_page(true);ui.close_menu();
+                        }
+                        if ui.add_enabled(self.doc.page_count()>1,
+                            egui::Button::new("Удалить текущую страницу")).clicked(){
+                            self.remove_current_page();ui.close_menu();
+                        }
+                    });
+                    ui.separator();
                     if ui.button("A0 — 841×1189 мм").clicked(){self.page_size(841.0,1189.0);ui.close_menu();}
                     if ui.button("A2 — 420×594 мм").clicked(){self.page_size(420.0,594.0);ui.close_menu();}
                     if ui.button("A4 — 210×297 мм").clicked(){self.page_size(210.0,297.0);ui.close_menu();}
@@ -161,6 +286,23 @@ impl Editor {
                         }
                     });
                     ui.separator();
+                    ui.label(RichText::new("СОСТАВНЫЕ КОНТУРЫ (EVEN-ODD)").strong());
+                    ui.small("Без сваривания: кривые сохраняют исходную геометрию, а пересечения меняют правило заливки.");
+                    let selected_count=self.selection_ids().len();
+                    if ui.add_enabled(selected_count>=2,
+                        egui::Button::new("Объединить контуры (Combine)")).clicked(){
+                        self.combine_selected_contours();ui.close_menu();
+                    }
+                    let one_compound=if selected_count==1{
+                        self.selected.and_then(|id|self.doc.objects.iter()
+                            .find(|o|o.id==id)).is_some_and(|o|
+                                matches!(o.shape,opencorel_core::Shape::CompoundPath{..}))
+                    }else{false};
+                    if ui.add_enabled(one_compound,
+                        egui::Button::new("Разделить контуры (Break Apart)")).clicked(){
+                        self.break_apart_selected_contour();ui.close_menu();
+                    }
+                    ui.separator();
                     ui.label("Результат: редактируемые контуры.");
                     ui.label("Ctrl+Z возвращает обе фигуры.");
                 });
@@ -182,10 +324,47 @@ impl Editor {
                     ui.small("Экспорт: SVG/PDF. Просмотр на холсте пока предварительный.");
                 });
                 ui.menu_button("Объект",|ui|{
+                    ui.menu_button("Библиотека фигур — 93",|ui|{
+                        ui.set_min_width(320.0);
+                        self.smart_shape_picker(ui);
+                    });
+                    ui.separator();
                     ui.label(RichText::new("ГРУППЫ").strong());
                     if ui.button("Центрировать по листу").clicked(){
                         self.center_selection_on_page();ui.close_menu();
                     }
+                    ui.menu_button("Выравнивание и распределение",|ui|{
+                        use opencorel_core::{Alignment,Distribution};
+                        let count=self.selection_ids().len();
+                        ui.label("Выравнивание по общему габариту выделения");
+                        ui.add_enabled_ui(count>=2,|ui|{
+                            for (title,mode) in [
+                                ("По левому краю",Alignment::Left),
+                                ("По центру X",Alignment::CenterX),
+                                ("По правому краю",Alignment::Right),
+                                ("По верхнему краю",Alignment::Top),
+                                ("По центру Y",Alignment::CenterY),
+                                ("По нижнему краю",Alignment::Bottom),
+                            ]{
+                                if ui.button(title).clicked(){
+                                    self.align_selection_precise(mode);ui.close_menu();
+                                }
+                            }
+                        });
+                        ui.separator();
+                        ui.label("Равные интервалы между центрами объектов");
+                        ui.add_enabled_ui(count>=3,|ui|{
+                            if ui.button("По горизонтали").clicked(){
+                                self.distribute_selection_precise(Distribution::HorizontalCenters);
+                                ui.close_menu();
+                            }
+                            if ui.button("По вертикали").clicked(){
+                                self.distribute_selection_precise(Distribution::VerticalCenters);
+                                ui.close_menu();
+                            }
+                        });
+                        ui.small("Ctrl+Z отменяет выравнивание одним действием.");
+                    });
                     if ui.button("Группировать       Ctrl+G").clicked(){
                         self.group_selection();ui.close_menu();
                     }
@@ -444,6 +623,7 @@ impl Editor {
                             Tool::Ellipse=>"F7",
                             Tool::Line=>"L",
                             Tool::Polygon=>"P",
+                            Tool::Smart=>"S", 
                         }))
                         .on_hover_text(productivity::tool_hint(self.tool));
                 }
@@ -618,6 +798,11 @@ impl Editor {
     }
 
     fn inspector_properties(&mut self,ui:&mut egui::Ui){
+        if self.tool==Tool::Smart{
+            ui.heading("Профессиональные фигуры");
+            self.smart_shape_picker(ui);
+            return;
+        }
         if self.tool==Tool::Freehand{
             ui.heading("Свободное рисование");
             ui.label("Удерживайте кнопку мыши и ведите линию. После отпускания появится редактируемая кривая Безье.");
@@ -684,6 +869,12 @@ impl Editor {
                         }).unwrap_or(0);
                     if editable_kind!=0{
                         ui.separator();
+                        if editable_kind==1 &&
+                            ui.button("Ломаную → Безье (точно)")
+                                .on_hover_text("Без сглаживания: каждый прямой сегмент остаётся геометрически прямым")
+                                .clicked(){
+                            self.convert_selected_polyline_exact();
+                        }
                         ui.label("Упрощение и сглаживание");
                         ui.horizontal(|ui|{
                             ui.label("Допуск, мм");
@@ -710,7 +901,7 @@ impl Editor {
             if self.selection_ids().len()==2{
                 use opencorel_core::path_topology::JoinMode;
                 ui.separator();
-                ui.label("Соединить две выделенные кривые");
+                ui.label("Соединить две открытые кривые или ломаные");
                 ui.small("V → Shift+щелчок по второй кривой → F10");
                 ui.horizontal(|ui|{
                     ui.label("Допуск сшивки, мм");
@@ -725,7 +916,7 @@ impl Editor {
                             tolerance_mm:self.join_tolerance_mm});
                     }
                     if ui.button("Сшить плавно")
-                        .on_hover_text("Свести узлы, выровнять соседние касательные и сохранить гладкость")
+                        .on_hover_text("Только для кривых Безье: выровнять касательные и сохранить гладкость")
                         .clicked(){
                         self.join_selected_beziers(JoinMode::SmoothSnap{
                             tolerance_mm:self.join_tolerance_mm});
@@ -759,11 +950,16 @@ impl Editor {
                         self.remove_active_node();
                     }
                     let can_split=self.doc.objects.iter().find(|o|o.id==id)
-                        .is_some_and(|o|matches!((&o.shape,address),
+                        .is_some_and(|o|match (&o.shape,address){
                             (opencorel_core::Shape::Bezier{segments,closed:false,..},
-                             opencorel_core::node_edit::NodeAddress::BezierEnd(i))
-                                if i+1<segments.len()));
-                    if can_split && ui.button("Разрезать кривую в этом узле")
+                             opencorel_core::node_edit::NodeAddress::BezierEnd(i))=>
+                                i.checked_add(1).is_some_and(|n|n<segments.len()),
+                            (opencorel_core::Shape::Polyline{points,closed:false},
+                             opencorel_core::node_edit::NodeAddress::Polyline(i))=>
+                                i>0 && i.checked_add(1).is_some_and(|n|n<points.len()),
+                            _=>false,
+                        });
+                    if can_split && ui.button("Разрезать контур в этом узле")
                         .on_hover_text("Создаёт два отдельных открытых контура с общей конечной точкой")
                         .clicked(){
                         self.split_selected_bezier();
@@ -845,6 +1041,12 @@ impl Editor {
             ui.small("F10 — узлы. Стрелки — сдвиг. Ctrl+Z — отмена.");
             ui.separator();
         }
+        if self.selection_is_text_plus_guide(){
+            ui.collapsing("Текст по кривой — профессиональный инструмент",|ui|{
+                self.text_path_controls(ui);
+            });
+            ui.separator();
+        }
         let Some(id)=self.selected else{
             ui.heading("Свойства объекта");
             ui.label("Щёлкните по объекту инструментом «Выделение» или выберите его во вкладке «Объекты».");
@@ -915,6 +1117,27 @@ impl Editor {
                 }
             }
         });
+        // Text Studio is a batch action: it operates on the selected set,
+        // not only the single object currently shown in this inspector.
+        let has_text_selection=self.selection_ids().iter().any(|selected_id|
+            self.doc.objects.iter().any(|o|
+                o.id==*selected_id&&matches!(o.shape,Shape::Text{..})));
+        if has_text_selection{
+            ui.collapsing("Мастерская текста — 30 инструментов",|ui|{
+                self.text_studio_panel(ui);
+            });
+        }
+        if !self.selection_ids().is_empty(){
+            ui.collapsing("Композиции — 7 массивов и розеток",|ui|{
+                self.pattern_studio_panel(ui);
+            });
+            ui.collapsing("Векторные эффекты — 9 инструментов",|ui|{
+                self.vector_effects_panel(ui);
+            });
+            ui.collapsing("Студия цвета — 16 гармоний",|ui|{
+                self.color_studio_panel(ui);
+            });
+        }
         ui.separator();
         // Images may contain tens of megabytes of Base64. Never clone the
         // whole object per GUI frame just to show a few numeric fields.
@@ -1363,6 +1586,70 @@ impl Editor {
     }
 
     fn inspector_page(&mut self,ui:&mut egui::Ui){
+        ui.heading("Страницы документа");
+        ui.label(format!("Страница {} из {}",
+            self.doc.active_page_index+1,self.doc.page_count()));
+        let entries:Vec<_>=(0..self.doc.page_count()).map(|index|{
+            let label=self.doc.page_title(index).unwrap_or("Страница").to_owned();
+            let dims=self.doc.page_dimensions(index).unwrap_or((0.,0.));
+            (index,label,dims)
+        }).collect();
+        egui::ScrollArea::vertical()
+            .id_salt("pages_list")
+            .max_height(190.0).show(ui,|ui|{
+                for (index,label,(w,h)) in entries{
+                    let title=format!("{} — {}  ({w:.0}×{h:.0} мм)",
+                        index+1,label);
+                    if ui.selectable_label(self.doc.active_page_index==index,title).clicked(){
+                        self.navigate_page(index);
+                    }
+                }
+            });
+        ui.horizontal_wrapped(|ui|{
+            if ui.button("+ Страница").clicked(){self.create_page(false);}
+            if ui.button("Дублировать").clicked(){self.create_page(true);}
+            if ui.add_enabled(self.doc.page_count()>1,
+                egui::Button::new("Удалить")).clicked(){self.remove_current_page();}
+        });
+        ui.horizontal_wrapped(|ui|{
+            if ui.add_enabled(self.doc.active_page_index>0,
+                egui::Button::new("← Ранее")).clicked(){self.shift_current_page(false);}
+            if ui.add_enabled(self.doc.active_page_index+1<self.doc.page_count(),
+                egui::Button::new("Позднее →")).clicked(){self.shift_current_page(true);}
+        });
+        if !self.page_rename_mode{
+            ui.horizontal(|ui|{
+                ui.label(format!("Название: {}",self.doc.active_page_title));
+                if ui.small_button("Изменить").clicked(){
+                    self.page_name_edit=self.doc.active_page_title.clone();
+                    self.page_rename_mode=true;
+                }
+            });
+        }else{
+            ui.label("Новое имя страницы");
+            ui.text_edit_singleline(&mut self.page_name_edit);
+            ui.horizontal(|ui|{
+                if ui.button("Применить").clicked(){
+                    let next=self.page_name_edit.clone();
+                    self.rename_current_page(&next);
+                }
+                if ui.button("Отмена").clicked(){self.page_rename_mode=false;}
+            });
+        }
+        ui.horizontal(|ui|{
+            if ui.small_button("Все SVG").on_hover_text("Экспорт всех страниц в отдельные SVG-файлы").clicked(){
+                self.export_all_pages_dialog("svg");
+            }
+            if ui.small_button("Все PDF").on_hover_text("Экспорт по одному RGB PDF на страницу").clicked(){
+                self.export_all_pages_dialog("pdf");
+            }
+        });
+        ui.small("Страницы хранят собственные объекты, слои, направляющие и размеры.");
+        ui.collapsing("Заменить фирменный цвет во всех страницах",|ui|{
+            self.color_studio_panel(ui);
+        });
+        ui.small("Экспорт PDF из меню «Файл» объединяет все страницы в один векторный документ.");
+        ui.separator();
         ui.heading("Параметры листа");
         ui.label("Наименование документа");
         let mut name=self.doc.name.clone();
@@ -1438,6 +1725,19 @@ impl Editor {
         });
         ui.label("Оранжевая рамка — только экранная подсказка, в файл не выводится.");
         ui.separator();
+        ui.heading("Печатный лист SVG");
+        ui.horizontal(|ui|{
+            ui.label("Вылет, мм");
+            ui.add(egui::DragValue::new(&mut self.print_bleed_mm)
+                .speed(0.25).range(0.0..=25.0));
+        });
+        ui.checkbox(&mut self.print_crop_marks,"Печатать метки реза");
+        if ui.button("Экспортировать печатный SVG...").clicked(){
+            self.export_print_sheet_dialog();
+        }
+        ui.small("Вылеты показывают только рисунок, уже выходящий за границы листа; края автоматически не растягиваются.");
+        ui.small("Отдельный файл RGB SVG, без PDF/X и CMYK. Исходный .kdr не меняется.");
+        ui.separator();
         ui.heading("Предпечатная проверка");
         ui.horizontal(|ui|{
             ui.label("Порог DPI для фото");
@@ -1445,7 +1745,7 @@ impl Editor {
                 .speed(5.0).range(30.0..=600.0));
         });
         if ui.button("Проверить макет").clicked(){self.run_preflight();}
-        ui.label("Один редактируемый лист. Многостраничность — следующий этап.");
+        ui.label("Многостраничные проекты сохраняются в KDR. SVG/PDF в обычном экспорте содержат только активную страницу.");
     }
 
     pub(super) fn workspace_footer(&mut self,ctx:&egui::Context){
@@ -1469,8 +1769,27 @@ impl Editor {
         });
         egui::TopBottomPanel::bottom("page_navigator").exact_height(29.0).show(ctx,|ui|{
             ui.horizontal(|ui|{
-                ui.label(RichText::new("Страница 1 из 1").strong())
-                    .on_hover_text("Многостраничные проекты пока не реализованы.");
+                if ui.add_enabled(self.doc.active_page_index>0,
+                    egui::Button::new("◀")).on_hover_text("Предыдущая страница").clicked(){
+                    self.navigate_page(self.doc.active_page_index-1);
+                }
+                ui.menu_button(format!("Страница {} из {}",
+                    self.doc.active_page_index+1,self.doc.page_count()),|ui|{
+                    for i in 0..self.doc.page_count(){
+                        let name=self.doc.page_title(i).unwrap_or("Страница").to_owned();
+                        if ui.selectable_label(i==self.doc.active_page_index,
+                            format!("{} — {}",i+1,name)).clicked(){
+                            self.navigate_page(i);ui.close_menu();
+                        }
+                    }
+                });
+                if ui.add_enabled(self.doc.active_page_index+1<self.doc.page_count(),
+                    egui::Button::new("▶")).on_hover_text("Следующая страница").clicked(){
+                    self.navigate_page(self.doc.active_page_index+1);
+                }
+                if ui.small_button("+").on_hover_text("Добавить пустую страницу").clicked(){
+                    self.create_page(false);
+                }
                 ui.separator();
                 ui.label(RichText::new("ЦВЕТА").strong().small());
                 for swatch in SWATCHES.iter().take(14){

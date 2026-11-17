@@ -7,9 +7,13 @@ use std::{collections::{HashSet,BTreeMap}, fs, io::{self, Write}, path::Path};
 pub mod svg_import;
 pub mod kdr;
 pub mod preflight;
+pub mod print_sheet;
+pub mod pages;
+pub mod smart_shapes;
 pub mod transform;
 pub mod node_edit;
 pub mod path_topology;
+pub mod compound_ops;
 pub mod freehand;
 pub mod guides;
 pub mod offset;
@@ -263,12 +267,21 @@ pub struct Document {
     /// Optional field keeps older .kdr documents compatible.
     #[serde(default,skip_serializing_if="Vec::is_empty")]
     pub guides:Vec<guides::Guide>,
+    /// Per-page persistent storage. The active slot is an empty placeholder;
+    /// active geometry remains in the legacy top-level fields.
+    #[serde(default,skip_serializing_if="Vec::is_empty")]
+    pub page_slots:Vec<pages::StoredPage>,
+    #[serde(default,skip_serializing_if="pages::is_page_zero")]
+    pub active_page_index:usize,
+    #[serde(default="pages::default_page_title")]
+    pub active_page_title:String,
 }
 impl Default for Document {
     fn default() -> Self {
         Self { schema_version:SCHEMA_VERSION, name:"Новый макет".into(),
             page:Page {width_mm:841.0,height_mm:594.0},objects:Vec::new(),next_id:1,
-            layers:default_layers(),next_layer_id:default_next_layer_id(),clip_links:Vec::new(),appearances:BTreeMap::new(),guides:Vec::new() }
+            layers:default_layers(),next_layer_id:default_next_layer_id(),clip_links:Vec::new(),appearances:BTreeMap::new(),guides:Vec::new(),
+            page_slots:Vec::new(),active_page_index:0,active_page_title:pages::default_page_title() }
     }
 }
 
@@ -297,6 +310,7 @@ impl Document {
                 +obj.style.fill.len()+obj.style.stroke.len()+obj.name.len()+shape_bytes
                 +obj.node_modes.len()*std::mem::size_of::<node_edit::NodeModeBinding>());
         }
+        total=total.saturating_add(self.inactive_size_bytes());
         total.saturating_add(self.guides.len()*std::mem::size_of::<guides::Guide>())
             .saturating_add(self.clip_links.len()*std::mem::size_of::<ClipLink>())
             .saturating_add(self.appearances.iter().map(|(_,a)|
@@ -542,6 +556,7 @@ impl Document {
     }
     pub fn validate(&self)->Result<(),String>{
         if self.schema_version!=SCHEMA_VERSION {return Err("Unknown document schema".into());}
+        self.validate_pages()?;
         guides::validate(&self.guides)?;
         if ![self.page.width_mm,self.page.height_mm].iter().all(|v|v.is_finite() && (1.0..=100_000.0).contains(v)) {
             return Err("Invalid page dimensions".into());

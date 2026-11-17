@@ -5,10 +5,14 @@ mod workspace;
 mod tool_dock;
 mod ui_theme;
 mod productivity;
+mod starter_templates;
+mod page_commands;
+mod array_commands;
 use opencorel_core::transform;
 use opencorel_core::node_edit::{self,NodeAddress};
 mod node_interaction;
 mod boolean_commands;
+mod compound_commands;
 mod clip_commands;
 mod masked_canvas;
 mod appearance_commands;
@@ -18,6 +22,13 @@ mod raster_preview;
 mod compound_render;
 mod text_preview;
 mod text_edit_ops;
+mod text_studio;
+mod pattern_studio;
+mod vector_effects;
+mod color_studio;
+mod smart_shape_studio;
+mod smart_shape_catalog;
+mod text_path_commands;
 mod bezier_preview;
 mod bezier_pen;
 mod snap_targets;
@@ -34,7 +45,7 @@ use raster_preview::RasterCache;
 use workspace::InspectorTab;
 
 #[derive(Clone,Copy,PartialEq)]
-enum Tool { Select, Nodes, Rect, Ellipse, Text, Curve, Freehand, Line, Polygon }
+enum Tool { Select, Nodes, Rect, Ellipse, Text, Curve, Freehand, Line, Polygon, Smart }
 #[derive(Clone,Copy,Debug,PartialEq,Eq)]
 enum ResizeCorner{TopLeft,TopRight,BottomLeft,BottomRight}
 impl ResizeCorner{
@@ -121,6 +132,43 @@ struct Editor{
     freehand_smoothness:f32,
     freehand_closed:bool,
     refit_tolerance_mm:f32,
+    array_columns:u32,
+    array_rows:u32,
+    array_gap_x_mm:f32,
+    array_gap_y_mm:f32,
+    pattern_copies:u32,
+    pattern_radius_mm:f32,
+    pattern_step_mm:f32,
+    pattern_amplitude_mm:f32,
+    pattern_cycles:f32,
+    pattern_start_angle:f32,
+    pattern_sweep_angle:f32,
+    pattern_rotate_objects:bool,
+    effect_offset_x_mm:f32,
+    effect_offset_y_mm:f32,
+    effect_depth:u32,
+    effect_width_mm:f32,
+    effect_opacity:f32,
+    effect_primary:String,
+    effect_secondary:String,
+    palette_base_color:String,
+    palette_find_color:String,
+    palette_replacement_color:String,
+    palette_use_stroke:bool,
+    palette_replace_fill:bool,
+    palette_replace_stroke:bool,
+    palette_replace_gradients:bool,
+    palette_match_count:Option<usize>,
+    smart_kind:opencorel_core::smart_shapes::SmartShape,
+    smart_search:String,
+    smart_inset:f32,
+    smart_detail:u8,
+    smart_rotation_degrees:f32,
+    smart_width_mm:f32,
+    smart_height_mm:f32,
+    text_path_start_mm:f32,
+    text_path_shift_mm:f32,
+    text_path_reverse:bool,
     active_layer:u64,
     pan:Vec2,
     undo:Vec<Document>,
@@ -169,14 +217,20 @@ struct Editor{
     font_search:String,
     text_find:String,
     text_replacement:String,
+    text_studio_wrap_columns:u32,
+    text_studio_indent_spaces:u32,
     inline_text:Option<InlineTextEdit>,
     proof_dpi:u32,
     keep_bitmap_ratio:bool,
     show_preflight:bool,
+    page_name_edit:String,
+    page_rename_mode:bool,
     preflight_lines:Vec<String>,
     minimum_image_dpi:f32,
     show_safe_area:bool,
     safe_margin_mm:f32,
+    print_bleed_mm:f32,
+    print_crop_marks:bool,
     internal_clipboard:Vec<Object>,
     paste_number:usize,
     show_welcome:bool,
@@ -208,6 +262,26 @@ impl Default for Editor{
             freehand_precision_px:2.0,freehand_smoothness:0.85,
             freehand_closed:false,
             refit_tolerance_mm:0.8,
+            array_columns:3,array_rows:2,
+            array_gap_x_mm:5.0,array_gap_y_mm:5.0,
+            pattern_copies:12,pattern_radius_mm:50.0,pattern_step_mm:25.0,
+            pattern_amplitude_mm:12.0,pattern_cycles:1.0,
+            pattern_start_angle:0.0,pattern_sweep_angle:360.0,
+            pattern_rotate_objects:false,
+            effect_offset_x_mm:3.0,effect_offset_y_mm:3.0,
+            effect_depth:8,effect_width_mm:2.0,effect_opacity:0.65,
+            effect_primary:"#192539".into(),effect_secondary:"#32CFB4".into(),
+            palette_base_color:"#447BD4".into(),
+            palette_find_color:"#FFFFFF".into(),
+            palette_replacement_color:"#000000".into(),
+            palette_use_stroke:false,palette_replace_fill:true,
+            palette_replace_stroke:true,palette_replace_gradients:true,
+            palette_match_count:None,
+            smart_kind:opencorel_core::smart_shapes::SmartShape::Star5,
+            smart_search:String::new(),
+            smart_inset:0.42,smart_detail:8,smart_rotation_degrees:0.0,
+            smart_width_mm:60.0,smart_height_mm:60.0,
+            text_path_start_mm:0.0,text_path_shift_mm:0.0,text_path_reverse:false,
             active_layer:1,pan:Vec2::ZERO,
             undo:Vec::new(),redo:Vec::new(),
             inspector_tab:InspectorTab::Objects,show_inspector:true,
@@ -232,11 +306,15 @@ impl Default for Editor{
             appearance_gradient_angle:0.0,appearance_dash_mm:0.0,
             appearance_cap:0,appearance_join:0,
             custom_pivot:false,pivot_x:0.0,pivot_y:0.0,
-            text_outliner:TextOutliner::new(),text_preview:TextPreview::default(),font_search:String::new(),text_find:String::new(),text_replacement:String::new(),inline_text:None,proof_dpi:96,
+            text_outliner:TextOutliner::new(),text_preview:TextPreview::default(),font_search:String::new(),text_find:String::new(),text_replacement:String::new(),
+            text_studio_wrap_columns:48,text_studio_indent_spaces:4,
+            inline_text:None,proof_dpi:96,
             keep_bitmap_ratio:true,
             show_preflight:false,preflight_lines:Vec::new(),
+            page_name_edit:String::new(),page_rename_mode:false,
             minimum_image_dpi:150.0,
             show_safe_area:false,safe_margin_mm:5.0,
+            print_bleed_mm:3.0,print_crop_marks:true,
             internal_clipboard:Vec::new(),paste_number:0,
             show_welcome:true,toolbox_expanded:false,resize_drag:None,
             resize_drag_base:None,resize_drag_checkpointed:false,
@@ -676,7 +754,8 @@ impl Editor{
             self.compound_cache.clear();
             self.bezier_preview.clear();
             self.raster_cache.clear();
-            self.selected=None;self.multi_selected.clear();
+            self.selected=None;self.multi_selected.clear();self.active_layer=1;
+            self.page_rename_mode=false;
             self.curve_draft=None;self.curve_start=None;
             self.curve_resumed=false;
             self.curve_outgoing=None;self.curve_drag_anchor=None;
@@ -699,7 +778,8 @@ impl Editor{
             self.vector_cache.clear();
             self.bezier_preview.clear();
             self.raster_cache.clear();
-            self.selected=None;self.multi_selected.clear();
+            self.selected=None;self.multi_selected.clear();self.active_layer=1;
+            self.page_rename_mode=false;
             self.curve_draft=None;self.curve_start=None;
             self.curve_resumed=false;
             self.curve_outgoing=None;self.curve_drag_anchor=None;
@@ -931,6 +1011,72 @@ impl Editor{
             };
         }
     }
+    /// Export each page as its own numbered vector file, without touching
+    /// the native KDR and without silently dropping inactive pages.
+    fn export_all_pages_dialog(&mut self,ext:&str){
+        if !matches!(ext,"svg"|"pdf"){return;}
+        let mut documents=Vec::with_capacity(self.doc.page_count());
+        for page_index in 0..self.doc.page_count(){
+            match self.doc.page_document(page_index){
+                Ok(doc)=>documents.push(doc),
+                Err(e)=>{
+                    self.status=format!("Ошибка страницы {}: {e}",page_index+1);
+                    return;
+                }
+            }
+        }
+        let Some(folder)=rfd::FileDialog::new()
+            .set_title("Выберите папку для экспорта всех страниц")
+            .pick_folder() else{return;};
+        let stem=std::path::Path::new(&self.file).file_stem()
+            .and_then(|v|v.to_str()).unwrap_or("OpenCorel");
+        let safe_stem:String=stem.chars()
+            .filter(|c|c.is_alphanumeric()||matches!(*c,'-'|'_'|' '))
+            .take(48).collect();
+        let folder_name=if safe_stem.trim().is_empty(){
+            "OpenCorel - страницы".to_string()
+        }else{format!("{safe_stem} - страницы")};
+        let target=folder.join(folder_name);
+        if let Err(e)=std::fs::create_dir(&target){
+            self.status=format!("Не удалось создать отдельную папку экспорта: {e}. Выберите другое место.");
+            return;
+        }
+        for (i,document) in documents.iter().enumerate(){
+            let path=target.join(format!("page-{:03}.{ext}",i+1));
+            if let Err(e)=opencorel_formats::save_document(document,&path){
+                self.status=format!("Экспорт остановлен на странице {}: {e}. Ранее созданные файлы остались в {}",
+                    i+1,target.display());
+                return;
+            }
+        }
+        self.status=format!("Экспортированы все {} страниц в {} ({}). Каждый файл — отдельная страница, не единый PDF.",
+            documents.len(),target.display(),ext.to_uppercase());
+    }
+
+    fn export_print_sheet_dialog(&mut self){
+        let opts=opencorel_core::print_sheet::PrintSheetOptions{
+            bleed_mm:self.print_bleed_mm,
+            crop_marks:self.print_crop_marks,
+        };
+        if let Err(e)=opts.validate(){
+            self.status=format!("Ошибка параметров печатного SVG: {e}");
+            return;
+        }
+        let stem=std::path::Path::new(&self.file).file_stem()
+            .and_then(|s|s.to_str()).unwrap_or("Макет");
+        if let Some(chosen)=rfd::FileDialog::new()
+            .add_filter("SVG для печатного листа",&["svg"])
+            .set_file_name(format!("{stem} - печать.svg"))
+            .save_file(){
+            let path=chosen.with_extension("svg");
+            self.status=match opencorel_core::print_sheet::export_print_svg(
+                &self.doc,&path,opts){
+                Ok(())=>format!("Печатный SVG экспортирован: {}. Цвет RGB, не PDF/X",
+                    path.display()),
+                Err(e)=>format!("Ошибка экспорта печатного SVG: {e}"),
+            };
+        }
+    }
     fn export_dialog(&mut self,ext:&str){
         let stem=std::path::Path::new(&self.file).file_stem()
             .and_then(|s|s.to_str()).unwrap_or("Макет");
@@ -952,8 +1098,14 @@ impl Editor{
                 _=>opencorel_formats::save_document(&self.doc,&path),
             };
             self.status=match result{
-                Ok(())=>format!("Экспортировано: {} ({}).",path.display(),
-                    if ext=="pdf"{"PDF RGB, не PDF/X"}else{"контрольный файл"}),
+                Ok(())=>format!("Экспортировано: {} ({}). {}",
+                    path.display(),
+                    if ext=="pdf"{"PDF RGB, не PDF/X"}else{"контрольный файл"},
+                    if self.doc.page_count()>1{
+                        if ext=="pdf"{format!("Все {} страницы в одном PDF.",self.doc.page_count())}
+                        else{format!("Экспортирована только активная страница {} из {}.",
+                            self.doc.active_page_index+1,self.doc.page_count())}
+                    }else{String::new()}),
                 Err(e)=>format!("Ошибка экспорта: {e}"),
             };
         }
@@ -1286,7 +1438,7 @@ impl Editor{
                         v,response.rect,press,ctx.input(|i|i.modifiers.alt));
                     if !guide_started && v.rect.contains(pos){
                         let p=if matches!(self.tool,
-                            Tool::Line|Tool::Rect|Tool::Ellipse|Tool::Polygon){
+                            Tool::Line|Tool::Rect|Tool::Ellipse|Tool::Polygon|Tool::Smart){
                             self.snap_canvas_point(v.mm(pos),v.scale,None)
                         }else{
                             self.snapped(v.mm(pos))
@@ -1344,6 +1496,7 @@ impl Editor{
                                     }
                                 }
                             }
+                            Tool::Smart=>self.start_smart_creation(p),
                             Tool::Rect|Tool::Ellipse|Tool::Line|Tool::Polygon=>{
                                 let shape=match self.tool {
                                     Tool::Rect=>Shape::Rectangle{x:p.x,y:p.y,w:1.0,h:1.0},
@@ -1372,7 +1525,7 @@ impl Editor{
                         self.node_drag.is_some_and(|(_,address)|!address.is_handle()){
                         self.snap_canvas_point(v.mm(pos),v.scale,self.selected)
                     }else if matches!(self.tool,
-                        Tool::Line|Tool::Rect|Tool::Ellipse|Tool::Polygon) &&
+                        Tool::Line|Tool::Rect|Tool::Ellipse|Tool::Polygon|Tool::Smart) &&
                         self.creation_start.is_some(){
                         self.snap_canvas_point(v.mm(pos),v.scale,
                             self.creation_start.map(|(_,id)|id))
@@ -1394,7 +1547,9 @@ impl Editor{
                         let x=p.x.min(now.x);let y=p.y.min(now.y);
                         let w=(p.x-now.x).abs().max(0.1);
                         let h=(p.y-now.y).abs().max(0.1);
-                        if let Some(obj)=self.doc.get_mut(id){
+                        if self.tool==Tool::Smart{
+                            self.resize_smart_creation(id,Bounds{x,y,w,h});
+                        }else if let Some(obj)=self.doc.get_mut(id){
                             match &mut obj.shape{
                                 Shape::Rectangle{x:rx,y:ry,w:rw,h:rh}|
                                 Shape::Ellipse{x:rx,y:ry,w:rw,h:rh}=>{
@@ -1489,6 +1644,10 @@ impl Editor{
                                 });
                                 if closing{self.curve_finish(true);}
                                 else{self.curve_click(p);}
+                                return;
+                            },
+                            Tool::Smart=>{
+                                self.place_smart_at(p);
                                 return;
                             },
                             Tool::Rect=>Shape::Rectangle{x:p.x,y:p.y,w:60.0,h:40.0},
@@ -1610,6 +1769,9 @@ impl eframe::App for Editor{
             if ctx.input(|i|i.key_pressed(egui::Key::H)){self.change_tool(Tool::Freehand);}
             if ctx.input(|i|i.key_pressed(egui::Key::L)){self.change_tool(Tool::Line);}
             if ctx.input(|i|i.key_pressed(egui::Key::P)){self.change_tool(Tool::Polygon);}
+            if ctx.input(|i|i.key_pressed(egui::Key::S)){
+                self.change_tool(Tool::Smart);
+            }
         }
         self.top_workspace(ctx);
         self.tool_sidebar(ctx);

@@ -1,5 +1,6 @@
 //! Convert system-font shaped text to editable cubic outlines, preserving holes.
 //! Never bundles, exports, or exposes the original font files.
+pub mod path_text;
 use fontdb::{Database,Family,Query,Style as FontStyle,Weight};
 use opencorel_core::{Contour,CubicSegment,Object,Point,Shape,TextAlign};
 use rustybuzz::{self,ttf_parser::{self,OutlineBuilder,GlyphId}};

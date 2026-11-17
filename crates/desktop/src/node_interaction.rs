@@ -275,6 +275,40 @@ impl Editor{
         self.status="Продолжение кривой: добавьте узлы, Enter — завершить, Esc — выйти".into();
     }
 
+    /// Convert a selected polyline into cubic segments without any smoothing
+    /// or approximation. Preserve style, appearance and the original object id.
+    pub(super) fn convert_selected_polyline_exact(&mut self){
+        let Some(id)=self.selected else{
+            self.status="Выберите ломаную для точного преобразования".into();
+            return;
+        };
+        if !self.multi_selected.is_empty() || !self.node_edit_allowed(id){
+            self.status="Выберите одну ломаную на доступном слое".into();
+            return;
+        }
+        let Some(object)=self.doc.objects.iter().find(|o|o.id==id) else{return;};
+        let shape=match node_edit::polyline_to_bezier_exact(&object.shape){
+            Ok(shape)=>shape,
+            Err(reason)=>{
+                self.status=format!("Преобразование отменено: {reason}");
+                return;
+            }
+        };
+        self.checkpoint();
+        if let Some(object)=self.doc.get_mut(id){
+            object.shape=shape;
+            object.node_modes.clear();
+        }
+        self.active_node=None;
+        self.node_drag=None;
+        self.node_drag_checkpointed=false;
+        self.fill_cache.entries.clear();
+        self.vector_cache.clear();
+        self.compound_cache.clear();
+        self.bezier_preview.clear();
+        self.status="Ломаная преобразована в точные кубические сегменты Безье. Ctrl+Z — отмена".into();
+    }
+
     /// Join exactly two selected, same-layer open Bézier objects in one
     /// native path. Refuse mismatched styles, clips, groups and locked layers
     /// rather than silently flattening or dropping object-level properties.
@@ -304,8 +338,18 @@ impl Editor{
             self.status="Сначала удалите связи обтравки для соединяемых контуров".into();
             return;
         }
-        let (joined,modes,report)=match opencorel_core::path_topology::join_beziers(
-            &a.shape,&a.node_modes,&b.shape,&b.node_modes,mode){
+        // Keep polylines as polylines. Converting straight-line artwork to
+        // cubics would silently change its editable object type.
+        let result=match (&a.shape,&b.shape){
+            (Shape::Polyline{..},Shape::Polyline{..})=>
+                opencorel_core::path_topology::join_polylines(
+                    &a.shape,&b.shape,mode).map(|(shape,report)|{
+                    (shape,Vec::new(),report)
+                }),
+            _=>opencorel_core::path_topology::join_beziers(
+                &a.shape,&a.node_modes,&b.shape,&b.node_modes,mode),
+        };
+        let (joined,modes,report)=match result{
             Ok(result)=>result,
             Err(reason)=>{
                 self.status=format!("Соединение отклонено: {reason}");
@@ -334,7 +378,7 @@ impl Editor{
     /// it in z-order. Copy appearance, style and the appropriate node modes.
     pub(super) fn split_selected_bezier(&mut self){
         let Some((id,address))=self.active_node else{
-            self.status="Выберите внутренний узел открытой кривой (F10)".into();
+            self.status="Выберите внутренний узел открытого контура (F10)".into();
             return;
         };
         if !self.node_edit_allowed(id){
@@ -351,15 +395,22 @@ impl Editor{
             return;
         }
         let Some(original)=self.doc.objects.iter().find(|o|o.id==id).cloned() else{return;};
-        let ((left,left_modes),(right,right_modes))=
-            match opencorel_core::path_topology::split_bezier(
-                &original.shape,&original.node_modes,address){
-                Ok(result)=>result,
-                Err(reason)=>{
-                    self.status=format!("Разрезание отклонено: {reason}");
-                    return;
-                }
-            };
+        let split=match &original.shape{
+            Shape::Polyline{..}=>
+                opencorel_core::path_topology::split_polyline(
+                    &original.shape,address).map(|(left,right)|{
+                    ((left,Vec::new()),(right,Vec::new()))
+                }),
+            _=>opencorel_core::path_topology::split_bezier(
+                &original.shape,&original.node_modes,address),
+        };
+        let ((left,left_modes),(right,right_modes))=match split{
+            Ok(result)=>result,
+            Err(reason)=>{
+                self.status=format!("Разрезание отклонено: {reason}");
+                return;
+            }
+        };
         self.checkpoint();
         if let Some(obj)=self.doc.get_mut(id){
             obj.shape=left;
@@ -946,4 +997,141 @@ mod tests{
         editor.doc.objects.last_mut().unwrap().group_id=Some(9);
         assert!(!editor.node_edit_allowed(id));
     }
+    #[test]
+    fn joining_two_polylines_is_undoable_and_preserves_native_vertices(){
+        let mut editor=Editor::default();
+        let a=editor.doc.add(Shape::Polyline{
+            points:vec![Point{x:0.,y:0.},Point{x:10.,y:0.}],
+            closed:false,
+        },Style::default());
+        let b=editor.doc.add(Shape::Polyline{
+            points:vec![Point{x:20.,y:0.},Point{x:10.,y:0.}],
+            closed:false,
+        },Style::default());
+        let before=editor.doc.clone();
+        editor.selected=Some(a);
+        editor.multi_selected=vec![b];
+        editor.join_selected_beziers(
+            opencorel_core::path_topology::JoinMode::Snap{tolerance_mm:0.}
+        );
+        assert_eq!(editor.undo.len(),1);
+        assert!(editor.doc.objects.iter().all(|o|o.id!=b));
+        let Shape::Polyline{points,closed:false}=&editor.doc.objects.iter()
+            .find(|o|o.id==a).unwrap().shape else{panic!("Expected native polyline")};
+        assert_eq!(points,&vec![
+            Point{x:0.,y:0.},Point{x:10.,y:0.},Point{x:20.,y:0.}
+        ]);
+        editor.doc.validate().unwrap();
+        editor.undo();
+        assert_eq!(editor.doc,before);
+        editor.redo();
+        editor.doc.validate().unwrap();
+    }
+    #[test]
+    fn joining_polylines_with_different_styles_does_not_change_document(){
+        let mut editor=Editor::default();
+        let a=editor.doc.add(Shape::Polyline{
+            points:vec![Point{x:0.,y:0.},Point{x:10.,y:0.}],closed:false
+        },Style::default());
+        let mut style=Style::default();
+        style.stroke="#FF0000".into();
+        let b=editor.doc.add(Shape::Polyline{
+            points:vec![Point{x:10.,y:0.},Point{x:20.,y:0.}],closed:false
+        },style);
+        let before=editor.doc.clone();
+        editor.selected=Some(a);
+        editor.multi_selected=vec![b];
+        editor.join_selected_beziers(opencorel_core::path_topology::JoinMode::Bridge);
+        assert_eq!(editor.doc,before);
+        assert!(editor.undo.is_empty());
+    }
+
+    #[test]
+    fn splitting_polyline_creates_two_editable_objects_and_supports_undo(){
+        let mut editor=Editor::default();
+        let id=editor.doc.add(Shape::Polyline{
+            points:vec![
+                Point{x:0.,y:0.},Point{x:10.,y:5.},
+                Point{x:20.,y:10.},Point{x:30.,y:20.},
+            ],
+            closed:false,
+        },Style::default());
+        editor.selected=Some(id);
+        editor.tool=Tool::Nodes;
+        editor.active_node=Some((id,NodeAddress::Polyline(2)));
+        let before=editor.doc.clone();
+        editor.split_selected_bezier();
+        assert_eq!(editor.undo.len(),1);
+        assert_eq!(editor.doc.objects.len(),before.objects.len()+1);
+        let left=editor.doc.objects.iter().find(|obj|obj.id==id).unwrap();
+        let Shape::Polyline{points,..}=&left.shape else{panic!("first piece")};
+        assert_eq!(points.len(),3);
+        let second_id=editor.selected.unwrap();
+        let right=editor.doc.objects.iter().find(|obj|obj.id==second_id).unwrap();
+        let Shape::Polyline{points,..}=&right.shape else{panic!("second piece")};
+        assert_eq!(points.len(),2);
+        assert_eq!(points[0],Point{x:20.,y:10.});
+        editor.doc.validate().unwrap();
+        editor.undo();
+        assert_eq!(editor.doc,before);
+        editor.redo();
+        editor.doc.validate().unwrap();
+    }
+    #[test]
+    fn splitting_endpoint_of_polyline_does_not_create_history(){
+        let mut editor=Editor::default();
+        let id=editor.doc.add(Shape::Polyline{
+            points:vec![Point{x:0.,y:0.},Point{x:10.,y:0.},
+                Point{x:20.,y:0.}],closed:false
+        },Style::default());
+        editor.selected=Some(id);
+        editor.tool=Tool::Nodes;
+        editor.active_node=Some((id,NodeAddress::Polyline(0)));
+        let before=editor.doc.clone();
+        editor.split_selected_bezier();
+        assert_eq!(editor.doc,before);
+        assert!(editor.undo.is_empty());
+    }
+
+    #[test]
+    fn exact_conversion_is_one_undo_step_and_preserves_style(){
+        let mut editor=Editor::default();
+        let id=editor.doc.add(Shape::Polyline{
+            points:vec![Point{x:0.,y:0.},Point{x:10.,y:5.},
+                Point{x:20.,y:8.}],closed:false
+        },Style::default());
+        editor.selected=Some(id);
+        editor.tool=Tool::Nodes;
+        let before=editor.doc.clone();
+        editor.convert_selected_polyline_exact();
+        let after=editor.doc.clone();
+        assert_eq!(editor.undo.len(),1);
+        let converted=editor.doc.objects.iter().find(|o|o.id==id).unwrap();
+        assert!(matches!(converted.shape,Shape::Bezier{..}));
+        assert_eq!(converted.style,before.objects.last().unwrap().style);
+        editor.doc.validate().unwrap();
+        editor.undo();
+        assert_eq!(editor.doc,before);
+        editor.redo();
+        assert_eq!(editor.doc,after);
+    }
+    #[test]
+    fn invalid_or_locked_conversion_has_no_history(){
+        let mut editor=Editor::default();
+        let id=editor.doc.add(Shape::Polyline{
+            points:vec![Point{x:0.,y:0.},Point{x:10.,y:5.}],
+            closed:false,
+        },Style::default());
+        editor.selected=Some(id);
+        editor.doc.layers[0].locked=true;
+        let before=editor.doc.clone();
+        editor.convert_selected_polyline_exact();
+        assert_eq!(editor.doc,before);
+        assert!(editor.undo.is_empty());
+        editor.doc.layers[0].locked=false;
+        editor.multi_selected.push(id);
+        editor.convert_selected_polyline_exact();
+        assert!(editor.undo.is_empty());
+    }
+
 }

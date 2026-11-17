@@ -283,6 +283,92 @@ pub fn move_node_with_modes(shape:&mut Shape,address:NodeAddress,
     }
     Ok(())
 }
+/// Convert a native polyline to exactly the same geometric trace in cubic form.
+/// Each line is represented by cubic controls at one and two thirds.
+/// Closed paths retain their implicit closing edge; no smoothing is applied.
+/// The operation is pure, allowing callers to checkpoint only on success.
+pub fn polyline_to_bezier_exact(shape:&Shape)->Result<Shape,String>{
+    let Shape::Polyline{points,closed}=shape else{
+        return Err("Select an editable polyline".into());
+    };
+    if points.len()<2 || (*closed && points.len()<3){
+        return Err("Polyline does not contain enough vertices".into());
+    }
+    if points.len()>10_001{
+        return Err("Exact conversion is limited to 10,000 cubic segments".into());
+    }
+    if points.iter().any(|p|!valid(*p)){
+        return Err("Polyline contains invalid coordinates".into());
+    }
+    let mut segments=Vec::with_capacity(points.len()-1);
+    for edge in points.windows(2){
+        let a=edge[0];
+        let b=edge[1];
+        let control1=Point{
+            x:(a.x as f64+(b.x as f64-a.x as f64)/3.0) as f32,
+            y:(a.y as f64+(b.y as f64-a.y as f64)/3.0) as f32,
+        };
+        let control2=Point{
+            x:(a.x as f64+2.0*(b.x as f64-a.x as f64)/3.0) as f32,
+            y:(a.y as f64+2.0*(b.y as f64-a.y as f64)/3.0) as f32,
+        };
+        if !valid(control1)||!valid(control2){
+            return Err("Converted controls exceed document bounds".into());
+        }
+        segments.push(CubicSegment{control1,control2,end:b});
+    }
+    Ok(Shape::Bezier{start:points[0],segments,closed:*closed})
+}
+
+#[cfg(test)]
+mod exact_conversion_tests {
+    use super::*;
+    fn pt(x:f32,y:f32)->Point{Point{x,y}}
+    fn approx(a:f32,b:f32)->bool{(a-b).abs()<0.002}
+    #[test]
+    fn exact_polyline_conversion_keeps_line_segments_exact(){
+        let input=Shape::Polyline{
+            points:vec![pt(0.,0.),pt(12.,6.),pt(16.,-4.)],closed:false,
+        };
+        let shape=polyline_to_bezier_exact(&input).unwrap();
+        let Shape::Bezier{start,segments,closed:false}=shape else{panic!("cubic")};
+        assert_eq!(start,pt(0.,0.));
+        assert_eq!(segments.len(),2);
+        assert_eq!(segments[0].end,pt(12.,6.));
+        assert_eq!(segments[1].end,pt(16.,-4.));
+        for (a,s) in [(start,&segments[0]),(segments[0].end,&segments[1])]{
+            for (t,p) in [(1./3.,s.control1),(2./3.,s.control2)]{
+                assert!(approx(p.x,a.x+(s.end.x-a.x)*t));
+                assert!(approx(p.y,a.y+(s.end.y-a.y)*t));
+            }
+        }
+        assert_eq!(input,Shape::Polyline{
+            points:vec![pt(0.,0.),pt(12.,6.),pt(16.,-4.)],closed:false,
+        });
+    }
+    #[test]
+    fn exact_polyline_conversion_preserves_closed_flag(){
+        let shape=polyline_to_bezier_exact(&Shape::Polyline{
+            points:vec![pt(0.,0.),pt(10.,0.),pt(10.,10.)],closed:true,
+        }).unwrap();
+        let Shape::Bezier{segments,closed,..}=shape else{panic!()};
+        assert!(closed);
+        assert_eq!(segments.len(),2);
+    }
+    #[test]
+    fn exact_polyline_conversion_rejects_invalid_inputs(){
+        for input in [
+            Shape::Polyline{points:vec![pt(1.,1.)],closed:false},
+            Shape::Polyline{points:vec![pt(1.,1.),pt(2.,2.)],closed:true},
+            Shape::Polyline{points:vec![pt(1.,1.),pt(f32::NAN,2.)],closed:false},
+            Shape::Polyline{points:vec![pt(1.,1.),pt(100_001.,2.)],closed:false},
+            Shape::Rectangle{x:0.,y:0.,w:2.,h:2.},
+        ]{
+            assert!(polyline_to_bezier_exact(&input).is_err());
+        }
+    }
+}
+
 /// Reverse a path in-place while preserving every cubic's geometric trace.
 /// Cubic controls swap order; for compound shapes every contour is reversed.
 pub fn reverse_path(shape:&mut Shape)->Result<(),String>{

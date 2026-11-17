@@ -153,6 +153,90 @@ pub fn join_beziers(
         gap_mm:gap,added_connector:bridged,
     }))
 }
+/// Join two open polylines without flattening or converting their geometry.
+/// The first object retains its start/end identity and its existing vertices.
+/// SmoothSnap is deliberately unsupported: polylines have no cubic handles.
+pub fn join_polylines(
+    first:&Shape,second:&Shape,mode:JoinMode
+)->Result<(Shape,JoinReport),String>{
+    fn vertices(shape:&Shape)->Result<&[Point],String>{
+        match shape{
+            Shape::Polyline{points,closed:false} if points.len()>=2=>{
+                if points.iter().any(|p|!valid(*p)){
+                    return Err("Polyline contains invalid coordinates".into());
+                }
+                Ok(points)
+            },
+            _=>Err("Select two open polylines with at least two vertices each".into())
+        }
+    }
+    let a=vertices(first)?;
+    let b=vertices(second)?;
+    let tolerance=match mode{
+        JoinMode::SmoothSnap{..}=>return Err("Smooth joining requires Bézier handles".into()),
+        JoinMode::Snap{tolerance_mm}=>{
+            if !tolerance_mm.is_finite() || !(0.0..=1000.0).contains(&tolerance_mm){
+                return Err("Snap tolerance must be within 0–1000 mm".into());
+            }
+            Some(tolerance_mm)
+        },
+        JoinMode::Bridge=>None,
+    };
+    let mut best=(f32::INFINITY,false,false);
+    for rev_a in [false,true]{
+        for rev_b in [false,true]{
+            let end=if rev_a{a[0]}else{a[a.len()-1]};
+            let start=if rev_b{b[b.len()-1]}else{b[0]};
+            let gap=distance(end,start);
+            if gap<best.0{best=(gap,rev_a,rev_b);}
+        }
+    }
+    let (gap,reverse_a,reverse_b)=best;
+    if !gap.is_finite(){return Err("Polyline endpoint distance is invalid".into());}
+    if tolerance.is_some_and(|t|gap>t){
+        return Err(format!("Endpoints are {:.2} mm apart; adjust nodes or use Bridge",gap));
+    }
+    let needed=a.len().checked_add(b.len())
+        .ok_or("Polyline vertex count overflow")?;
+    if needed>60_000{return Err("Joined polyline exceeds 60,000 vertices".into());}
+    let mut points=a.to_vec();
+    let mut tail=b.to_vec();
+    if reverse_a{points.reverse();}
+    if reverse_b{tail.reverse();}
+    let end=*points.last().expect("validated length");
+    let bridged=matches!(mode,JoinMode::Bridge) && gap>EPSILON_MM;
+    if !bridged{
+        // A snap is a single shared vertex, not two almost-coincident nodes.
+        tail.remove(0);
+    }
+    points.extend(tail);
+    Ok((Shape::Polyline{points,closed:false},JoinReport{
+        reversed_first:reverse_a,reversed_second:reverse_b,
+        gap_mm:gap,added_connector:bridged,
+    }))
+}
+
+/// Split an open polyline at an existing interior vertex. The vertex is
+/// shared by both resulting objects, so the original visual trace is exact.
+pub fn split_polyline(shape:&Shape,cut:NodeAddress)->Result<(Shape,Shape),String>{
+    let Shape::Polyline{points,closed:false}=shape else{
+        return Err("Only an open polyline can be split".into());
+    };
+    let NodeAddress::Polyline(i)=cut else{
+        return Err("Select an interior polyline vertex".into());
+    };
+    if points.len()<3 || i==0 || i>=points.len()-1{
+        return Err("Cannot split at a terminal polyline vertex".into());
+    }
+    if points.len()>60_000 || points.iter().any(|p|!valid(*p)){
+        return Err("Polyline has too many or invalid vertices".into());
+    }
+    Ok((
+        Shape::Polyline{points:points[..=i].to_vec(),closed:false},
+        Shape::Polyline{points:points[i..].to_vec(),closed:false},
+    ))
+}
+
 /// Cut an open Bézier at an existing interior anchor. The cut anchor becomes
 /// both the left end and the right start, so neither resulting path has a
 /// missing segment. Its persistent tangent mode is removed at the seam.
@@ -354,4 +438,75 @@ mod tests{
         let empty=Shape::Bezier{start:p(0.,0.),segments:vec![],closed:false};
         assert!(split_bezier(&empty,&[],NodeAddress::BezierEnd(0)).is_err());
     }
+    fn line(xs:&[(f32,f32)])->Shape{
+        Shape::Polyline{
+            points:xs.iter().map(|(x,y)|p(*x,*y)).collect(),
+            closed:false,
+        }
+    }
+    #[test]
+    fn polyline_snap_preserves_vertex_type_and_removes_duplicate_joint(){
+        let a=line(&[(0.,0.),(10.,0.)]);
+        let b=line(&[(10.,0.),(20.,0.)]);
+        let (joined,report)=join_polylines(&a,&b,JoinMode::Snap{tolerance_mm:0.}).unwrap();
+        assert!(!report.added_connector);
+        assert_eq!(joined,line(&[(0.,0.),(10.,0.),(20.,0.)]));
+    }
+    #[test]
+    fn polyline_snap_reorients_nearest_ends(){
+        let a=line(&[(0.,0.),(10.,0.)]);
+        let b=line(&[(20.,0.),(10.,0.)]);
+        let (joined,report)=join_polylines(&a,&b,JoinMode::Snap{tolerance_mm:0.}).unwrap();
+        assert!(report.reversed_second);
+        assert_eq!(joined,line(&[(0.,0.),(10.,0.),(20.,0.)]));
+    }
+    #[test]
+    fn polyline_bridge_retains_both_endpoints(){
+        let a=line(&[(0.,0.),(10.,0.)]);
+        let b=line(&[(20.,0.),(30.,0.)]);
+        let (joined,report)=join_polylines(&a,&b,JoinMode::Bridge).unwrap();
+        assert!(report.added_connector);
+        assert_eq!(report.gap_mm,10.);
+        assert_eq!(joined,line(&[(0.,0.),(10.,0.),(20.,0.),(30.,0.)]));
+    }
+    #[test]
+    fn polyline_snap_rejects_invalid_input_without_mutating_sources(){
+        let a=line(&[(0.,0.),(10.,0.)]);
+        let b=line(&[(20.,0.),(30.,0.)]);
+        let original=a.clone();
+        for tolerance in [-1.,f32::NAN,f32::INFINITY,1.]{
+            assert!(join_polylines(&a,&b,JoinMode::Snap{
+                tolerance_mm:tolerance
+            }).is_err());
+        }
+        assert!(join_polylines(&a,&b,JoinMode::SmoothSnap{
+            tolerance_mm:100.
+        }).is_err());
+        assert_eq!(a,original);
+        let malformed=line(&[(0.,0.),(f32::NAN,1.)]);
+        assert!(join_polylines(&malformed,&b,JoinMode::Bridge).is_err());
+    }
+
+    #[test]
+    fn polyline_split_preserves_original_visual_trace(){
+        let original=line(&[(0.,0.),(10.,5.),(20.,10.),(30.,20.)]);
+        let (left,right)=split_polyline(&original,NodeAddress::Polyline(2)).unwrap();
+        assert_eq!(left,line(&[(0.,0.),(10.,5.),(20.,10.)]));
+        assert_eq!(right,line(&[(20.,10.),(30.,20.)]));
+        assert_eq!(original,line(&[(0.,0.),(10.,5.),(20.,10.),(30.,20.)]));
+    }
+    #[test]
+    fn polyline_split_rejects_terminal_closed_and_invalid_vertices(){
+        let a=line(&[(0.,0.),(10.,0.),(20.,0.)]);
+        for i in [0,2,3,usize::MAX]{
+            assert!(split_polyline(&a,NodeAddress::Polyline(i)).is_err());
+        }
+        assert!(split_polyline(&a,NodeAddress::BezierStart).is_err());
+        let mut closed=a.clone();
+        if let Shape::Polyline{closed,..}=&mut closed{*closed=true;}
+        assert!(split_polyline(&closed,NodeAddress::Polyline(1)).is_err());
+        let broken=line(&[(0.,0.),(f32::NAN,0.),(20.,0.)]);
+        assert!(split_polyline(&broken,NodeAddress::Polyline(1)).is_err());
+    }
+
 }

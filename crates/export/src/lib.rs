@@ -1,6 +1,7 @@
 //! Preliminary vector PDF export for RGB proofing and customer review.
 //! NOT a PDF/X prepress exporter: no CMYK, output intents, trapping, or bleed.
 pub mod raster_export;
+pub mod multipage_pdf;
 use opencorel_core::Document;
 use std::{fs, io::Write, path::Path};
 
@@ -19,7 +20,10 @@ pub fn pdf_bytes(doc:&Document)->Result<Vec<u8>,String>{
         .map_err(|e|format!("Could not parse document SVG for PDF export: {e}"))?;
     let pdf=svg2pdf::to_pdf(&tree,
         svg2pdf::ConversionOptions::default(),
-        svg2pdf::PageOptions::default())
+        // SVG/CSS pixel geometry is based on 96 DPI. Explicitly convert
+        // those pixels to PDF points (72 per inch) to preserve millimetres.
+        // The svg2pdf default of 72 DPI enlarges physical pages by 4/3.
+        svg2pdf::PageOptions{dpi:96.0})
         .map_err(|e|format!("PDF conversion failed: {e:?}"))?;
     if !pdf.starts_with(b"%PDF-"){
         return Err("PDF exporter returned invalid output".into());
@@ -29,7 +33,9 @@ pub fn pdf_bytes(doc:&Document)->Result<Vec<u8>,String>{
 
 /// Write a temporary PDF in the destination directory and then publish it.
 pub fn export_pdf(doc:&Document,path:impl AsRef<Path>)->Result<(),String>{
-    let bytes=pdf_bytes(doc)?;
+    let bytes=if doc.page_count()>1{
+        multipage_pdf::multipage_pdf_bytes(doc)?
+    }else{pdf_bytes(doc)?};
     let path=path.as_ref();
     let dir=path.parent().filter(|p|!p.as_os_str().is_empty())
         .unwrap_or_else(||Path::new("."));
@@ -51,6 +57,30 @@ mod tests{
         assert!(pdf.len()>100);
         assert!(pdf.starts_with(b"%PDF-"));
         assert!(pdf.windows(5).any(|v|v==b"%%EOF"));
+    }
+    #[test] fn pdf_media_box_matches_physical_millimetres(){
+        let mut doc=Document::default();
+        doc.page.width_mm=210.0;
+        doc.page.height_mm=297.0;
+        doc.add(Shape::Rectangle{x:10.0,y:12.0,w:30.0,h:40.0},
+            Style::default());
+        let bytes=pdf_bytes(&doc).unwrap();
+        let pdf=lopdf::Document::load_mem(&bytes).unwrap();
+        let page_id=*pdf.get_pages().get(&1).unwrap();
+        let page=pdf.get_object(page_id).unwrap().as_dict().unwrap();
+        let media_box=page.get(b"MediaBox")
+            .or_else(|_|{
+                let parent=page.get(b"Parent")?.as_reference()?;
+                pdf.get_object(parent)?.as_dict()?.get(b"MediaBox")
+            }).unwrap().as_array().unwrap();
+        let value=|entry:&lopdf::Object|entry.as_float().unwrap_or_else(|_|
+            entry.as_i64().unwrap() as f32);
+        let width=value(&media_box[2])-value(&media_box[0]);
+        let height=value(&media_box[3])-value(&media_box[1]);
+        assert!((width-210.0*72.0/25.4).abs()<1.0,
+            "A4 width in PDF points: {width}");
+        assert!((height-297.0*72.0/25.4).abs()<1.0,
+            "A4 height in PDF points: {height}");
     }
     #[test] fn clipped_document_exports_pdf(){
         let mut doc=Document::default();
