@@ -401,7 +401,11 @@ mod tests{
         let source=doc.clone();
         generate_effect(&mut doc,&[id],&settings(EffectMode::LongShadow)).unwrap();
         assert_eq!(clean_effect_copies(&mut doc,&[id]).unwrap(),4);
-        assert_eq!(doc,source);
+        assert_eq!(doc.objects,source.objects);
+        assert_eq!(doc.appearances,source.appearances);
+        assert_eq!(doc.clip_links,source.clip_links);
+        assert!(doc.next_id>source.next_id); // IDs are never reused after cleanup.
+        doc.validate().unwrap();
     }
     #[test]
     fn reject_unsupported_raster_and_locked_object_without_mutating(){
