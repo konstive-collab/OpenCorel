@@ -883,8 +883,7 @@ impl Editor{
         };
         if let Some(id)=self.curve_draft{
             let Some(object)=self.doc.objects.iter().find(|o|o.id==id) else{return;};
-            if !self.doc.layer(object.layer_id)
-                .is_some_and(|layer|layer.visible&&!layer.locked){return;}
+            if !self.doc.is_object_editable(id){return;}
             let affects_existing=matches!(&object.shape,Shape::Bezier{segments,..}
                 if segments.last().is_some_and(|last|
                     last.end==anchor && last.control2!=incoming));
