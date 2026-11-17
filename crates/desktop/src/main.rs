@@ -26,6 +26,7 @@ mod text_studio;
 mod pattern_studio;
 mod vector_effects;
 mod color_studio;
+mod smart_shape_studio;
 mod bezier_preview;
 mod bezier_pen;
 mod snap_targets;
@@ -42,7 +43,7 @@ use raster_preview::RasterCache;
 use workspace::InspectorTab;
 
 #[derive(Clone,Copy,PartialEq)]
-enum Tool { Select, Nodes, Rect, Ellipse, Text, Curve, Freehand, Line, Polygon }
+enum Tool { Select, Nodes, Rect, Ellipse, Text, Curve, Freehand, Line, Polygon, Smart }
 #[derive(Clone,Copy,Debug,PartialEq,Eq)]
 enum ResizeCorner{TopLeft,TopRight,BottomLeft,BottomRight}
 impl ResizeCorner{
@@ -156,6 +157,13 @@ struct Editor{
     palette_replace_stroke:bool,
     palette_replace_gradients:bool,
     palette_match_count:Option<usize>,
+    smart_kind:opencorel_core::smart_shapes::SmartShape,
+    smart_search:String,
+    smart_inset:f32,
+    smart_detail:u8,
+    smart_rotation_degrees:f32,
+    smart_width_mm:f32,
+    smart_height_mm:f32,
     active_layer:u64,
     pan:Vec2,
     undo:Vec<Document>,
@@ -264,6 +272,10 @@ impl Default for Editor{
             palette_use_stroke:false,palette_replace_fill:true,
             palette_replace_stroke:true,palette_replace_gradients:true,
             palette_match_count:None,
+            smart_kind:opencorel_core::smart_shapes::SmartShape::Star5,
+            smart_search:String::new(),
+            smart_inset:0.42,smart_detail:8,smart_rotation_degrees:0.0,
+            smart_width_mm:60.0,smart_height_mm:60.0,
             active_layer:1,pan:Vec2::ZERO,
             undo:Vec::new(),redo:Vec::new(),
             inspector_tab:InspectorTab::Objects,show_inspector:true,
@@ -1420,7 +1432,7 @@ impl Editor{
                         v,response.rect,press,ctx.input(|i|i.modifiers.alt));
                     if !guide_started && v.rect.contains(pos){
                         let p=if matches!(self.tool,
-                            Tool::Line|Tool::Rect|Tool::Ellipse|Tool::Polygon){
+                            Tool::Line|Tool::Rect|Tool::Ellipse|Tool::Polygon|Tool::Smart){
                             self.snap_canvas_point(v.mm(pos),v.scale,None)
                         }else{
                             self.snapped(v.mm(pos))
@@ -1478,6 +1490,7 @@ impl Editor{
                                     }
                                 }
                             }
+                            Tool::Smart=>self.start_smart_creation(p),
                             Tool::Rect|Tool::Ellipse|Tool::Line|Tool::Polygon=>{
                                 let shape=match self.tool {
                                     Tool::Rect=>Shape::Rectangle{x:p.x,y:p.y,w:1.0,h:1.0},
@@ -1506,7 +1519,7 @@ impl Editor{
                         self.node_drag.is_some_and(|(_,address)|!address.is_handle()){
                         self.snap_canvas_point(v.mm(pos),v.scale,self.selected)
                     }else if matches!(self.tool,
-                        Tool::Line|Tool::Rect|Tool::Ellipse|Tool::Polygon) &&
+                        Tool::Line|Tool::Rect|Tool::Ellipse|Tool::Polygon|Tool::Smart) &&
                         self.creation_start.is_some(){
                         self.snap_canvas_point(v.mm(pos),v.scale,
                             self.creation_start.map(|(_,id)|id))
@@ -1528,7 +1541,9 @@ impl Editor{
                         let x=p.x.min(now.x);let y=p.y.min(now.y);
                         let w=(p.x-now.x).abs().max(0.1);
                         let h=(p.y-now.y).abs().max(0.1);
-                        if let Some(obj)=self.doc.get_mut(id){
+                        if self.tool==Tool::Smart{
+                            self.resize_smart_creation(id,Bounds{x,y,w,h});
+                        }else if let Some(obj)=self.doc.get_mut(id){
                             match &mut obj.shape{
                                 Shape::Rectangle{x:rx,y:ry,w:rw,h:rh}|
                                 Shape::Ellipse{x:rx,y:ry,w:rw,h:rh}=>{
@@ -1623,6 +1638,10 @@ impl Editor{
                                 });
                                 if closing{self.curve_finish(true);}
                                 else{self.curve_click(p);}
+                                return;
+                            },
+                            Tool::Smart=>{
+                                self.start_smart_creation(p);
                                 return;
                             },
                             Tool::Rect=>Shape::Rectangle{x:p.x,y:p.y,w:60.0,h:40.0},
