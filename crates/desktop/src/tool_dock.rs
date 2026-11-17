@@ -255,7 +255,8 @@ mod tests{
     #[test]
     fn compact_rail_has_only_essential_top_level_tools(){
         assert_eq!(PRIMARY.len(),5);
-        assert_eq!(SHAPES.len(),4);
+        assert_eq!(SHAPES.len(),5);
+        assert!(SHAPES.contains(&Tool::Smart));
         assert!(!PRIMARY.contains(&Tool::Rect));
         assert!(!PRIMARY.contains(&Tool::Ellipse));
         assert!(SHAPES.contains(&Tool::Rect));
