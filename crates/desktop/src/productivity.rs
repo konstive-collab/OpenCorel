@@ -69,10 +69,8 @@ fn plain(fill:&str)->Style{
 impl Editor{
     pub(super) fn copy_selection(&mut self)->bool{
         let ids:HashSet<u64>=self.selection_ids().into_iter().collect();
-        let visible:HashSet<u64>=self.doc.layers.iter()
-            .filter(|layer|layer.visible).map(|l|l.id).collect();
         let chosen:Vec<_>=self.doc.objects.iter().filter(|obj|
-            ids.contains(&obj.id) && visible.contains(&obj.layer_id)).collect();
+            ids.contains(&obj.id)&&self.doc.is_object_visible(obj.id)).collect();
         if chosen.is_empty(){
             self.status="Сначала выделите объекты для копирования".into();
             return false;
@@ -90,11 +88,7 @@ impl Editor{
     }
     pub(super) fn cut_selection(&mut self){
         let selected=self.selection_ids();
-        let editable:HashSet<u64>=self.doc.layers.iter()
-            .filter(|layer|layer.visible&&!layer.locked).map(|l|l.id).collect();
-        if selected.iter().any(|id|self.doc.objects.iter()
-            .find(|obj|obj.id==*id)
-            .map(|obj|!editable.contains(&obj.layer_id)).unwrap_or(true)){
+        if selected.iter().any(|id|!self.doc.is_object_editable(*id)){
             self.status="Нельзя вырезать объекты из заблокированных или скрытых слоёв".into();
             return;
         }
@@ -127,10 +121,8 @@ impl Editor{
     }
     pub(super) fn duplicate_preserving_styles(&mut self){
         let ids:HashSet<u64>=self.selection_ids().into_iter().collect();
-        let editable:HashSet<u64>=self.doc.layers.iter()
-            .filter(|l|l.visible&&!l.locked).map(|l|l.id).collect();
         let copies:Vec<_>=self.doc.objects.iter().filter(|obj|
-            ids.contains(&obj.id)&&editable.contains(&obj.layer_id)).cloned().collect();
+            ids.contains(&obj.id)&&self.doc.is_object_editable(obj.id)).cloned().collect();
         if copies.is_empty(){
             self.status="Выделите редактируемые объекты для дублирования".into();return;
         }
@@ -150,11 +142,9 @@ impl Editor{
             self.status="Для группировки выделите минимум два объекта с Shift".into();return;
         }
         let selected:HashSet<u64>=ids.iter().copied().collect();
-        let editable:HashSet<u64>=self.doc.layers.iter()
-            .filter(|layer|layer.visible&&!layer.locked).map(|layer|layer.id).collect();
         if self.doc.objects.iter().filter(|o|selected.contains(&o.id)).count()!=selected.len()
             || self.doc.objects.iter().filter(|o|selected.contains(&o.id))
-            .any(|o|o.group_id.is_some()||!editable.contains(&o.layer_id)){
+            .any(|o|o.group_id.is_some()||!self.doc.is_object_editable(o.id)){
             self.status="Сначала разгруппируйте прежние группы и разблокируйте слои".into();
             return;
         }
@@ -169,11 +159,9 @@ impl Editor{
         let groups:HashSet<u64>=self.doc.objects.iter()
             .filter(|obj|ids.contains(&obj.id)).filter_map(|obj|obj.group_id).collect();
         if groups.is_empty(){self.status="В выделении нет групп".into();return;}
-        let editable:HashSet<u64>=self.doc.layers.iter()
-            .filter(|l|l.visible&&!l.locked).map(|l|l.id).collect();
         if self.doc.objects.iter().any(|o|o.group_id
             .map(|g|groups.contains(&g)).unwrap_or(false)
-            && !editable.contains(&o.layer_id)){
+            && !self.doc.is_object_editable(o.id)){
             self.status="Группа содержит объект из заблокированного слоя".into();return;
         }
         self.checkpoint();
@@ -238,8 +226,7 @@ impl Editor{
         let Some(id)=self.selected else{return;};
         let Some(index)=self.doc.objects.iter().position(|o|o.id==id) else{return;};
         let obj=&self.doc.objects[index];
-        if !self.doc.layer(obj.layer_id).map(|layer|layer.visible&&!layer.locked)
-            .unwrap_or(false){
+        if !self.doc.is_object_editable(id){
             self.status="Слой заблокирован".into();return;
         }
         if !transform::resizable(&obj.shape){
@@ -295,8 +282,6 @@ impl Editor{
     where F:FnMut(&mut Shape,Point)->Result<(),String>{
         let ids:HashSet<u64>=self.selection_ids().into_iter().collect();
         if ids.is_empty(){self.status="Сначала выберите объект".into();return;}
-        let editable:HashSet<u64>=self.doc.layers.iter()
-            .filter(|l|l.visible&&!l.locked).map(|l|l.id).collect();
         let Some(bounds)=self.selection_bounds() else{return;};
         let center=pivot_override.unwrap_or(Point{
             x:bounds.x+bounds.w*0.5,y:bounds.y+bounds.h*0.5
@@ -312,7 +297,7 @@ impl Editor{
         }
         let mut converted=Vec::new();
         for o in self.doc.objects.iter().filter(|o|ids.contains(&o.id)){
-            if !editable.contains(&o.layer_id){
+            if !self.doc.is_object_editable(o.id){
                 self.status="Выделение содержит объекты из недоступных слоёв".into();return;
             }
             let mut shape=o.shape.clone();
@@ -332,10 +317,8 @@ impl Editor{
     }
     pub(super) fn nudge_selection(&mut self,dx:f32,dy:f32){
         let ids:HashSet<u64>=self.selection_ids().into_iter().collect();
-        let editable:HashSet<u64>=self.doc.layers.iter()
-            .filter(|l|l.visible&&!l.locked).map(|l|l.id).collect();
         if self.doc.objects.iter().any(|o|
-            ids.contains(&o.id)&&!editable.contains(&o.layer_id)){
+            ids.contains(&o.id)&&!self.doc.is_object_editable(o.id)){
             self.status="Сдвиг отменён: в выделении есть заблокированный объект".into();
             return;
         }
