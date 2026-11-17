@@ -11,6 +11,9 @@ const MAX_OBJECTS:usize=100_000;
 const MAX_CLIPS:usize=10_000;
 const MAX_LABEL_BYTES:usize=256;
 
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+pub enum ObjectStackMove{Forward,Backward,Front,Back}
+
 fn bounded_copy_name(name:&str)->String{
     let mut value=format!("Копия — {name}");
     if value.len()>MAX_LABEL_BYTES{
@@ -31,6 +34,94 @@ impl Document{
             o.visible&&!o.locked&&self.layer(o.layer_id)
                 .is_some_and(|l|l.visible&&!l.locked))
     }
+    /// Return IDs that can be edited by the current canvas selection model.
+    pub fn editable_object_ids(&self)->HashSet<u64>{
+        self.objects.iter().filter(|o|self.is_object_editable(o.id))
+            .map(|o|o.id).collect()
+    }
+    /// Reorder selected objects inside one layer. Selected objects retain
+    /// their relative order; whole groups move together. Layer stack order
+    /// remains the primary cross-layer stacking mechanism.
+    pub fn reorder_objects_in_layer(&mut self,ids:&[u64],movement:ObjectStackMove)
+        ->Result<usize,String>{
+        let wanted:HashSet<u64>=ids.iter().copied().collect();
+        if wanted.is_empty(){return Err("Нет выбранных объектов".into());}
+        let chosen:Vec<&Object>=self.objects.iter()
+            .filter(|o|wanted.contains(&o.id)).collect();
+        if chosen.len()!=wanted.len(){
+            return Err("Выделение содержит отсутствующие объекты".into());
+        }
+        if chosen.iter().any(|o|!self.is_object_editable(o.id)){
+            return Err("Порядок нельзя менять у скрытых или заблокированных объектов".into());
+        }
+        let layer_id=chosen[0].layer_id;
+        if chosen.iter().any(|o|o.layer_id!=layer_id){
+            return Err("Сначала переместите выделение в один слой".into());
+        }
+        let groups:HashSet<u64>=chosen.iter().filter_map(|o|o.group_id).collect();
+        for group in groups{
+            if self.objects.iter().filter(|o|o.group_id==Some(group))
+                .any(|o|!wanted.contains(&o.id)){
+                return Err("Для изменения порядка выберите группу целиком".into());
+            }
+        }
+        let mut order:Vec<u64>=self.objects.iter().filter(|o|o.layer_id==layer_id)
+            .map(|o|o.id).collect();
+        let before=order.clone();
+        match movement{
+            ObjectStackMove::Front=>{
+                let mut selected:Vec<u64>=order.iter().copied()
+                    .filter(|id|wanted.contains(id)).collect();
+                order.retain(|id|!wanted.contains(id));
+                order.append(&mut selected);
+            }
+            ObjectStackMove::Back=>{
+                let mut selected:Vec<u64>=order.iter().copied()
+                    .filter(|id|wanted.contains(id)).collect();
+                order.retain(|id|!wanted.contains(id));
+                selected.extend(order);
+                order=selected;
+            }
+            ObjectStackMove::Forward=>{
+                if order.len()>1{
+                    for i in (0..order.len()-1).rev(){
+                        if wanted.contains(&order[i])&&!wanted.contains(&order[i+1]){
+                            order.swap(i,i+1);
+                        }
+                    }
+                }
+            }
+            ObjectStackMove::Backward=>{
+                for i in 1..order.len(){
+                    if wanted.contains(&order[i])&&!wanted.contains(&order[i-1]){
+                        order.swap(i,i-1);
+                    }
+                }
+            }
+        }
+        if order==before{return Ok(0);}
+        let mut layer_orders:HashMap<u64,Vec<u64>>=HashMap::new();
+        layer_orders.insert(layer_id,order);
+        for layer in &self.layers{
+            if layer.id==layer_id{continue;}
+            layer_orders.insert(layer.id,self.objects.iter()
+                .filter(|o|o.layer_id==layer.id).map(|o|o.id).collect());
+        }
+        let mut by_id:HashMap<u64,Object>=std::mem::take(&mut self.objects)
+            .into_iter().map(|o|(o.id,o)).collect();
+        let mut reordered=Vec::with_capacity(by_id.len());
+        for layer in &self.layers{
+            if let Some(ids)=layer_orders.get(&layer.id){
+                for id in ids{
+                    if let Some(object)=by_id.remove(id){reordered.push(object);}
+                }
+            }
+        }
+        reordered.extend(by_id.into_values());
+        self.objects=reordered;
+        Ok(wanted.len())
+    }
+    /// Rename a layer without changing object references or z-order.
     pub fn rename_layer(&mut self,id:u64,name:&str)->Result<(),String>{
         if name.trim().is_empty()||name.len()>MAX_LABEL_BYTES||
             name.chars().any(char::is_control)||!crate::valid_xml_text(name){
@@ -177,6 +268,30 @@ impl Document{
 mod tests{
     use super::*;
     use crate::{Shape,Style,Point};
+    #[test]
+    fn layer_stack_controls_paint_order_and_hit_testing(){
+        let mut doc=Document::default();
+        let base=doc.add(Shape::Rectangle{x:0.,y:0.,w:30.,h:30.},Style::default());
+        let top_layer=doc.add_layer("Top".into());
+        let top=doc.add_to_layer(Shape::Ellipse{x:0.,y:0.,w:30.,h:30.},Style::default(),top_layer);
+        assert_eq!(doc.hit_test(Point{x:15.,y:15.},0.),Some(top));
+        assert_eq!(doc.visible_objects().map(|o|o.id).collect::<Vec<_>>(),vec![base,top]);
+        doc.move_layer_to(top_layer,0).unwrap();
+        assert_eq!(doc.hit_test(Point{x:15.,y:15.},0.),Some(base));
+        assert_eq!(doc.visible_objects().map(|o|o.id).collect::<Vec<_>>(),vec![top,base]);
+    }
+    #[test]
+    fn object_stack_moves_one_step_and_preserves_selection_order(){
+        let mut doc=Document::default();
+        let a=doc.add(Shape::Rectangle{x:0.,y:0.,w:5.,h:5.},Style::default());
+        let b=doc.add(Shape::Rectangle{x:10.,y:0.,w:5.,h:5.},Style::default());
+        let c=doc.add(Shape::Rectangle{x:20.,y:0.,w:5.,h:5.},Style::default());
+        assert_eq!(doc.reorder_objects_in_layer(&[a],ObjectStackMove::Forward).unwrap(),1);
+        assert_eq!(doc.objects.iter().map(|o|o.id).collect::<Vec<_>>(),vec![b,a,c]);
+        doc.reorder_objects_in_layer(&[a,c],ObjectStackMove::Back).unwrap();
+        assert_eq!(doc.objects.iter().map(|o|o.id).collect::<Vec<_>>(),vec![a,c,b]);
+        doc.validate().unwrap();
+    }
     #[test]
     fn legacy_documents_default_object_flags_to_visible_and_unlocked(){
         let mut doc=Document::default();
