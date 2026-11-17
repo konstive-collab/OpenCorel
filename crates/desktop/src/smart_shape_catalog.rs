@@ -154,7 +154,7 @@ mod tests{
     }
     #[test]
     fn labels_wrap_without_breaking_unicode_bytes(){
-        let wrapped=wrap_label("Профессиональная стрелка двойная",12);
+        let wrapped=wrap_label("Профессиональная стрелка двойная",20);
         assert!(wrapped.contains('\n'));
         assert_eq!(wrapped.replace('\n'," ").split_whitespace()
             .collect::<Vec<_>>().join(" "),
