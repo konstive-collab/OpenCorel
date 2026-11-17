@@ -69,8 +69,10 @@ fn plain(fill:&str)->Style{
 impl Editor{
     pub(super) fn copy_selection(&mut self)->bool{
         let ids:HashSet<u64>=self.selection_ids().into_iter().collect();
-        let chosen:Vec<_>=self.doc.objects.iter().filter(|obj|
-            ids.contains(&obj.id)&&self.doc.is_object_visible(obj.id)).collect();
+        // Object Manager can select hidden or locked objects intentionally;
+        // copying is read-only, so preserve the entire selected set.
+        let chosen:Vec<_>=self.doc.objects.iter()
+            .filter(|obj|ids.contains(&obj.id)).collect();
         if chosen.is_empty(){
             self.status="Сначала выделите объекты для копирования".into();
             return false;
@@ -121,8 +123,14 @@ impl Editor{
     }
     pub(super) fn duplicate_preserving_styles(&mut self){
         let ids:HashSet<u64>=self.selection_ids().into_iter().collect();
-        let copies:Vec<_>=self.doc.objects.iter().filter(|obj|
-            ids.contains(&obj.id)&&self.doc.object_is_editable(obj)).cloned().collect();
+        let selected:Vec<_>=self.doc.objects.iter()
+            .filter(|obj|ids.contains(&obj.id)).collect();
+        if selected.len()!=ids.len()||selected.iter()
+            .any(|obj|!self.doc.object_is_editable(obj)){
+            self.status="Дублирование отменено: выделение содержит скрытые или заблокированные объекты".into();
+            return;
+        }
+        let copies:Vec<_>=selected.into_iter().cloned().collect();
         if copies.is_empty(){
             self.status="Выделите редактируемые объекты для дублирования".into();return;
         }
