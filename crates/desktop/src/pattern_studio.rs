@@ -376,6 +376,7 @@ mod tests{
         let id=e.doc.add(Shape::Rectangle{x:20.,y:20.,w:10.,h:15.},
             Style::default());
         e.selected=Some(id);
+        e.pattern_copies=4;
         e.create_pattern(PatternMode::Kaleidoscope);
         assert_eq!(e.doc.objects.len(),5);
         e.doc.validate().unwrap();
