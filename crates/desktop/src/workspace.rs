@@ -1955,14 +1955,14 @@ impl Editor {
         let editable:HashSet<u64>=self.doc.layers.iter()
             .filter(|l|l.visible&&!l.locked).map(|l|l.id).collect();
         if self.doc.objects.iter().filter(|o|ids.contains(&o.id))
-            .any(|o|!editable.contains(&o.layer_id)){
+            .any(|o|!o.visible||o.locked||!editable.contains(&o.layer_id)){
             self.status="Цвет не изменён: часть выделения находится в закрытом слое".into();
             return;
         }
         if !self.doc.objects.iter().any(|o|ids.contains(&o.id)){return;}
         self.checkpoint();
         for obj in self.doc.objects.iter_mut(){
-            if ids.contains(&obj.id)&&editable.contains(&obj.layer_id){
+            if ids.contains(&obj.id)&&obj.visible&&!obj.locked&&editable.contains(&obj.layer_id){
                 if is_stroke{
                     obj.style.stroke=value.into();
                     if value!="none" && obj.style.stroke_width_mm==0.0{
