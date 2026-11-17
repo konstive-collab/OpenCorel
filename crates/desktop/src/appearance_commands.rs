@@ -48,7 +48,7 @@ impl Editor{
             Err(e)=>{self.status=format!("Недопустимое оформление: {e}");return;}
         };
         if !self.doc.objects.iter().filter(|o|ids.contains(&o.id)).all(|o|
-            self.doc.layer(o.layer_id).is_some_and(|layer|layer.visible&&!layer.locked)){
+            o.visible&&!o.locked&&self.doc.layer(o.layer_id).is_some_and(|layer|layer.visible&&!layer.locked)){
             self.status="Оформление нельзя менять на заблокированном слое".into();
             return;
         }
@@ -66,7 +66,7 @@ impl Editor{
         let ids:HashSet<u64>=self.selection_ids().into_iter().collect();
         if !ids.iter().any(|id|self.doc.appearances.contains_key(id)){return;}
         if !self.doc.objects.iter().filter(|o|ids.contains(&o.id)).all(|o|
-            self.doc.layer(o.layer_id).is_some_and(|layer|layer.visible&&!layer.locked)){
+            o.visible&&!o.locked&&self.doc.layer(o.layer_id).is_some_and(|layer|layer.visible&&!layer.locked)){
             self.status="Не удалось сбросить оформление на заблокированном слое".into();
             return;
         }
@@ -90,7 +90,7 @@ impl Editor{
             Some(o)=>o,
             None=>return
         };
-        if !self.doc.layer(dest.layer_id).is_some_and(|l|l.visible&&!l.locked){
+        if !dest.visible||dest.locked||!self.doc.layer(dest.layer_id).is_some_and(|l|l.visible&&!l.locked){
             self.status="Цель пипетки находится на заблокированном слое".into();
             return;
         }
