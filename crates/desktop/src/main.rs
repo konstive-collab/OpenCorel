@@ -1763,6 +1763,9 @@ impl eframe::App for Editor{
             if ctx.input(|i|i.key_pressed(egui::Key::H)){self.change_tool(Tool::Freehand);}
             if ctx.input(|i|i.key_pressed(egui::Key::L)){self.change_tool(Tool::Line);}
             if ctx.input(|i|i.key_pressed(egui::Key::P)){self.change_tool(Tool::Polygon);}
+            if ctx.input(|i|i.key_pressed(egui::Key::S)){
+                self.change_tool(Tool::Smart);
+            }
         }
         self.top_workspace(ctx);
         self.tool_sidebar(ctx);
