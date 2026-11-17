@@ -401,8 +401,8 @@ mod tests{
         assert_eq!(doc.layers[0].id,b);
         let id=doc.add_to_layer(Shape::Rectangle{x:1.,y:1.,w:2.,h:2.},Style::default(),a);
         assert!(doc.delete_layer(1).is_err());
-        assert_eq!(doc.delete_layer(a).unwrap(),1);
-        assert_eq!(doc.objects.iter().find(|o|o.id==id).unwrap().layer_id,1);
+        assert_eq!(doc.delete_layer(a).unwrap(),b);
+        assert_eq!(doc.objects.iter().find(|o|o.id==id).unwrap().layer_id,b);
         assert!(doc.layer(a).is_none());
         doc.validate().unwrap();
     }
