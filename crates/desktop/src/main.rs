@@ -239,6 +239,9 @@ struct Editor{
     resize_drag_base:Option<Bounds>,
     resize_drag_checkpointed:bool,
     object_filter:String,
+    layer_rename_target:Option<u64>,
+    layer_rename_draft:String,
+    object_current_layer_only:bool,
     active_node:Option<(u64,NodeAddress)>,
     node_drag:Option<(u64,NodeAddress)>,
     node_drag_checkpointed:bool,
@@ -318,7 +321,9 @@ impl Default for Editor{
             internal_clipboard:Vec::new(),paste_number:0,
             show_welcome:true,toolbox_expanded:false,resize_drag:None,
             resize_drag_base:None,resize_drag_checkpointed:false,
-            object_filter:String::new(),active_node:None,node_drag:None,
+            object_filter:String::new(),layer_rename_target:None,
+            layer_rename_draft:String::new(),object_current_layer_only:false,
+            active_node:None,node_drag:None,
             node_drag_checkpointed:false}
     }
 }
