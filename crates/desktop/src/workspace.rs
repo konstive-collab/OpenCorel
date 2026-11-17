@@ -817,7 +817,7 @@ impl Editor {
             if ui.button("Выделить слой").on_hover_text("Выбрать все доступные объекты активного слоя").clicked(){
                 let ids:Vec<u64>=self.doc.objects.iter()
                     .filter(|o|o.layer_id==self.active_layer&&
-                        self.doc.is_object_editable(o.id))
+                        self.doc.object_is_editable(o))
                     .map(|o|o.id).collect();
                 self.selected=ids.first().copied();
                 self.multi_selected=ids.into_iter().skip(1).collect();
@@ -1961,14 +1961,14 @@ impl Editor {
         let ids:HashSet<u64>=self.selection_ids().into_iter().collect();
         if ids.is_empty(){self.status="Сначала выберите объект".into();return;}
         if self.doc.objects.iter().filter(|o|ids.contains(&o.id))
-            .any(|o|!self.doc.is_object_editable(o.id)){
+            .any(|o|!self.doc.object_is_editable(o)){
             self.status="Цвет не изменён: часть выделения находится в закрытом слое".into();
             return;
         }
         if !self.doc.objects.iter().any(|o|ids.contains(&o.id)){return;}
         self.checkpoint();
         for obj in self.doc.objects.iter_mut(){
-            if ids.contains(&obj.id)&&self.doc.is_object_editable(obj.id){
+            if ids.contains(&obj.id)&&self.doc.object_is_editable(obj){
                 if is_stroke{
                     obj.style.stroke=value.into();
                     if value!="none" && obj.style.stroke_width_mm==0.0{
@@ -2036,7 +2036,7 @@ impl Editor {
         let ids:HashSet<u64>=self.selection_ids().into_iter().collect();
         if ids.is_empty(){return;}
         if self.doc.objects.iter().filter(|o|ids.contains(&o.id))
-            .any(|o|!self.doc.is_object_editable(o.id)){
+            .any(|o|!self.doc.object_is_editable(o)){
             self.status="Удаление отменено: выделение содержит скрытый или заблокированный объект/слой".into();
             return;
         }
