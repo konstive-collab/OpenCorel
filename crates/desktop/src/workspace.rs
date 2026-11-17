@@ -227,6 +227,12 @@ impl Editor {
                     ui.set_min_width(285.0);
                     self.vector_effects_panel(ui);
                 });
+                ui.menu_button("Цвет",|ui|{
+                    ui.set_min_width(330.0);
+                    egui::ScrollArea::vertical().max_height(590.0).show(ui,|ui|{
+                        self.color_studio_panel(ui);
+                    });
+                });
                 ui.menu_button("Макет",|ui|{
                     ui.menu_button("Страницы документа",|ui|{
                         ui.label(format!("Страниц: {} / максимум 64",self.doc.page_count()));
@@ -1106,6 +1112,9 @@ impl Editor {
             ui.collapsing("Векторные эффекты — 9 инструментов",|ui|{
                 self.vector_effects_panel(ui);
             });
+            ui.collapsing("Студия цвета — 16 гармоний",|ui|{
+                self.color_studio_panel(ui);
+            });
         }
         ui.separator();
         // Images may contain tens of megabytes of Base64. Never clone the
@@ -1614,6 +1623,9 @@ impl Editor {
             }
         });
         ui.small("Страницы хранят собственные объекты, слои, направляющие и размеры.");
+        ui.collapsing("Заменить фирменный цвет во всех страницах",|ui|{
+            self.color_studio_panel(ui);
+        });
         ui.small("Экспорт PDF из меню «Файл» объединяет все страницы в один векторный документ.");
         ui.separator();
         ui.heading("Параметры листа");
