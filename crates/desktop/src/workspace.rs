@@ -695,7 +695,7 @@ impl Editor {
         #[derive(Clone)]
         struct Row{
             group_header:bool,id:u64,group:Option<u64>,label:String,
-            visible:bool,locked:bool,depth:usize,
+            visible:bool,locked:bool,depth:usize,collapsed:bool,
         }
         ui.horizontal(|ui|{
             ui.heading("СЛОИ");
@@ -860,11 +860,12 @@ impl Editor {
                     members.iter().any(|member|matches(member));
                 if !group_matches{continue;}
                 let first=members.first().map(|o|o.id).unwrap_or(obj.id);
+                let collapsed=self.collapsed_groups.contains(&group_id);
                 rows.push(Row{group_header:true,id:first,group:Some(group_id),
                     label:format!("Группа {} · {} объектов",group_id,members.len()),
                     visible:members.iter().all(|o|o.visible),
-                    locked:members.iter().all(|o|o.locked),depth:0});
-                for member in members{
+                    locked:members.iter().all(|o|o.locked),depth:0,collapsed});
+                if !collapsed{for member in members{
                     if !query.is_empty()&&!group_id.to_string().contains(&query)&&!matches(member){
                         continue;
                     }
@@ -879,11 +880,11 @@ impl Editor {
                         Shape::Raster{pixel_width,pixel_height,..}=>format!("Фото {pixel_width}×{pixel_height}"),
                     }}else{member.name.clone()};
                     rows.push(Row{group_header:false,id:member.id,group,
-                        label:text,visible:member.visible,locked:member.locked,depth:1});
-                }
+                        label:text,visible:member.visible,locked:member.locked,depth:1,collapsed:false});
+                }}
             }else if matches(obj){
                 rows.push(Row{group_header:false,id:obj.id,group:None,
-                    label,visible:obj.visible,locked:obj.locked,depth:0});
+                    label,visible:obj.visible,locked:obj.locked,depth:0,collapsed:false});
             }
         }
         ui.label(RichText::new(format!("Показано строк: {} · Shift — множественный выбор · верхний объект рисуется последним",rows.len()))
@@ -895,6 +896,14 @@ impl Editor {
                     ui.horizontal(|ui|{
                         if row.group_header{
                             ui.add_space(2.0);
+                            if ui.small_button(if row.collapsed{"▶"}else{"▼"})
+                                .on_hover_text(if row.collapsed{"Развернуть группу"}else{"Свернуть группу"})
+                                .clicked(){
+                                if let Some(group)=row.group{
+                                    if row.collapsed{self.collapsed_groups.remove(&group);}
+                                    else{self.collapsed_groups.insert(group);}
+                                }
+                            }
                             if ui.selectable_label(
                                 self.selection_ids().iter().any(|id|
                                     self.doc.objects.iter().find(|o|o.id==*id)
