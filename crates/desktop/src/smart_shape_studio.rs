@@ -91,7 +91,7 @@ impl Editor{
         }
         if self.doc.objects.iter().filter(|o|ids.contains(&o.id)).count()!=ids.len()||
             self.doc.objects.iter().filter(|o|ids.contains(&o.id)).any(|o|
-                o.group_id.is_some() ||
+                o.group_id.is_some() || !o.visible || o.locked ||
                 !self.doc.layer(o.layer_id).is_some_and(|l|l.visible&&!l.locked)||
                 matches!(o.shape,Shape::Raster{..}|Shape::EmbeddedSvg{..}|Shape::Text{..}))||
             self.doc.clip_links.iter().any(|l|
