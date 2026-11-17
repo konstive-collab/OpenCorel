@@ -52,12 +52,11 @@ impl Editor{
             Err(e)=>self.status=format!("Размер фигуры отклонён: {e}"),
         }
     }
-    /// One click can place a meaningful, standard-size symbol at the centre
-    /// of the active page, without first drawing a dummy 1mm path.
-    pub(super) fn insert_smart_in_center(&mut self){
-        let (w,h)=(self.smart_width_mm,self.smart_height_mm);
-        let b=Bounds{x:(self.doc.page.width_mm-w)/2.,
-            y:(self.doc.page.height_mm-h)/2.,w,h};
+    /// Place one standard-size smart shape at an exact point.
+    /// Unlike drag-start, a click does not leave an unfinished drag session.
+    pub(super) fn place_smart_at(&mut self,top_left:Point){
+        let b=Bounds{x:top_left.x,y:top_left.y,
+            w:self.smart_width_mm,h:self.smart_height_mm};
         match smart_shapes::create(self.smart_kind,b,self.smart_options()){
             Ok(shape)=>{
                 if let Some(id)=self.add_shape(shape,Self::smart_shape_style(self.smart_kind)){
@@ -71,6 +70,14 @@ impl Editor{
             Err(e)=>self.status=format!("Не удалось создать фигуру: {e}"),
         }
     }
+    pub(super) fn insert_smart_in_center(&mut self){
+        let at=Point{
+            x:(self.doc.page.width_mm-self.smart_width_mm)/2.,
+            y:(self.doc.page.height_mm-self.smart_height_mm)/2.,
+        };
+        self.place_smart_at(at);
+    }
+
     /// Batch transform only editable native vector paths, retaining all
     /// styling, layer, z-order and appearance metadata. No images or text are
     /// silently destroyed. Preview clone ensures full atomicity.
