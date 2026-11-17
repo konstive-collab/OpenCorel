@@ -24,6 +24,7 @@ mod text_preview;
 mod text_edit_ops;
 mod text_studio;
 mod pattern_studio;
+mod vector_effects;
 mod bezier_preview;
 mod bezier_pen;
 mod snap_targets;
@@ -139,6 +140,13 @@ struct Editor{
     pattern_start_angle:f32,
     pattern_sweep_angle:f32,
     pattern_rotate_objects:bool,
+    effect_offset_x_mm:f32,
+    effect_offset_y_mm:f32,
+    effect_depth:u32,
+    effect_width_mm:f32,
+    effect_opacity:f32,
+    effect_primary:String,
+    effect_secondary:String,
     active_layer:u64,
     pan:Vec2,
     undo:Vec<Document>,
@@ -238,6 +246,9 @@ impl Default for Editor{
             pattern_amplitude_mm:12.0,pattern_cycles:1.0,
             pattern_start_angle:0.0,pattern_sweep_angle:360.0,
             pattern_rotate_objects:false,
+            effect_offset_x_mm:3.0,effect_offset_y_mm:3.0,
+            effect_depth:8,effect_width_mm:2.0,effect_opacity:0.65,
+            effect_primary:"#192539".into(),effect_secondary:"#32CFB4".into(),
             active_layer:1,pan:Vec2::ZERO,
             undo:Vec::new(),redo:Vec::new(),
             inspector_tab:InspectorTab::Objects,show_inspector:true,
