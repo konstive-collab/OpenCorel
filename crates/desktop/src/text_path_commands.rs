@@ -27,7 +27,7 @@ impl Editor{
             self.doc.objects.iter().find(|o|o.id==*id).cloned()).collect();
         if selected.len()!=2||selected.iter().any(|o|
             o.group_id.is_some()||
-            !self.doc.is_object_editable(o.id))||
+            !self.doc.object_is_editable(o))||
             self.doc.clip_links.iter().any(|link|
                 ids.contains(&link.source_id)||ids.contains(&link.target_id)){
             self.status="Текст и направляющая должны быть доступными объектами вне групп и обтравки".into();
