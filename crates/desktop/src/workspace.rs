@@ -36,7 +36,7 @@ impl Editor {
         self.resize_drag_base=None;self.resize_drag_checkpointed=false;
         self.node_drag_checkpointed=false;
         if next!=Tool::Nodes{self.active_node=None;}
-        if matches!(next,Tool::Text|Tool::Nodes|Tool::Freehand){
+        if matches!(next,Tool::Text|Tool::Nodes|Tool::Freehand|Tool::Smart){
             self.inspector_tab=InspectorTab::Properties;
             self.show_inspector=true;
         }
@@ -319,6 +319,11 @@ impl Editor {
                     ui.small("Экспорт: SVG/PDF. Просмотр на холсте пока предварительный.");
                 });
                 ui.menu_button("Объект",|ui|{
+                    ui.menu_button("Библиотека фигур — 93",|ui|{
+                        ui.set_min_width(320.0);
+                        self.smart_shape_picker(ui);
+                    });
+                    ui.separator();
                     ui.label(RichText::new("ГРУППЫ").strong());
                     if ui.button("Центрировать по листу").clicked(){
                         self.center_selection_on_page();ui.close_menu();
@@ -613,6 +618,7 @@ impl Editor {
                             Tool::Ellipse=>"F7",
                             Tool::Line=>"L",
                             Tool::Polygon=>"P",
+                            Tool::Smart=>"S", 
                         }))
                         .on_hover_text(productivity::tool_hint(self.tool));
                 }
@@ -787,6 +793,11 @@ impl Editor {
     }
 
     fn inspector_properties(&mut self,ui:&mut egui::Ui){
+        if self.tool==Tool::Smart{
+            ui.heading("Профессиональные фигуры");
+            self.smart_shape_picker(ui);
+            return;
+        }
         if self.tool==Tool::Freehand{
             ui.heading("Свободное рисование");
             ui.label("Удерживайте кнопку мыши и ведите линию. После отпускания появится редактируемая кривая Безье.");
