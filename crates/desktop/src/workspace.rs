@@ -907,7 +907,7 @@ impl Editor {
                             RichText::new(name).color(Color32::GRAY)
                         }else if !visible{
                             RichText::new(name).weak()
-                        }else{name.into()};
+                        }else{RichText::new(name)};
                         let button=egui::Button::new(label)
                             .selected(self.is_selected(id))
                             .min_size(Vec2::new(ui.available_width()-24.0,23.0));
