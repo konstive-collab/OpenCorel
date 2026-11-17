@@ -7,7 +7,7 @@ use std::{collections::HashMap,collections::hash_map::DefaultHasher,
     hash::{Hash,Hasher}};
 
 const MAX_PREVIEW_CHARS:usize=600;
-const MAX_CACHED_OBJECTS:usize=24;
+const MAX_CACHED_OBJECTS:usize=32;
 
 #[derive(Default)]
 pub(super) struct TextPreview{
