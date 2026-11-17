@@ -908,7 +908,7 @@ impl Editor {
                                 self.selection_ids().iter().any(|id|
                                     self.doc.objects.iter().find(|o|o.id==*id)
                                         .is_some_and(|o|o.group_id==row.group)),
-                                &row.label).clicked(){
+                                row.label.as_str()).clicked(){
                                 self.select_object(Some(row.id),false);
                                 self.inspector_tab=InspectorTab::Properties;
                             }
@@ -922,7 +922,7 @@ impl Editor {
                                 .clicked(){self.object_lock(row.id,!row.locked);}
                             let layer_id=self.doc.objects.iter().find(|o|o.id==row.id)
                                 .map(|o|o.layer_id).unwrap_or(self.active_layer);
-                            if ui.add(egui::Button::new(&row.label)
+                            if ui.add(egui::Button::new(row.label.as_str())
                                 .selected(self.is_selected(row.id))
                                 .min_size(Vec2::new(ui.available_width(),23.0)))
                                 .on_hover_text(format!("Объект #{} · слой {}",row.id,layer_id))
