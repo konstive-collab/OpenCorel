@@ -155,7 +155,7 @@ fn generate_pattern(doc:&mut Document,ids:&[u64],opts:PatternOptions)
         return Err("Выберите хотя бы один существующий объект".into());
     }
     if originals.iter().any(|o|o.group_id.is_some()||
-        !doc.layer(o.layer_id).is_some_and(|l|l.visible&&!l.locked)){
+        !doc.is_object_editable(o.id)){
         return Err("Массив требует незаблокированные несгруппированные объекты".into());
     }
     if doc.clip_links.iter().any(|link|
