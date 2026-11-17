@@ -36,7 +36,11 @@ impl Document{
     }
     /// Return IDs that can be edited by the current canvas selection model.
     pub fn editable_object_ids(&self)->HashSet<u64>{
-        self.objects.iter().filter(|o|self.is_object_editable(o.id))
+        let editable_layers:HashSet<u64>=self.layers.iter()
+            .filter(|layer|layer.visible&&!layer.locked)
+            .map(|layer|layer.id).collect();
+        self.objects.iter().filter(|o|
+            o.visible&&!o.locked&&editable_layers.contains(&o.layer_id))
             .map(|o|o.id).collect()
     }
     /// Reorder selected objects inside one layer. Selected objects retain
