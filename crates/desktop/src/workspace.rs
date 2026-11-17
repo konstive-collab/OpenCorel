@@ -131,7 +131,7 @@ impl Editor {
                 ui.menu_button("Правка",|ui|{
                     if ui.add_enabled(!self.undo.is_empty(),egui::Button::new("Отменить      Ctrl+Z")).clicked(){self.undo();ui.close_menu();}
                     if ui.add_enabled(!self.redo.is_empty(),egui::Button::new("Повторить     Ctrl+Y")).clicked(){self.redo();ui.close_menu();}
-                    if ui.button("Дублировать     Ctrl+D").clicked(){self.duplicate_preserving_styles();ui.close_menu();}
+                    if ui.button("Дублировать     Ctrl+D").clicked(){self.object_duplicate_selection();ui.close_menu();}
                     ui.menu_button("Массив копий / сетка...",|ui|{
                         ui.label("Размножить выделенные объекты по строкам и столбцам");
                         ui.horizontal(|ui|{
@@ -375,7 +375,7 @@ impl Editor {
                     ui.separator();
                     if ui.button("На передний план").clicked(){self.reorder_selection(true);ui.close_menu();}
                     if ui.button("На задний план").clicked(){self.reorder_selection(false);ui.close_menu();}
-                    if ui.button("Дублировать").clicked(){self.duplicate_preserving_styles();ui.close_menu();}
+                    if ui.button("Дублировать").clicked(){self.object_duplicate_selection();ui.close_menu();}
                     ui.separator();
                     if ui.button("Повернуть вправо на 90°").clicked(){self.rotate_selection(opencorel_core::transform::QuarterTurn::Clockwise);ui.close_menu();}
                     if ui.button("Повернуть влево на 90°").clicked(){self.rotate_selection(opencorel_core::transform::QuarterTurn::CounterClockwise);ui.close_menu();}
@@ -603,7 +603,7 @@ impl Editor {
                         self.center_selection_on_page();
                     }
                     if ui.small_button("Копия").on_hover_text("Ctrl+D").clicked(){
-                        self.duplicate_preserving_styles();
+                        self.object_duplicate_selection();
                     }
                     if ui.small_button("Удалить").on_hover_text("Delete").clicked(){
                         self.delete_selection();
@@ -724,7 +724,7 @@ impl Editor {
                     if let Some(layer)=self.doc.layers.iter_mut().find(|l|l.id==id){
                         layer.visible=!visible;
                     }
-                    if !visible{self.selected=None;self.multi_selected.clear();}
+                    if visible{self.selected=None;self.multi_selected.clear();}
                 }
                 if ui.small_button(if locked{"🔒"}else{"🔓"})
                     .on_hover_text(if locked{"Разблокировать слой"}else{"Заблокировать слой"}).clicked(){
@@ -837,7 +837,6 @@ impl Editor {
                     Shape::Raster{pixel_width,pixel_height,..}=>format!("Изображение {pixel_width}×{pixel_height}"),
                 }
             };
-            let layer_name=self.doc.layer(obj.layer_id).map(|l|l.name.as_str()).unwrap_or("");
             let matches=|o:&opencorel_core::Object|{
                 let title=if o.name.is_empty(){match &o.shape{
                     Shape::Rectangle{..}=>"прямоугольник",
@@ -1974,54 +1973,12 @@ impl Editor {
         }
     }
     pub(super) fn delete_selection(&mut self){
-        let ids:HashSet<u64>=self.selection_ids().into_iter().collect();
-        if ids.is_empty(){return;}
-        let editable:HashSet<u64>=self.doc.layers.iter()
-            .filter(|l|l.visible&&!l.locked).map(|l|l.id).collect();
-        if self.doc.objects.iter().any(|o|ids.contains(&o.id)&&
-            !editable.contains(&o.layer_id)){
-            self.status="Удаление отменено: выделение включает заблокированные слои".into();
-            return;
-        }
-        if !self.doc.objects.iter().any(|o|ids.contains(&o.id)){return;}
-        self.checkpoint();
-        self.doc.objects.retain(|o|!ids.contains(&o.id));
-        self.doc.clip_links.retain(|clip|
-            !ids.contains(&clip.source_id)&&!ids.contains(&clip.target_id));
-        self.doc.appearances.retain(|id,_|!ids.contains(id));
-        self.selected=None;self.multi_selected.clear();
-        self.status="Выделенные объекты удалены".into();
+        self.object_delete_selection();
     }
     pub(super) fn duplicate_selection(&mut self){
-        // Kept for existing keyboard/UI call sites; preserves text formatting.
-        self.duplicate_preserving_styles();
+        self.object_duplicate_selection();
     }
     pub(super) fn reorder_selection(&mut self,front:bool){
-        let ids:HashSet<u64>=self.selection_ids().into_iter().collect();
-        if ids.is_empty(){return;}
-        let editable:HashSet<u64>=self.doc.layers.iter()
-            .filter(|l|l.visible&&!l.locked).map(|l|l.id).collect();
-        if self.doc.objects.iter().any(|o|ids.contains(&o.id)&&
-            !editable.contains(&o.layer_id)){
-            self.status="Порядок не изменён: слой заблокирован".into();return;
-        }
-        if !self.doc.objects.iter().any(|o|ids.contains(&o.id)){return;}
-        self.checkpoint();
-        let mut selected=Vec::new();
-        let mut rest=Vec::new();
-        for obj in self.doc.objects.drain(..){
-            if ids.contains(&obj.id){selected.push(obj);}
-            else{rest.push(obj);}
-        }
-        self.doc.objects=if front{
-            rest.extend(selected);rest
-        }else{
-            selected.extend(rest);selected
-        };
-        self.status=if front{
-            "Выделенные объекты перемещены на передний план".into()
-        }else{
-            "Выделенные объекты перемещены на задний план".into()
-        };
+        self.object_reorder_selection(if front{StackOrder::Front}else{StackOrder::Back});
     }
 }
