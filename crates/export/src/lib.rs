@@ -20,7 +20,10 @@ pub fn pdf_bytes(doc:&Document)->Result<Vec<u8>,String>{
         .map_err(|e|format!("Could not parse document SVG for PDF export: {e}"))?;
     let pdf=svg2pdf::to_pdf(&tree,
         svg2pdf::ConversionOptions::default(),
-        svg2pdf::PageOptions::default())
+        // SVG/CSS pixel geometry is based on 96 DPI. Explicitly convert
+        // those pixels to PDF points (72 per inch) to preserve millimetres.
+        // The svg2pdf default of 72 DPI enlarges physical pages by 4/3.
+        svg2pdf::PageOptions{dpi:96.0})
         .map_err(|e|format!("PDF conversion failed: {e:?}"))?;
     if !pdf.starts_with(b"%PDF-"){
         return Err("PDF exporter returned invalid output".into());
