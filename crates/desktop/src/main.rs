@@ -1641,7 +1641,7 @@ impl Editor{
                                 return;
                             },
                             Tool::Smart=>{
-                                self.start_smart_creation(p);
+                                self.place_smart_at(p);
                                 return;
                             },
                             Tool::Rect=>Shape::Rectangle{x:p.x,y:p.y,w:60.0,h:40.0},
