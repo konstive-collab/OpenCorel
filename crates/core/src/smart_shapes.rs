@@ -848,7 +848,7 @@ mod tests{
     use crate::{Document,Style};
     #[test]
     fn all_90_shapes_are_native_finite_and_exportable(){
-        assert_eq!(SmartShape::ALL.len(),90);
+        assert_eq!(SmartShape::ALL.len(),93);
         for kind in SmartShape::ALL{
             let shape=create(kind,Bounds{x:11.,y:13.,w:50.,h:70.},
                 Options::default()).unwrap_or_else(|e|panic!("{kind:?} {e}"));
