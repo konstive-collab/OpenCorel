@@ -25,6 +25,7 @@ mod text_edit_ops;
 mod text_studio;
 mod pattern_studio;
 mod vector_effects;
+mod color_studio;
 mod bezier_preview;
 mod bezier_pen;
 mod snap_targets;
@@ -147,6 +148,13 @@ struct Editor{
     effect_opacity:f32,
     effect_primary:String,
     effect_secondary:String,
+    palette_base_color:String,
+    palette_find_color:String,
+    palette_replacement_color:String,
+    palette_use_stroke:bool,
+    palette_replace_fill:bool,
+    palette_replace_stroke:bool,
+    palette_replace_gradients:bool,
     active_layer:u64,
     pan:Vec2,
     undo:Vec<Document>,
@@ -249,6 +257,11 @@ impl Default for Editor{
             effect_offset_x_mm:3.0,effect_offset_y_mm:3.0,
             effect_depth:8,effect_width_mm:2.0,effect_opacity:0.65,
             effect_primary:"#192539".into(),effect_secondary:"#32CFB4".into(),
+            palette_base_color:"#447BD4".into(),
+            palette_find_color:"#FFFFFF".into(),
+            palette_replacement_color:"#000000".into(),
+            palette_use_stroke:false,palette_replace_fill:true,
+            palette_replace_stroke:true,palette_replace_gradients:true,
             active_layer:1,pan:Vec2::ZERO,
             undo:Vec::new(),redo:Vec::new(),
             inspector_tab:InspectorTab::Objects,show_inspector:true,
