@@ -203,6 +203,11 @@ impl Editor {
                             }
                         }
                     });
+                    ui.menu_button("Текст по кривой...",|ui|{
+                        ui.set_min_width(315.0);
+                        self.text_path_controls(ui);
+                    });
+                    ui.separator();
                     ui.menu_button("Стили типографики",|ui|{
                         for preset in [
                             super::text_studio::TextPreset::Display,
@@ -1034,6 +1039,12 @@ impl Editor {
                 });
             }
             ui.small("F10 — узлы. Стрелки — сдвиг. Ctrl+Z — отмена.");
+            ui.separator();
+        }
+        if self.selection_is_text_plus_guide(){
+            ui.collapsing("Текст по кривой — профессиональный инструмент",|ui|{
+                self.text_path_controls(ui);
+            });
             ui.separator();
         }
         let Some(id)=self.selected else{
