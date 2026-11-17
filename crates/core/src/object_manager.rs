@@ -154,14 +154,16 @@ impl Document{
         let index=self.layers.iter().position(|l|l.id==id)
             .ok_or("Слой не найден")?;
         if self.layers[index].locked{return Err("Сначала разблокируйте слой".into());}
-        if !self.layers.iter().any(|l|l.id==1){
-            return Err("Основной слой отсутствует".into());
-        }
+        let fallback=self.layers.iter()
+            .find(|l|l.id!=id&&l.visible&&!l.locked)
+            .or_else(||self.layers.iter().find(|l|l.id!=id&&!l.locked))
+            .map(|l|l.id)
+            .ok_or("Нужен хотя бы один разблокированный слой для переноса объектов")?;
         for object in &mut self.objects{
-            if object.layer_id==id{object.layer_id=1;}
+            if object.layer_id==id{object.layer_id=fallback;}
         }
         self.layers.remove(index);
-        Ok(1)
+        Ok(fallback)
     }
     pub fn duplicate_layer(&mut self,id:u64)->Result<u64,String>{
         let source=self.layer(id).cloned().ok_or("Слой не найден")?;
