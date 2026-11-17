@@ -9,6 +9,7 @@ pub mod kdr;
 pub mod preflight;
 pub mod print_sheet;
 pub mod pages;
+pub mod smart_shapes;
 pub mod transform;
 pub mod node_edit;
 pub mod path_topology;
