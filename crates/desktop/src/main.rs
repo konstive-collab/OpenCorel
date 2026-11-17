@@ -22,6 +22,7 @@ mod raster_preview;
 mod compound_render;
 mod text_preview;
 mod text_edit_ops;
+mod text_studio;
 mod bezier_preview;
 mod bezier_pen;
 mod snap_targets;
@@ -177,6 +178,8 @@ struct Editor{
     font_search:String,
     text_find:String,
     text_replacement:String,
+    text_studio_wrap_columns:u32,
+    text_studio_indent_spaces:u32,
     inline_text:Option<InlineTextEdit>,
     proof_dpi:u32,
     keep_bitmap_ratio:bool,
@@ -246,7 +249,9 @@ impl Default for Editor{
             appearance_gradient_angle:0.0,appearance_dash_mm:0.0,
             appearance_cap:0,appearance_join:0,
             custom_pivot:false,pivot_x:0.0,pivot_y:0.0,
-            text_outliner:TextOutliner::new(),text_preview:TextPreview::default(),font_search:String::new(),text_find:String::new(),text_replacement:String::new(),inline_text:None,proof_dpi:96,
+            text_outliner:TextOutliner::new(),text_preview:TextPreview::default(),font_search:String::new(),text_find:String::new(),text_replacement:String::new(),
+            text_studio_wrap_columns:48,text_studio_indent_spaces:4,
+            inline_text:None,proof_dpi:96,
             keep_bitmap_ratio:true,
             show_preflight:false,preflight_lines:Vec::new(),
             page_name_edit:String::new(),page_rename_mode:false,
@@ -1040,8 +1045,9 @@ impl Editor{
                     path.display(),
                     if ext=="pdf"{"PDF RGB, не PDF/X"}else{"контрольный файл"},
                     if self.doc.page_count()>1{
-                        format!("Экспортирована только активная страница {} из {}.",
-                            self.doc.active_page_index+1,self.doc.page_count())
+                        if ext=="pdf"{format!("Все {} страницы в одном PDF.",self.doc.page_count())}
+                        else{format!("Экспортирована только активная страница {} из {}.",
+                            self.doc.active_page_index+1,self.doc.page_count())}
                     }else{String::new()}),
                 Err(e)=>format!("Ошибка экспорта: {e}"),
             };
