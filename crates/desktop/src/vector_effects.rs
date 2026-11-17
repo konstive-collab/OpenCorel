@@ -200,7 +200,7 @@ fn generate_effect(doc:&mut Document,ids:&[u64],opts:&EffectOptions)->Result<Vec
     if originals.is_empty()||originals.len()!=selected.len(){
         return Err("Сначала выберите редактируемые объекты".into());
     }
-    if originals.iter().any(|o|o.group_id.is_some()||
+    if originals.iter().any(|o|o.group_id.is_some()||!o.visible||o.locked||
         !doc.layer(o.layer_id).is_some_and(|l|l.visible&&!l.locked)){
         return Err("Эффекты недоступны для групп или закрытых слоёв".into());
     }
@@ -269,7 +269,7 @@ fn clean_effect_copies(doc:&mut Document,source_ids:&[u64])->Result<usize,String
         .map(|o|o.id).collect();
     if matching.is_empty(){return Ok(0);}
     for object in doc.objects.iter().filter(|o|matching.contains(&o.id)){
-        if !doc.layer(object.layer_id).is_some_and(|l|l.visible&&!l.locked){
+        if !object.visible||object.locked||!doc.layer(object.layer_id).is_some_and(|l|l.visible&&!l.locked){
             return Err("Среди копий есть объекты на закрытых слоях".into());
         }
     }
