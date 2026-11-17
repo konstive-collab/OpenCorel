@@ -3,7 +3,7 @@
 //! All bulk actions are preflighted, then recorded as exactly one undo step.
 use super::Editor;
 use eframe::egui::{self,RichText};
-use opencorel_core::{valid_color,Document,Shape};
+use opencorel_core::{valid_color,Document};
 use std::collections::HashSet;
 
 #[derive(Clone,Copy,Debug,PartialEq,Eq)]
@@ -267,6 +267,7 @@ impl Editor{
             fill:self.palette_replace_fill,stroke:self.palette_replace_stroke,
             gradients:self.palette_replace_gradients,
         };
+        self.palette_match_count=None;
         let mut preview=self.doc.clone();
         match replace_project_colors(&mut preview,
             &self.palette_find_color,&self.palette_replacement_color,flags){
@@ -313,17 +314,24 @@ impl Editor{
             ui.checkbox(&mut self.palette_replace_stroke,"Контуры");
             ui.checkbox(&mut self.palette_replace_gradients,"Градиенты");
         });
-        if valid_color(&self.palette_find_color){
-            let flags=ReplaceFlags{fill:self.palette_replace_fill,
-                stroke:self.palette_replace_stroke,
-                gradients:self.palette_replace_gradients};
-            let mut count=0usize;
-            for i in 0..self.doc.page_count(){
-                if let Ok(page)=self.doc.page_document(i){
-                    count+=count_matches(&page,&self.palette_find_color,flags);
+        if ui.small_button("Подсчитать совпадения на всех страницах").clicked(){
+            if valid_color(&self.palette_find_color){
+                let flags=ReplaceFlags{fill:self.palette_replace_fill,
+                    stroke:self.palette_replace_stroke,
+                    gradients:self.palette_replace_gradients};
+                let mut count=0usize;
+                for i in 0..self.doc.page_count(){
+                    if let Ok(page)=self.doc.page_document(i){
+                        count+=count_matches(&page,&self.palette_find_color,flags);
+                    }
                 }
+                self.palette_match_count=Some(count);
+            }else{
+                self.status="Укажите цвет поиска в формате #RRGGBB".into();
             }
-            ui.label(format!("Совпадений в документе: {count}"));
+        }
+        if let Some(count)=self.palette_match_count{
+            ui.label(format!("Совпадений при последнем подсчёте: {count}"));
         }
         if ui.button("Заменить цвет во всём проекте").clicked(){
             self.replace_project_color();
