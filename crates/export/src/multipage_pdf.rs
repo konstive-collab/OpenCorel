@@ -119,8 +119,12 @@ mod tests{
                 coordinates[2].as_i64().unwrap() as f32);
             let height=coordinates[3].as_float().unwrap_or_else(|_|
                 coordinates[3].as_i64().unwrap() as f32);
-            assert!((width-w*72./25.4).abs()<1.0);
-            assert!((height-h*72./25.4).abs()<1.0);
+            assert!((width-w*72./25.4).abs()<1.0,
+                "page {} PDF MediaBox width={} pt, expected={} pt ({} mm)",
+                i+1,width,w*72./25.4,w);
+            assert!((height-h*72./25.4).abs()<1.0,
+                "page {} PDF MediaBox height={} pt, expected={} pt ({} mm)",
+                i+1,height,h*72./25.4,h);
         }
         assert_eq!(d,original);
     }
