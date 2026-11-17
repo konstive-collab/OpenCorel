@@ -26,7 +26,7 @@ impl Editor{
         let selected:Vec<_>=ids.iter().filter_map(|id|
             self.doc.objects.iter().find(|o|o.id==*id).cloned()).collect();
         if selected.len()!=2||selected.iter().any(|o|
-            o.group_id.is_some()||
+            o.group_id.is_some()||!o.visible||o.locked||
             !self.doc.layer(o.layer_id).is_some_and(|l|l.visible&&!l.locked))||
             self.doc.clip_links.iter().any(|link|
                 ids.contains(&link.source_id)||ids.contains(&link.target_id)){
