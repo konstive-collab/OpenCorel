@@ -58,6 +58,30 @@ mod tests{
         assert!(pdf.starts_with(b"%PDF-"));
         assert!(pdf.windows(5).any(|v|v==b"%%EOF"));
     }
+    #[test] fn pdf_media_box_matches_physical_millimetres(){
+        let mut doc=Document::default();
+        doc.page.width_mm=210.0;
+        doc.page.height_mm=297.0;
+        doc.add(Shape::Rectangle{x:10.0,y:12.0,w:30.0,h:40.0},
+            Style::default());
+        let bytes=pdf_bytes(&doc).unwrap();
+        let pdf=lopdf::Document::load_mem(&bytes).unwrap();
+        let page_id=*pdf.get_pages().get(&1).unwrap();
+        let page=pdf.get_object(page_id).unwrap().as_dict().unwrap();
+        let media_box=page.get(b"MediaBox")
+            .or_else(|_|{
+                let parent=page.get(b"Parent")?.as_reference()?;
+                pdf.get_object(parent)?.as_dict()?.get(b"MediaBox")
+            }).unwrap().as_array().unwrap();
+        let value=|entry:&lopdf::Object|entry.as_float().unwrap_or_else(|_|
+            entry.as_i64().unwrap() as f32);
+        let width=value(&media_box[2])-value(&media_box[0]);
+        let height=value(&media_box[3])-value(&media_box[1]);
+        assert!((width-210.0*72.0/25.4).abs()<1.0,
+            "A4 width in PDF points: {width}");
+        assert!((height-297.0*72.0/25.4).abs()<1.0,
+            "A4 height in PDF points: {height}");
+    }
     #[test] fn clipped_document_exports_pdf(){
         let mut doc=Document::default();
         let mask=doc.add(Shape::Ellipse{x:10.0,y:10.0,w:40.0,h:40.0},Style::default());
