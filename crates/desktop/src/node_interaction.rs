@@ -10,7 +10,7 @@ impl Editor{
     pub(super) fn node_edit_allowed(&self,id:u64)->bool{
         let Some(obj)=self.doc.objects.iter().find(|obj|obj.id==id) else{return false;};
         obj.group_id.is_none()
-            && self.doc.layer(obj.layer_id).map(|l|l.visible&&!l.locked).unwrap_or(false)
+            && obj.visible&&!obj.locked&&self.doc.layer(obj.layer_id).map(|l|l.visible&&!l.locked).unwrap_or(false)
             && node_edit::editable(&obj.shape)
     }
     fn active_node_object(&self)->Option<&opencorel_core::Object>{
