@@ -14,7 +14,7 @@ impl Editor{
             let Some(obj)=self.doc.objects.iter().find(|o|o.id==*id) else{
                 self.status="Выделенный объект не найден".into();return;
             };
-            if !self.doc.is_object_editable(obj.id)
+            if !self.doc.object_is_editable(obj)
                 || obj.group_id.is_some(){
                 self.status="Объекты должны быть на видимых незаблокированных слоях без групп".into();
                 return;
