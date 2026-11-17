@@ -449,10 +449,13 @@ impl Document {
     pub fn layer(&self,id:u64)->Option<&Layer>{
         self.layers.iter().find(|layer|layer.id==id)
     }
+    /// Paint in layer-stack order (bottom to top), preserving object order
+    /// within each layer. This makes the layer manager's stack controls
+    /// affect both canvas and exported SVG/PDF consistently.
     pub fn visible_objects(&self)->impl Iterator<Item=&Object>{
-        let visible:HashSet<u64>=self.layers.iter().filter(|layer|layer.visible)
-            .map(|layer|layer.id).collect();
-        self.objects.iter().filter(move |obj|visible.contains(&obj.layer_id)&&obj.visible)
+        self.layers.iter().filter(|layer|layer.visible).flat_map(move |layer|
+            self.objects.iter().filter(move |obj|
+                obj.layer_id==layer.id&&obj.visible))
     }
     pub fn get_mut(&mut self,id:u64) -> Option<&mut Object> {
         self.objects.iter_mut().find(|o|o.id==id)
@@ -551,17 +554,20 @@ impl Document {
     where F:Fn(&Object)->Bounds,G:Fn(&Object,Point,f32)->bool{
         if !p.x.is_finite() || !p.y.is_finite() ||
             !tolerance.is_finite() || tolerance<0.0{return None;}
-        let editable:HashSet<u64>=self.layers.iter()
-            .filter(|layer|layer.visible&&!layer.locked).map(|layer|layer.id).collect();
         let sources:HashSet<u64>=self.clip_links.iter().map(|c|c.source_id).collect();
-        self.objects.iter().rev().find(|o|{
-            if !editable.contains(&o.layer_id)||!o.visible||o.locked||sources.contains(&o.id)
-                || !bounds(o).contains(p,tolerance) ||
-                !shape_hit(o,p,tolerance){return false;}
-            self.clip_links.iter().find(|link|link.target_id==o.id)
-                .is_none_or(|link|self.objects.iter().find(|src|src.id==link.source_id)
-                    .is_some_and(|src|clip_contains_point(&src.shape,p)))
-        }).map(|o|o.id)
+        for layer in self.layers.iter().rev().filter(|l|l.visible&&!l.locked){
+            if let Some(object)=self.objects.iter().rev().find(|o|{
+                if o.layer_id!=layer.id||!o.visible||o.locked||
+                    sources.contains(&o.id)||!bounds(o).contains(p,tolerance)||
+                    !shape_hit(o,p,tolerance){return false;}
+                self.clip_links.iter().find(|link|link.target_id==o.id)
+                    .is_none_or(|link|self.objects.iter().find(|src|src.id==link.source_id)
+                        .is_some_and(|src|clip_contains_point(&src.shape,p)))
+            }){
+                return Some(object.id);
+            }
+        }
+        None
     }
     pub fn validate(&self)->Result<(),String>{
         if self.schema_version!=SCHEMA_VERSION {return Err("Unknown document schema".into());}
