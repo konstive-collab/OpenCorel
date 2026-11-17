@@ -51,7 +51,7 @@ impl Editor{
         let chosen:HashSet<u64>=ids.iter().copied().collect();
         if self.doc.objects.iter().filter(|o|chosen.contains(&o.id)).count()!=chosen.len() ||
             self.doc.objects.iter().filter(|o|chosen.contains(&o.id)).any(|o|
-                o.group_id.is_some() ||
+                o.group_id.is_some() || !o.visible || o.locked ||
                 !self.doc.layer(o.layer_id).is_some_and(|l|l.visible&&!l.locked)) ||
             self.doc.clip_links.iter().any(|l|
                 chosen.contains(&l.source_id)||chosen.contains(&l.target_id)){
@@ -89,7 +89,7 @@ impl Editor{
         if sources.len()!=selected.len(){
             self.status="Один или несколько выделенных объектов не найдены".into();return;
         }
-        if sources.iter().any(|o|o.group_id.is_some() ||
+        if sources.iter().any(|o|o.group_id.is_some() || !o.visible || o.locked ||
             !self.doc.layer(o.layer_id).is_some_and(|l|l.visible&&!l.locked)){
             self.status="Сетка: сначала разгруппируйте объекты и разблокируйте слои".into();
             return;
