@@ -1277,8 +1277,7 @@ impl Editor {
             _=>None
         };
         if let Some((raster,mut x,mut y,mut width,mut height,pw,ph,source))=asset{
-            let allowed=self.doc.layer(self.doc.objects[index].layer_id)
-                .map(|l|l.visible&&!l.locked).unwrap_or(false);
+            let allowed=self.doc.is_object_editable(id);
             ui.heading(format!("Объект #{id}"));
             if self.multi_selected.len()>0{
                 ui.label(format!("Выбрано {} объектов",self.selection_ids().len()));
@@ -1365,8 +1364,7 @@ impl Editor {
                     segments:c.segments.iter().take(20).copied().collect()
                 }).collect();
             let mut style=self.doc.objects[index].style.clone();
-            let allowed=self.doc.layer(self.doc.objects[index].layer_id)
-                .map(|layer|layer.visible&&!layer.locked).unwrap_or(false);
+            let allowed=self.doc.is_object_editable(id);
             ui.heading(format!("Составной векторный объект #{id}"));
             ui.label(format!("Контуров: {total}, сегментов: {segments}"));
             ui.label("Отверстия букв сохраняются (even-odd).");
@@ -1431,7 +1429,7 @@ impl Editor {
             return;
         }
         let mut object=self.doc.objects[index].clone();
-        let editing_allowed=self.doc.layer(object.layer_id).map(|l|l.visible&&!l.locked).unwrap_or(false);
+        let editing_allowed=self.doc.is_object_editable(id);
         ui.heading(format!("Объект #{id}"));
         if !self.multi_selected.is_empty(){
             ui.label(format!("Выделено {} объектов. Свойства основного объекта:",self.selection_ids().len()));
@@ -1946,17 +1944,15 @@ impl Editor {
         if !valid_paint(value){return;}
         let ids:HashSet<u64>=self.selection_ids().into_iter().collect();
         if ids.is_empty(){self.status="Сначала выберите объект".into();return;}
-        let editable:HashSet<u64>=self.doc.layers.iter()
-            .filter(|l|l.visible&&!l.locked).map(|l|l.id).collect();
         if self.doc.objects.iter().filter(|o|ids.contains(&o.id))
-            .any(|o|!editable.contains(&o.layer_id)){
+            .any(|o|!self.doc.is_object_editable(o.id)){
             self.status="Цвет не изменён: часть выделения находится в закрытом слое".into();
             return;
         }
         if !self.doc.objects.iter().any(|o|ids.contains(&o.id)){return;}
         self.checkpoint();
         for obj in self.doc.objects.iter_mut(){
-            if ids.contains(&obj.id)&&editable.contains(&obj.layer_id){
+            if ids.contains(&obj.id)&&self.doc.is_object_editable(obj.id){
                 if is_stroke{
                     obj.style.stroke=value.into();
                     if value!="none" && obj.style.stroke_width_mm==0.0{
@@ -1969,11 +1965,9 @@ impl Editor {
     pub(super) fn delete_selection(&mut self){
         let ids:HashSet<u64>=self.selection_ids().into_iter().collect();
         if ids.is_empty(){return;}
-        let editable:HashSet<u64>=self.doc.layers.iter()
-            .filter(|l|l.visible&&!l.locked).map(|l|l.id).collect();
-        if self.doc.objects.iter().any(|o|ids.contains(&o.id)&&
-            !editable.contains(&o.layer_id)){
-            self.status="Удаление отменено: выделение включает заблокированные слои".into();
+        if self.doc.objects.iter().filter(|o|ids.contains(&o.id))
+            .any(|o|!self.doc.is_object_editable(o.id)){
+            self.status="Удаление отменено: выделение содержит скрытый или заблокированный объект/слой".into();
             return;
         }
         if !self.doc.objects.iter().any(|o|ids.contains(&o.id)){return;}
@@ -1990,31 +1984,39 @@ impl Editor {
         self.duplicate_preserving_styles();
     }
     pub(super) fn reorder_selection(&mut self,front:bool){
-        let ids:HashSet<u64>=self.selection_ids().into_iter().collect();
+        let ids=self.selection_ids();
         if ids.is_empty(){return;}
-        let editable:HashSet<u64>=self.doc.layers.iter()
-            .filter(|l|l.visible&&!l.locked).map(|l|l.id).collect();
-        if self.doc.objects.iter().any(|o|ids.contains(&o.id)&&
-            !editable.contains(&o.layer_id)){
-            self.status="Порядок не изменён: слой заблокирован".into();return;
-        }
-        if !self.doc.objects.iter().any(|o|ids.contains(&o.id)){return;}
-        self.checkpoint();
-        let mut selected=Vec::new();
-        let mut rest=Vec::new();
-        for obj in self.doc.objects.drain(..){
-            if ids.contains(&obj.id){selected.push(obj);}
-            else{rest.push(obj);}
-        }
-        self.doc.objects=if front{
-            rest.extend(selected);rest
+        let mut candidate=self.doc.clone();
+        let movement=if front{
+            opencorel_core::object_manager::ObjectStackMove::Front
         }else{
-            selected.extend(rest);selected
+            opencorel_core::object_manager::ObjectStackMove::Back
         };
-        self.status=if front{
-            "Выделенные объекты перемещены на передний план".into()
+        match candidate.reorder_objects_in_layer(&ids,movement){
+            Ok(0)=>self.status="Порядок уже соответствует выбранной позиции".into(),
+            Ok(count)=>{
+                self.checkpoint();self.doc=candidate;
+                self.status=format!("Порядок изменён для объектов: {count}");
+            },
+            Err(e)=>self.status=e,
+        }
+    }
+    pub(super) fn reorder_selection_step(&mut self,forward:bool){
+        let ids=self.selection_ids();
+        if ids.is_empty(){return;}
+        let mut candidate=self.doc.clone();
+        let movement=if forward{
+            opencorel_core::object_manager::ObjectStackMove::Forward
         }else{
-            "Выделенные объекты перемещены на задний план".into()
+            opencorel_core::object_manager::ObjectStackMove::Backward
         };
+        match candidate.reorder_objects_in_layer(&ids,movement){
+            Ok(0)=>self.status="Объекты уже находятся на границе порядка".into(),
+            Ok(count)=>{
+                self.checkpoint();self.doc=candidate;
+                self.status=format!("Объекты перемещены на один уровень: {count}");
+            },
+            Err(e)=>self.status=e,
+        }
     }
 }
