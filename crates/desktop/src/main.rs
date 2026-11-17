@@ -2284,6 +2284,41 @@ mod tests {
         assert_eq!(editor.undo.len(),1);
     }
     #[test]
+    fn bulk_object_visibility_and_lock_changes_are_one_undo_step(){
+        let mut editor=Editor::default();editor.doc=Document::default();
+        let a=editor.doc.add(Shape::Rectangle{x:0.,y:0.,w:5.,h:5.},Style::default());
+        let b=editor.doc.add(Shape::Ellipse{x:10.,y:0.,w:5.,h:5.},Style::default());
+        editor.selected=Some(a);editor.multi_selected=vec![b];
+        editor.set_selection_visibility(false);
+        assert!(!editor.doc.get_mut(a).unwrap().visible);
+        assert!(!editor.doc.get_mut(b).unwrap().visible);
+        assert_eq!(editor.undo.len(),1);
+        editor.undo();
+        assert!(editor.doc.get_mut(a).unwrap().visible);
+        assert!(editor.doc.get_mut(b).unwrap().visible);
+        editor.selected=Some(a);editor.multi_selected=vec![b];
+        editor.set_selection_locked(true);
+        assert!(editor.doc.get_mut(a).unwrap().locked);
+        assert!(editor.doc.get_mut(b).unwrap().locked);
+        assert_eq!(editor.undo.len(),1);
+    }
+    #[test]
+    fn create_layer_from_selection_moves_complete_group_atomically(){
+        let mut editor=Editor::default();editor.doc=Document::default();
+        let a=editor.doc.add(Shape::Rectangle{x:0.,y:0.,w:5.,h:5.},Style::default());
+        let b=editor.doc.add(Shape::Ellipse{x:10.,y:0.,w:5.,h:5.},Style::default());
+        editor.doc.group_objects(&[a,b]).unwrap();
+        editor.selected=Some(a);editor.multi_selected=vec![b];
+        editor.create_layer_from_selection();
+        assert_eq!(editor.doc.objects.iter().find(|o|o.id==a).unwrap().layer_id,editor.active_layer);
+        assert_eq!(editor.doc.objects.iter().find(|o|o.id==b).unwrap().layer_id,editor.active_layer);
+        assert_eq!(editor.doc.layer(editor.active_layer).unwrap().name,"Выделение 2");
+        assert_eq!(editor.undo.len(),1);
+        editor.undo();
+        assert_eq!(editor.doc.objects.iter().find(|o|o.id==a).unwrap().layer_id,1);
+        assert_eq!(editor.doc.objects.iter().find(|o|o.id==b).unwrap().layer_id,1);
+    }
+    #[test]
     fn one_step_object_reorder_is_undoable_and_layer_scoped(){
         let mut editor=Editor::default();
         editor.doc=Document::default();
