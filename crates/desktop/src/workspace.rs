@@ -219,6 +219,10 @@ impl Editor {
                         }
                     });
                 });
+                ui.menu_button("Композиции",|ui|{
+                    ui.set_min_width(275.0);
+                    self.pattern_studio_panel(ui);
+                });
                 ui.menu_button("Макет",|ui|{
                     ui.menu_button("Страницы документа",|ui|{
                         ui.label(format!("Страниц: {} / максимум 64",self.doc.page_count()));
@@ -1089,6 +1093,11 @@ impl Editor {
         if has_text_selection{
             ui.collapsing("Мастерская текста — 30 инструментов",|ui|{
                 self.text_studio_panel(ui);
+            });
+        }
+        if !self.selection_ids().is_empty(){
+            ui.collapsing("Композиции — 7 массивов и розеток",|ui|{
+                self.pattern_studio_panel(ui);
             });
         }
         ui.separator();
