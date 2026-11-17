@@ -122,7 +122,7 @@ impl Editor{
     pub(super) fn duplicate_preserving_styles(&mut self){
         let ids:HashSet<u64>=self.selection_ids().into_iter().collect();
         let copies:Vec<_>=self.doc.objects.iter().filter(|obj|
-            ids.contains(&obj.id)&&self.doc.is_object_editable(obj.id)).cloned().collect();
+            ids.contains(&obj.id)&&self.doc.object_is_editable(obj)).cloned().collect();
         if copies.is_empty(){
             self.status="Выделите редактируемые объекты для дублирования".into();return;
         }
@@ -144,7 +144,7 @@ impl Editor{
         let selected:HashSet<u64>=ids.iter().copied().collect();
         if self.doc.objects.iter().filter(|o|selected.contains(&o.id)).count()!=selected.len()
             || self.doc.objects.iter().filter(|o|selected.contains(&o.id))
-            .any(|o|o.group_id.is_some()||!self.doc.is_object_editable(o.id)){
+            .any(|o|o.group_id.is_some()||!self.doc.object_is_editable(o)){
             self.status="Сначала разгруппируйте прежние группы и разблокируйте слои".into();
             return;
         }
@@ -161,7 +161,7 @@ impl Editor{
         if groups.is_empty(){self.status="В выделении нет групп".into();return;}
         if self.doc.objects.iter().any(|o|o.group_id
             .map(|g|groups.contains(&g)).unwrap_or(false)
-            && !self.doc.is_object_editable(o.id)){
+            && !self.doc.object_is_editable(o)){
             self.status="Группа содержит объект из заблокированного слоя".into();return;
         }
         self.checkpoint();
@@ -204,7 +204,7 @@ impl Editor{
             new_x.abs()>100_000.0||new_y.abs()>100_000.0{return;}
         let Some(bounds)=self.selection_bounds() else{return;};
         let ids:HashSet<u64>=self.selection_ids().into_iter().collect();
-        if self.doc.objects.iter().any(|o|ids.contains(&o.id)&&!self.doc.is_object_editable(o.id)){
+        if self.doc.objects.iter().any(|o|ids.contains(&o.id)&&!self.doc.object_is_editable(o)){
             self.status="Выделение включает заблокированный слой".into();return;
         }
         let dx=new_x-bounds.x;
@@ -295,7 +295,7 @@ impl Editor{
         }
         let mut converted=Vec::new();
         for o in self.doc.objects.iter().filter(|o|ids.contains(&o.id)){
-            if !self.doc.is_object_editable(o.id){
+            if !self.doc.object_is_editable(o){
                 self.status="Выделение содержит объекты из недоступных слоёв".into();return;
             }
             let mut shape=o.shape.clone();
@@ -316,7 +316,7 @@ impl Editor{
     pub(super) fn nudge_selection(&mut self,dx:f32,dy:f32){
         let ids:HashSet<u64>=self.selection_ids().into_iter().collect();
         if self.doc.objects.iter().any(|o|
-            ids.contains(&o.id)&&!self.doc.is_object_editable(o.id)){
+            ids.contains(&o.id)&&!self.doc.object_is_editable(o)){
             self.status="Сдвиг отменён: в выделении есть заблокированный объект".into();
             return;
         }
