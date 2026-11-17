@@ -21,8 +21,7 @@ impl Editor{
                 self.status="Разгруппируйте фигуры перед логической операцией".into();
                 return;
             }
-            if ![a.layer_id,b.layer_id].iter().all(|id|
-                self.doc.layer(*id).map(|l|l.visible&&!l.locked).unwrap_or(false)){
+            if !self.doc.is_object_editable(a.id)||!self.doc.is_object_editable(b.id){
                 self.status="Операция отменена: слой скрыт или заблокирован".into();
                 return;
             }

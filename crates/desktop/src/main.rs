@@ -239,6 +239,9 @@ struct Editor{
     resize_drag_base:Option<Bounds>,
     resize_drag_checkpointed:bool,
     object_filter:String,
+    layer_rename_target:Option<u64>,
+    layer_rename_draft:String,
+    object_current_layer_only:bool,
     active_node:Option<(u64,NodeAddress)>,
     node_drag:Option<(u64,NodeAddress)>,
     node_drag_checkpointed:bool,
@@ -318,7 +321,9 @@ impl Default for Editor{
             internal_clipboard:Vec::new(),paste_number:0,
             show_welcome:true,toolbox_expanded:false,resize_drag:None,
             resize_drag_base:None,resize_drag_checkpointed:false,
-            object_filter:String::new(),active_node:None,node_drag:None,
+            object_filter:String::new(),layer_rename_target:None,
+            layer_rename_draft:String::new(),object_current_layer_only:false,
+            active_node:None,node_drag:None,
             node_drag_checkpointed:false}
     }
 }
@@ -460,8 +465,7 @@ fn trim_history(history:&mut Vec<Document>) {
 impl Editor{
     fn begin_inline_text_edit(&mut self,id:u64,pos:Pos2){
         let Some(object)=self.doc.objects.iter().find(|o|o.id==id) else{return;};
-        let editable=self.doc.layer(object.layer_id)
-            .is_some_and(|layer|layer.visible&&!layer.locked);
+        let editable=self.doc.is_object_editable(id);
         if !editable {
             self.status="Текст находится на скрытом или заблокированном слое".into();
             return;
@@ -483,8 +487,7 @@ impl Editor{
         let Some(object)=self.doc.objects.iter().find(|o|o.id==session.object_id) else{
             self.status="Объект больше не существует".into();return;
         };
-        let editable=self.doc.layer(object.layer_id)
-            .is_some_and(|layer|layer.visible&&!layer.locked);
+        let editable=self.doc.is_object_editable(session.object_id);
         if !editable {
             self.status="Нельзя изменять текст на заблокированном слое".into();return;
         }
@@ -555,14 +558,15 @@ impl Editor{
             self.status="Выделите один или несколько текстовых объектов".into();
             return;
         }
-        let editable:HashSet<u64>=self.doc.layers.iter()
-            .filter(|l|l.visible&&!l.locked).map(|l|l.id).collect();
+        if ids.iter().any(|id|!self.doc.is_object_editable(*id)){
+            self.status="Преобразование отменено: выделение содержит скрытые или заблокированные объекты".into();
+            return;
+        }
         let mut converted=Vec::new();
-        // Atomic batch: an unavailable font or glyph must not convert only half
-        // of a customer document.
+        // Atomic batch: an unavailable font, glyph or object lock must not
+        // convert only half of a selected document.
         for id in ids{
             let Some(obj)=self.doc.objects.iter().find(|o|o.id==id) else{continue;};
-            if !editable.contains(&obj.layer_id){continue;}
             if !matches!(obj.shape,Shape::Text{..}){continue;}
             match self.text_outliner.convert_object(obj){
                 Ok(shape)=>converted.push((id,shape)),
@@ -603,9 +607,7 @@ impl Editor{
         if self.tool!=Tool::Select || !self.multi_selected.is_empty(){return None;}
         let id=self.selected?;
         let o=self.doc.objects.iter().find(|o|o.id==id)?;
-        let editable=self.doc.layer(o.layer_id)
-            .map(|l|l.visible&&!l.locked).unwrap_or(false);
-        if !editable||!transform::resizable(&o.shape){return None;}
+        if !self.doc.is_object_editable(id)||!transform::resizable(&o.shape){return None;}
         let b=self.text_preview.ink_bounds(o).unwrap_or_else(||o.bounds());
         if b.w<0.1||b.h<0.1{return None;}
         for corner in [ResizeCorner::TopLeft,ResizeCorner::TopRight,
@@ -623,8 +625,7 @@ impl Editor{
             self.status="Недопустимая координата изменения размера".into();
             return;
         }
-        if !self.doc.layer(self.doc.objects[index].layer_id)
-            .is_some_and(|l|l.visible&&!l.locked) ||
+        if !self.doc.is_object_editable(id)||
             !transform::resizable(&self.doc.objects[index].shape){
             self.status="Размер заблокированного объекта изменить нельзя".into();
             return;
@@ -704,10 +705,8 @@ impl Editor{
         self.multi_selected=next.into_iter().skip(1).collect();
     }
     fn select_all(&mut self){
-        let editable:HashSet<u64>=self.doc.layers.iter().filter(|l|l.visible&&!l.locked)
-            .map(|l|l.id).collect();
         let ids:Vec<u64>=self.doc.objects.iter()
-            .filter(|o|editable.contains(&o.layer_id)).map(|o|o.id).collect();
+            .filter(|o|self.doc.object_is_editable(o)).map(|o|o.id).collect();
         self.selected=ids.first().copied();
         self.multi_selected=ids.into_iter().skip(1).collect();
         self.status=format!("Выбрано объектов: {}",self.selection_ids().len());
@@ -730,10 +729,8 @@ impl Editor{
     }
     fn layout_selection_available(&mut self,ids:&[u64])->bool{
         let ids:HashSet<u64>=ids.iter().copied().collect();
-        let editable:HashSet<u64>=self.doc.layers.iter()
-            .filter(|l|l.visible&&!l.locked).map(|l|l.id).collect();
         if self.doc.objects.iter().any(|o|ids.contains(&o.id)
-            && (!editable.contains(&o.layer_id)||o.group_id.is_some())){
+            && (!self.doc.object_is_editable(o)||o.group_id.is_some())){
             self.status="Выровнять можно только отдельные незаблокированные объекты. Группу сначала разгруппируйте.".into();
             return false;
         }
@@ -819,8 +816,9 @@ impl Editor{
         let layer_id=self.curve_draft
             .and_then(|id|self.doc.objects.iter().find(|o|o.id==id))
             .map(|o|o.layer_id).unwrap_or(self.active_layer);
-        if !self.doc.layer(layer_id).is_some_and(|layer|layer.visible&&!layer.locked){
-            self.status="Слой кривой скрыт или заблокирован".into();return;
+        if self.curve_draft.is_some_and(|id|!self.doc.is_object_editable(id))||
+            !self.doc.layer(layer_id).is_some_and(|layer|layer.visible&&!layer.locked){
+            self.status="Кривая находится на скрытом или заблокированном объекте/слое".into();return;
         }
         let Some(start)=self.curve_start else {
             self.curve_outgoing=None;
@@ -888,8 +886,7 @@ impl Editor{
         };
         if let Some(id)=self.curve_draft{
             let Some(object)=self.doc.objects.iter().find(|o|o.id==id) else{return;};
-            if !self.doc.layer(object.layer_id)
-                .is_some_and(|layer|layer.visible&&!layer.locked){return;}
+            if !self.doc.is_object_editable(id){return;}
             let affects_existing=matches!(&object.shape,Shape::Bezier{segments,..}
                 if segments.last().is_some_and(|last|
                     last.end==anchor && last.control2!=incoming));
@@ -913,8 +910,7 @@ impl Editor{
         if close{
             if let Some(id)=self.curve_draft{
                 let can_close=self.doc.objects.iter().find(|o|o.id==id)
-                    .is_some_and(|o|self.doc.layer(o.layer_id)
-                        .is_some_and(|l|l.visible&&!l.locked)
+                    .is_some_and(|o|self.doc.object_is_editable(o)
                         && matches!(&o.shape,Shape::Bezier{segments,closed:false,..}
                             if segments.len()>=2));
                 if can_close {
@@ -1332,7 +1328,7 @@ impl Editor{
             }
             let selected:HashSet<u64>=self.selection_ids().into_iter().collect();
             for o in self.doc.objects.iter().filter(|o|selected.contains(&o.id)){
-                if self.doc.layer(o.layer_id).map(|l|l.visible).unwrap_or(false){
+                if self.doc.is_object_visible(o.id){
                     let bounds=self.text_preview.ink_bounds(o).unwrap_or_else(||o.bounds());
                     outline(&page_painter,v.bounds(bounds).expand(3.0),
                         Color32::from_rgb(22,175,148),1.5);
@@ -2261,6 +2257,83 @@ mod tests {
         assert_eq!(editor.doc.objects.len(),original);
         editor.redo();
         assert_eq!(editor.doc.objects.len(),original+1);
+    }
+    #[test]
+    fn select_all_skips_hidden_and_locked_objects(){
+        let mut editor=Editor::default();
+        editor.doc=Document::default();
+        let visible=editor.doc.add(Shape::Rectangle{x:0.,y:0.,w:10.,h:10.},Style::default());
+        let hidden=editor.doc.add(Shape::Rectangle{x:20.,y:0.,w:10.,h:10.},Style::default());
+        let locked=editor.doc.add(Shape::Rectangle{x:40.,y:0.,w:10.,h:10.},Style::default());
+        editor.doc.get_mut(hidden).unwrap().visible=false;
+        editor.doc.get_mut(locked).unwrap().locked=true;
+        editor.select_all();
+        assert_eq!(editor.selection_ids(),vec![visible]);
+    }
+    #[test]
+    fn locked_object_cannot_be_picked_or_deleted_but_can_be_unlocked_from_manager(){
+        let mut editor=Editor::default();
+        editor.doc=Document::default();
+        let id=editor.doc.add(Shape::Rectangle{x:0.,y:0.,w:20.,h:20.},Style::default());
+        editor.doc.get_mut(id).unwrap().locked=true;
+        assert_eq!(editor.hit_test_at(Point{x:10.,y:10.},0.),None);
+        editor.selected=Some(id);
+        editor.delete_selection();
+        assert!(editor.doc.get_mut(id).is_some());
+        assert!(editor.undo.is_empty());
+        editor.doc.get_mut(id).unwrap().locked=false;
+        editor.delete_selection();
+        assert!(editor.doc.get_mut(id).is_none());
+        assert_eq!(editor.undo.len(),1);
+    }
+    #[test]
+    fn bulk_object_visibility_and_lock_changes_are_one_undo_step(){
+        let mut editor=Editor::default();editor.doc=Document::default();
+        let a=editor.doc.add(Shape::Rectangle{x:0.,y:0.,w:5.,h:5.},Style::default());
+        let b=editor.doc.add(Shape::Ellipse{x:10.,y:0.,w:5.,h:5.},Style::default());
+        editor.selected=Some(a);editor.multi_selected=vec![b];
+        editor.set_selection_visibility(false);
+        assert!(!editor.doc.get_mut(a).unwrap().visible);
+        assert!(!editor.doc.get_mut(b).unwrap().visible);
+        assert_eq!(editor.undo.len(),1);
+        editor.undo();
+        assert!(editor.doc.get_mut(a).unwrap().visible);
+        assert!(editor.doc.get_mut(b).unwrap().visible);
+        editor.selected=Some(a);editor.multi_selected=vec![b];
+        editor.set_selection_locked(true);
+        assert!(editor.doc.get_mut(a).unwrap().locked);
+        assert!(editor.doc.get_mut(b).unwrap().locked);
+        assert_eq!(editor.undo.len(),1);
+    }
+    #[test]
+    fn create_layer_from_selection_moves_complete_group_atomically(){
+        let mut editor=Editor::default();editor.doc=Document::default();
+        let a=editor.doc.add(Shape::Rectangle{x:0.,y:0.,w:5.,h:5.},Style::default());
+        let b=editor.doc.add(Shape::Ellipse{x:10.,y:0.,w:5.,h:5.},Style::default());
+        editor.doc.group_objects(&[a,b]).unwrap();
+        editor.selected=Some(a);editor.multi_selected=vec![b];
+        editor.create_layer_from_selection();
+        assert_eq!(editor.doc.objects.iter().find(|o|o.id==a).unwrap().layer_id,editor.active_layer);
+        assert_eq!(editor.doc.objects.iter().find(|o|o.id==b).unwrap().layer_id,editor.active_layer);
+        assert_eq!(editor.doc.layer(editor.active_layer).unwrap().name,"Выделение 1");
+        assert_eq!(editor.undo.len(),1);
+        editor.undo();
+        assert_eq!(editor.doc.objects.iter().find(|o|o.id==a).unwrap().layer_id,1);
+        assert_eq!(editor.doc.objects.iter().find(|o|o.id==b).unwrap().layer_id,1);
+    }
+    #[test]
+    fn one_step_object_reorder_is_undoable_and_layer_scoped(){
+        let mut editor=Editor::default();
+        editor.doc=Document::default();
+        let a=editor.doc.add(Shape::Rectangle{x:0.,y:0.,w:5.,h:5.},Style::default());
+        let b=editor.doc.add(Shape::Rectangle{x:10.,y:0.,w:5.,h:5.},Style::default());
+        let c=editor.doc.add(Shape::Rectangle{x:20.,y:0.,w:5.,h:5.},Style::default());
+        editor.selected=Some(b);
+        editor.reorder_selection_step(true);
+        assert_eq!(editor.doc.objects.iter().map(|o|o.id).collect::<Vec<_>>(),vec![a,c,b]);
+        assert_eq!(editor.undo.len(),1);
+        editor.undo();
+        assert_eq!(editor.doc.objects.iter().map(|o|o.id).collect::<Vec<_>>(),vec![a,b,c]);
     }
     #[test]
     fn concave_polygon_fill_is_triangulated(){

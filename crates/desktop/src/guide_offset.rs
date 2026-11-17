@@ -151,8 +151,7 @@ impl Editor{
         let Some(source)=self.doc.objects.iter().find(|o|o.id==id).cloned()
             else{return;};
         if source.group_id.is_some() ||
-            !self.doc.layer(source.layer_id)
-                .is_some_and(|l|l.visible&&!l.locked){
+            !self.doc.is_object_editable(id){
             self.status="Смещение недоступно для групп и заблокированных слоёв".into();
             return;
         }

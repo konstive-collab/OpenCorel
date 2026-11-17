@@ -5,6 +5,7 @@ use base64::Engine;
 use std::{collections::{HashSet,BTreeMap}, fs, io::{self, Write}, path::Path};
 
 pub mod svg_import;
+pub mod object_manager;
 pub mod kdr;
 pub mod preflight;
 pub mod print_sheet;
@@ -213,11 +214,18 @@ impl TextFormat{
         Ok(())
     }
 }
+fn default_object_visible()->bool{true}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Object {
     pub id: u64,
     pub shape: Shape,
     pub style: Style,
+    /// Per-object visibility and edit protection; absent in legacy KDR means visible/unlocked.
+    #[serde(default="default_object_visible")]
+    pub visible:bool,
+    #[serde(default)]
+    pub locked:bool,
     #[serde(default="default_layer_id")]
     pub layer_id: u64,
     #[serde(default)]
@@ -334,9 +342,9 @@ impl Document {
         if source.group_id.is_some() || target.group_id.is_some() {
             return Err("Grouped objects cannot be clipping operands".into());
         }
-        let editable=|layer_id|self.layer(layer_id)
-            .is_some_and(|l|l.visible&&!l.locked);
-        if !editable(source.layer_id)||!editable(target.layer_id) {
+        let editable=|object:&Object|self.layer(object.layer_id)
+            .is_some_and(|l|l.visible&&!l.locked)&&object.visible&&!object.locked;
+        if !editable(source)||!editable(target) {
             return Err("Clipping operands must be on visible, unlocked layers".into());
         }
         if self.clip_links.iter().any(|c|c.target_id==source_id ||
@@ -364,7 +372,7 @@ impl Document {
         appearance.validate()?;
         let obj=self.objects.iter().find(|o|o.id==id)
             .ok_or("Appearance target not found")?;
-        if !self.layer(obj.layer_id).is_some_and(|l|l.visible&&!l.locked){
+        if !self.layer(obj.layer_id).is_some_and(|l|l.visible&&!l.locked)||!obj.visible||obj.locked{
             return Err("Cannot style an object on a hidden or locked layer".into());
         }
         if appearance.is_default(){self.appearances.remove(&id);}
@@ -382,6 +390,7 @@ impl Document {
         let id=self.next_id;
         self.next_id+=1;
         self.objects.push(Object{id,shape,style,layer_id,
+            visible:true,locked:false,
             text_format:TextFormat::default(),name:String::new(),group_id:None,
             node_modes:Vec::new()});
         id
@@ -395,7 +404,7 @@ impl Document {
             .filter(|layer|layer.visible&&!layer.locked).map(|layer|layer.id).collect();
         let chosen:Vec<_>=self.objects.iter().filter(|o|wanted.contains(&o.id)).collect();
         if chosen.len()!=wanted.len() || chosen.iter().any(|o|
-            !eligible.contains(&o.layer_id)||o.group_id.is_some()){
+            !eligible.contains(&o.layer_id)||!o.visible||o.locked||o.group_id.is_some()){
             return Err("Objects must exist, be editable and not already grouped".into());
         }
         if self.next_id==u64::MAX{return Err("Group ID limit exceeded".into());}
@@ -414,7 +423,7 @@ impl Document {
         let eligible:HashSet<u64>=self.layers.iter().filter(|l|l.visible&&!l.locked)
             .map(|l|l.id).collect();
         if self.objects.iter().any(|o|o.group_id.map(|g|groups.contains(&g))
-            .unwrap_or(false)&&!eligible.contains(&o.layer_id)){
+            .unwrap_or(false)&&(!eligible.contains(&o.layer_id)||!o.visible||o.locked)){
             return Err("Cannot ungroup objects on hidden or locked layers".into());
         }
         let mut count=0;
@@ -440,10 +449,13 @@ impl Document {
     pub fn layer(&self,id:u64)->Option<&Layer>{
         self.layers.iter().find(|layer|layer.id==id)
     }
+    /// Paint in layer-stack order (bottom to top), preserving object order
+    /// within each layer. This makes the layer manager's stack controls
+    /// affect both canvas and exported SVG/PDF consistently.
     pub fn visible_objects(&self)->impl Iterator<Item=&Object>{
-        let visible:HashSet<u64>=self.layers.iter().filter(|layer|layer.visible)
-            .map(|layer|layer.id).collect();
-        self.objects.iter().filter(move |obj|visible.contains(&obj.layer_id))
+        self.layers.iter().filter(|layer|layer.visible).flat_map(move |layer|
+            self.objects.iter().filter(move |obj|
+                obj.layer_id==layer.id&&obj.visible))
     }
     pub fn get_mut(&mut self,id:u64) -> Option<&mut Object> {
         self.objects.iter_mut().find(|o|o.id==id)
@@ -464,7 +476,7 @@ impl Document {
         // Never align only part of a locked or grouped selection. Individual
         // group members must not be rearranged, breaking the group geometry.
         if self.objects.iter().any(|o|wanted.contains(&o.id)
-            && (!editable.contains(&o.layer_id)||o.group_id.is_some())){
+            && (!editable.contains(&o.layer_id)||!o.visible||o.locked||o.group_id.is_some())){
             return 0;
         }
         let objects:Vec<_>=self.objects.iter().filter(|o|
@@ -495,7 +507,7 @@ impl Document {
         let editable:HashSet<u64>=self.layers.iter()
             .filter(|l|l.visible&&!l.locked).map(|l|l.id).collect();
         if self.objects.iter().any(|o|wanted.contains(&o.id)
-            && (!editable.contains(&o.layer_id)||o.group_id.is_some())){
+            && (!editable.contains(&o.layer_id)||!o.visible||o.locked||o.group_id.is_some())){
             return 0;
         }
         let mut positions:Vec<(u64,f32)>=self.objects.iter().filter(|o|
@@ -542,17 +554,20 @@ impl Document {
     where F:Fn(&Object)->Bounds,G:Fn(&Object,Point,f32)->bool{
         if !p.x.is_finite() || !p.y.is_finite() ||
             !tolerance.is_finite() || tolerance<0.0{return None;}
-        let editable:HashSet<u64>=self.layers.iter()
-            .filter(|layer|layer.visible&&!layer.locked).map(|layer|layer.id).collect();
         let sources:HashSet<u64>=self.clip_links.iter().map(|c|c.source_id).collect();
-        self.objects.iter().rev().find(|o|{
-            if !editable.contains(&o.layer_id) || sources.contains(&o.id)
-                || !bounds(o).contains(p,tolerance) ||
-                !shape_hit(o,p,tolerance){return false;}
-            self.clip_links.iter().find(|link|link.target_id==o.id)
-                .is_none_or(|link|self.objects.iter().find(|src|src.id==link.source_id)
-                    .is_some_and(|src|clip_contains_point(&src.shape,p)))
-        }).map(|o|o.id)
+        for layer in self.layers.iter().rev().filter(|l|l.visible&&!l.locked){
+            if let Some(object)=self.objects.iter().rev().find(|o|{
+                if o.layer_id!=layer.id||!o.visible||o.locked||
+                    sources.contains(&o.id)||!bounds(o).contains(p,tolerance)||
+                    !shape_hit(o,p,tolerance){return false;}
+                self.clip_links.iter().find(|link|link.target_id==o.id)
+                    .is_none_or(|link|self.objects.iter().find(|src|src.id==link.source_id)
+                        .is_some_and(|src|clip_contains_point(&src.shape,p)))
+            }){
+                return Some(object.id);
+            }
+        }
+        None
     }
     pub fn validate(&self)->Result<(),String>{
         if self.schema_version!=SCHEMA_VERSION {return Err("Unknown document schema".into());}

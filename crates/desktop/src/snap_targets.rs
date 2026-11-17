@@ -32,7 +32,7 @@ pub(super) fn nearest_anchor(
     for obj in doc.objects.iter().take(MAX_OBJECTS){
         if visited.get()>=MAX_VISITED_POINTS{break;}
         if Some(obj.id)==excluded_id{continue;}
-        if !doc.layer(obj.layer_id).is_some_and(|layer|layer.visible){continue;}
+        if !obj.visible||!doc.layer(obj.layer_id).is_some_and(|layer|layer.visible){continue;}
         let mut check=|candidate:Point|{
             if visited.get()>=MAX_VISITED_POINTS{return;}
             visited.set(visited.get()+1);

@@ -29,9 +29,7 @@ impl Editor {
         let candidates:Vec<_>=ids.iter().copied().filter(|id|
             self.doc.clip_links.iter().any(|c|c.target_id==*id)).collect();
         if candidates.is_empty(){self.status="У выделенных объектов нет обтравки".into();return;}
-        let editable=candidates.iter().all(|id|self.doc.objects.iter().find(|o|o.id==*id)
-            .and_then(|o|self.doc.layer(o.layer_id))
-            .is_some_and(|layer|layer.visible&&!layer.locked));
+        let editable=candidates.iter().all(|id|self.doc.is_object_editable(*id));
         if !editable{
             self.status="Нельзя изменить обтравку на скрытом или заблокированном слое".into();
             return;

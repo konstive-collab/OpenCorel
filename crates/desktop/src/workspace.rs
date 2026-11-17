@@ -692,34 +692,122 @@ impl Editor {
     fn inspector_objects(&mut self,ui:&mut egui::Ui){
         ui.horizontal(|ui|{
             ui.heading("СЛОИ");
-            if ui.small_button("+ Слой").on_hover_text("Создать новый слой").clicked(){
-                self.checkpoint();
-                let name=format!("Слой {}",self.doc.layers.len()+1);
-                self.active_layer=self.doc.add_layer(name);
+            if ui.small_button("+ Слой").on_hover_text("Создать новый слой сверху стека").clicked(){
+                if self.doc.layers.len()>=1024||self.doc.next_layer_id==u64::MAX{
+                    self.status="Достигнут лимит слоёв".into();
+                }else{
+                    self.checkpoint();
+                    let name=format!("Слой {}",self.doc.layers.len()+1);
+                    self.active_layer=self.doc.add_layer(name);
+                    self.layer_rename_target=Some(self.active_layer);
+                    self.layer_rename_draft=self.doc.layer(self.active_layer)
+                        .map(|l|l.name.clone()).unwrap_or_default();
+                }
             }
+            ui.label(RichText::new(format!("{}/1024",self.doc.layers.len()))
+                .small().color(Color32::GRAY));
         });
-        let layers:Vec<_>=self.doc.layers.iter()
-            .map(|layer|(layer.id,layer.name.clone(),layer.visible,layer.locked)).collect();
-        for (id,name,mut visible,mut locked) in layers{
+        ui.small("Слои расположены сверху вниз: верхние перекрывают нижние. Порядок влияет на холст и экспорт.");
+        let layers:Vec<_>=self.doc.layers.iter().enumerate().rev()
+            .map(|(index,layer)|(index,layer.id,layer.name.clone(),
+                layer.visible,layer.locked,
+                self.doc.objects.iter().filter(|o|o.layer_id==layer.id).count()))
+            .collect();
+        for (index,id,name,mut visible,mut locked,object_count) in layers{
             ui.horizontal(|ui|{
                 if ui.selectable_label(self.active_layer==id,
-                    format!("{} {}",if visible{"●"}else{"○"},name)).clicked(){
+                    format!("{} {}",if visible{"●"}else{"○"},name))
+                    .on_hover_text(format!("Слой #{id}, объектов: {object_count}"))
+                    .clicked(){
                     self.active_layer=id;
+                    self.layer_rename_target=Some(id);
+                    self.layer_rename_draft=name.clone();
                 }
-                if ui.checkbox(&mut visible,"").on_hover_text("Видимость").changed(){
+                if ui.small_button(if visible{"◉"}else{"○"})
+                    .on_hover_text("Показать/скрыть слой").clicked(){
                     self.checkpoint();
                     if let Some(layer)=self.doc.layers.iter_mut().find(|l|l.id==id){
-                        layer.visible=visible;
+                        layer.visible=!visible;
+                    }
+                    self.status=format!("Слой «{name}»: видимость изменена");
+                }
+                if ui.small_button(if locked{"■"}else{"□"})
+                    .on_hover_text("Заблокировать/разблокировать слой").clicked(){
+                    self.checkpoint();
+                    if let Some(layer)=self.doc.layers.iter_mut().find(|l|l.id==id){
+                        layer.locked=!locked;
+                    }
+                    self.status=format!("Слой «{name}»: блокировка изменена");
+                }
+                if ui.small_button("↑").on_hover_text("Поднять слой в стеке").clicked(){
+                    let mut candidate=self.doc.clone();
+                    match candidate.move_layer_to(id,(index+1).min(candidate.layers.len()-1)){
+                        Ok(())=>{
+                            self.checkpoint();self.doc=candidate;
+                            self.status=format!("Слой «{name}» поднят");
+                        },Err(e)=>self.status=e,
                     }
                 }
-                if ui.checkbox(&mut locked,"").on_hover_text("Блокировка").changed(){
-                    self.checkpoint();
-                    if let Some(layer)=self.doc.layers.iter_mut().find(|l|l.id==id){
-                        layer.locked=locked;
+                if ui.small_button("↓").on_hover_text("Опустить слой в стеке").clicked(){
+                    let mut candidate=self.doc.clone();
+                    match candidate.move_layer_to(id,index.saturating_sub(1)){
+                        Ok(())=>{
+                            self.checkpoint();self.doc=candidate;
+                            self.status=format!("Слой «{name}» опущен");
+                        },Err(e)=>self.status=e,
+                    }
+                }
+                if ui.small_button("⧉").on_hover_text("Дублировать слой вместе с объектами").clicked(){
+                    let mut candidate=self.doc.clone();
+                    match candidate.duplicate_layer(id){
+                        Ok(new_id)=>{
+                            self.checkpoint();self.doc=candidate;self.active_layer=new_id;
+                            self.layer_rename_target=Some(new_id);
+                            self.layer_rename_draft=self.doc.layer(new_id)
+                                .map(|l|l.name.clone()).unwrap_or_default();
+                            self.status=format!("Создана копия слоя «{name}»");
+                        },Err(e)=>self.status=e,
+                    }
+                }
+                if ui.small_button("×").on_hover_text("Удалить слой; объекты сохранятся в основном слое").clicked(){
+                    let mut candidate=self.doc.clone();
+                    match candidate.delete_layer(id){
+                        Ok(fallback)=>{
+                            let fallback_name=candidate.layer(fallback)
+                                .map(|l|l.name.clone()).unwrap_or_else(||format!("#{fallback}"));
+                            self.checkpoint();self.doc=candidate;
+                            if self.active_layer==id{self.active_layer=fallback;}
+                            self.layer_rename_target=None;
+                            self.status=format!("Слой «{name}» удалён; объекты перенесены в «{fallback_name}»");
+                        },Err(e)=>self.status=e,
                     }
                 }
             });
         }
+        if self.layer_rename_target!=Some(self.active_layer){
+            self.layer_rename_target=Some(self.active_layer);
+            self.layer_rename_draft=self.doc.layer(self.active_layer)
+                .map(|l|l.name.clone()).unwrap_or_default();
+        }
+        ui.horizontal(|ui|{
+            ui.label("Имя:");
+            ui.add(egui::TextEdit::singleline(&mut self.layer_rename_draft)
+                .desired_width(130.0));
+            let can_rename=self.doc.layer(self.active_layer)
+                .is_some_and(|l|!l.locked);
+            if ui.add_enabled(can_rename,egui::Button::new("Сохранить имя"))
+                .clicked(){
+                let mut candidate=self.doc.clone();
+                match candidate.rename_layer(self.active_layer,&self.layer_rename_draft){
+                    Ok(())=>{
+                        if candidate!=self.doc{
+                            self.checkpoint();self.doc=candidate;
+                        }
+                        self.status="Название слоя сохранено".into();
+                    },Err(e)=>self.status=e,
+                }
+            }
+        });
         ui.separator();
         ui.horizontal(|ui|{
             ui.heading("ОБЪЕКТЫ");
@@ -728,7 +816,46 @@ impl Editor {
         });
         ui.add(egui::TextEdit::singleline(&mut self.object_filter)
             .hint_text("Поиск объекта или названия..."));
-        ui.horizontal(|ui|{
+        ui.checkbox(&mut self.object_current_layer_only,"Только активный слой");
+        ui.horizontal_wrapped(|ui|{
+            if ui.button("Выделить слой").on_hover_text("Выбрать все доступные объекты активного слоя").clicked(){
+                let ids:Vec<u64>=self.doc.objects.iter()
+                    .filter(|o|o.layer_id==self.active_layer&&
+                        self.doc.object_is_editable(o))
+                    .map(|o|o.id).collect();
+                self.selected=ids.first().copied();
+                self.multi_selected=ids.into_iter().skip(1).collect();
+                self.status=format!("Выбрано объектов активного слоя: {}",self.selection_ids().len());
+            }
+            if ui.add_enabled(!self.selection_ids().is_empty(),
+                egui::Button::new("В активный слой"))
+                .on_hover_text("Перенести всё выделение, не разрушая группы")
+                .clicked(){
+                let ids=self.selection_ids();
+                let mut candidate=self.doc.clone();
+                match candidate.move_objects_to_layer(&ids,self.active_layer){
+                    Ok(count)=>{
+                        self.checkpoint();self.doc=candidate;
+                        self.status=format!("Перемещено в активный слой: {count}");
+                    },Err(e)=>self.status=e,
+                }
+            }
+        });
+        ui.horizontal_wrapped(|ui|{
+            let has_selection=!self.selection_ids().is_empty();
+            if ui.add_enabled(has_selection,egui::Button::new("В новый слой"))
+                .on_hover_text("Создать слой и перенести в него всё выделение")
+                .clicked(){self.create_layer_from_selection();}
+            if ui.add_enabled(has_selection,egui::Button::new("Скрыть"))
+                .clicked(){self.set_selection_visibility(false);}
+            if ui.add_enabled(has_selection,egui::Button::new("Показать"))
+                .clicked(){self.set_selection_visibility(true);}
+            if ui.add_enabled(has_selection,egui::Button::new("Блок"))
+                .clicked(){self.set_selection_locked(true);}
+            if ui.add_enabled(has_selection,egui::Button::new("Разблок"))
+                .clicked(){self.set_selection_locked(false);}
+        });
+        ui.horizontal_wrapped(|ui|{
             if ui.add_enabled(self.selection_ids().len()>=2,
                 egui::Button::new("Группа  Ctrl+G")).clicked(){
                 self.group_selection();
@@ -736,63 +863,84 @@ impl Editor {
             if ui.button("Разгрупп.").on_hover_text("Ctrl+Shift+G").clicked(){
                 self.ungroup_selection();
             }
+            if ui.add_enabled(!self.selection_ids().is_empty(),
+                egui::Button::new("↑ Порядок")).on_hover_text("На один уровень выше в своём слое").clicked(){
+                self.reorder_selection_step(true);
+            }
+            if ui.add_enabled(!self.selection_ids().is_empty(),
+                egui::Button::new("↓ Порядок")).on_hover_text("На один уровень ниже в своём слое").clicked(){
+                self.reorder_selection_step(false);
+            }
         });
         let query=self.object_filter.trim().to_lowercase();
-        let filtered:Option<Vec<usize>>=if query.is_empty(){None}else{
-            Some(self.doc.objects.iter().enumerate().filter_map(|(index,obj)|{
-                let label=if !obj.name.is_empty(){obj.name.to_lowercase()}else{
+        let mut entries:Vec<(u64,u64,String,bool,bool,bool,Option<u64>)>=Vec::new();
+        for layer in self.doc.layers.iter().rev(){
+            if self.object_current_layer_only&&layer.id!=self.active_layer{continue;}
+            for obj in self.doc.objects.iter().rev().filter(|o|o.layer_id==layer.id){
+                let display=if !obj.name.is_empty(){obj.name.clone()}else{
                     match &obj.shape{
-                        Shape::Text{value,..}=>value.to_lowercase(),
-                        Shape::Rectangle{..}=>"прямоугольник".into(),
-                        Shape::Ellipse{..}=>"эллипс".into(),
-                        Shape::Raster{..}=>"фото изображение".into(),
-                        Shape::EmbeddedSvg{..}=>"вектор".into(),
-                        Shape::CompoundPath{..}=>"контуры".into(),
-                        Shape::Bezier{..}=>"кривая".into(),
-                        Shape::Polyline{..}=>"линия".into(),
+                        Shape::Rectangle{..}=>"▭ Прямоугольник".to_string(),
+                        Shape::Ellipse{..}=>"◯ Эллипс".into(),
+                        Shape::Text{value,..}=>format!("T {}",value.chars().take(24).collect::<String>()),
+                        Shape::Bezier{..}=>"⌁ Безье".into(),
+                        Shape::CompoundPath{contours}=>format!("✒ Контуры ({})",contours.len()),
+                        Shape::Polyline{..}=>"╱ Линия".into(),
+                        Shape::EmbeddedSvg{source_format,..}=>format!("▧ Вектор {source_format}"),
+                        Shape::Raster{pixel_width,pixel_height,..}=>format!("▧ Фото {pixel_width}×{pixel_height}"),
                     }
                 };
-                if label.contains(&query)||obj.id.to_string().contains(&query){
-                    Some(index)
-                }else{None}
-            }).collect())
-        };
-        let count=filtered.as_ref().map_or(self.doc.objects.len(),Vec::len);
-        ui.label(RichText::new(format!("Показано: {count}. Shift — множественное выделение."))
+                let search_text=match &obj.shape{
+                    Shape::Text{value,..}=>format!("{} {}",display,value).to_lowercase(),
+                    _=>display.to_lowercase(),
+                };
+                if !query.is_empty()&&!search_text.contains(&query)&&
+                    !obj.id.to_string().contains(&query){continue;}
+                entries.push((obj.id,layer.id,display,obj.visible,obj.locked,
+                    layer.visible,obj.group_id));
+            }
+        }
+        let count=entries.len();
+        ui.label(RichText::new(format!("Показано: {count}. Shift — множественное выделение. Глаз и замок работают отдельно для каждого объекта."))
             .small().color(Color32::GRAY));
         egui::ScrollArea::vertical().id_salt("objects_list")
-            .show_rows(ui,26.0,count,|ui,rows|{
+            .show_rows(ui,27.0,count,|ui,rows|{
                 for row in rows{
-                    let index=if let Some(ref filtered)=filtered{
-                        filtered[count-1-row]
-                    }else{count-1-row};
-                    let obj=&self.doc.objects[index];
-                    let id=obj.id;let layer_id=obj.layer_id;
-                    let display=if obj.name.is_empty(){
-                        match &obj.shape{
-                            Shape::Rectangle{..}=>"▭ Прямоугольник".to_string(),
-                            Shape::Ellipse{..}=>"◯ Эллипс".into(),
-                            Shape::Text{value,..}=>format!("T {}",value.chars().take(20).collect::<String>()),
-                            Shape::Bezier{..}=>"⌁ Безье".into(),
-                            Shape::CompoundPath{contours}=>format!("✒ Контуры ({})",contours.len()),
-                            Shape::Polyline{..}=>"╱ Линия".into(),
-                            Shape::EmbeddedSvg{source_format,..}=>format!("▧ Вектор {source_format}"),
-                            Shape::Raster{pixel_width,pixel_height,..}=>format!("▧ Фото {pixel_width}×{pixel_height}"),
+                    let (id,layer_id,display,mut visible,mut locked,layer_visible,group)=
+                        entries[count-1-row].clone();
+                    ui.horizontal(|ui|{
+                        if ui.small_button(if visible{"◉"}else{"○"})
+                            .on_hover_text("Показать/скрыть объект").clicked(){
+                            self.checkpoint();
+                            if let Some(obj)=self.doc.get_mut(id){obj.visible=!visible;}
+                            self.status=format!("Видимость объекта #{id} изменена");
                         }
-                    }else{obj.name.clone()};
-                    let name=if let Some(group)=obj.group_id{
-                        format!("▣ {}  · G{}",display,group)
-                    }else{display};
-                    let visible=self.doc.layer(layer_id).map(|l|l.visible).unwrap_or(false);
-                    let button=egui::Button::new(name)
-                        .selected(self.is_selected(id))
-                        .min_size(Vec2::new(ui.available_width(),23.0));
-                    if ui.add_enabled(visible,button).clicked(){
-                        let shift=ui.input(|i|i.modifiers.shift);
-                        self.select_object(Some(id),shift);
-                        self.active_layer=layer_id;
-                        self.inspector_tab=InspectorTab::Properties;
-                    }
+                        if ui.small_button(if locked{"■"}else{"□"})
+                            .on_hover_text("Заблокировать/разблокировать объект").clicked(){
+                            self.checkpoint();
+                            if let Some(obj)=self.doc.get_mut(id){obj.locked=!locked;}
+                            self.status=format!("Блокировка объекта #{id} изменена");
+                        }
+                        let name=if let Some(group)=group{
+                            format!("▣ {display} · G{group}")
+                        }else{display.clone()};
+                        let label=if !layer_visible{
+                            RichText::new(name).color(Color32::GRAY)
+                        }else if !visible{
+                            RichText::new(name).weak()
+                        }else{RichText::new(name)};
+                        let button=egui::Button::new(label)
+                            .selected(self.is_selected(id))
+                            .min_size(Vec2::new(ui.available_width()-24.0,23.0));
+                        if ui.add(button).clicked(){
+                            let shift=ui.input(|i|i.modifiers.shift);
+                            self.select_object(Some(id),shift);
+                            self.active_layer=layer_id;
+                            self.inspector_tab=InspectorTab::Properties;
+                            self.layer_rename_target=Some(layer_id);
+                            self.layer_rename_draft=self.doc.layer(layer_id)
+                                .map(|l|l.name.clone()).unwrap_or_default();
+                        }
+                    });
                 }
             });
     }
@@ -1149,13 +1297,12 @@ impl Editor {
             _=>None
         };
         if let Some((raster,mut x,mut y,mut width,mut height,pw,ph,source))=asset{
-            let allowed=self.doc.layer(self.doc.objects[index].layer_id)
-                .map(|l|l.visible&&!l.locked).unwrap_or(false);
+            let allowed=self.doc.is_object_editable(id);
             ui.heading(format!("Объект #{id}"));
             if self.multi_selected.len()>0{
                 ui.label(format!("Выбрано {} объектов",self.selection_ids().len()));
             }
-            if !allowed{ui.colored_label(Color32::RED,"Слой заблокирован");}
+            if !allowed{ui.colored_label(Color32::RED,"Объект или слой скрыт/заблокирован");}
             let mut changed=false;
             ui.add_enabled_ui(allowed,|ui|{
                 if raster{
@@ -1237,12 +1384,11 @@ impl Editor {
                     segments:c.segments.iter().take(20).copied().collect()
                 }).collect();
             let mut style=self.doc.objects[index].style.clone();
-            let allowed=self.doc.layer(self.doc.objects[index].layer_id)
-                .map(|layer|layer.visible&&!layer.locked).unwrap_or(false);
+            let allowed=self.doc.is_object_editable(id);
             ui.heading(format!("Составной векторный объект #{id}"));
             ui.label(format!("Контуров: {total}, сегментов: {segments}"));
             ui.label("Отверстия букв сохраняются (even-odd).");
-            if !allowed {ui.colored_label(Color32::RED,"Слой заблокирован");}
+            if !allowed {ui.colored_label(Color32::RED,"Объект или слой скрыт/заблокирован");}
             let mut changed=false;
             ui.add_enabled_ui(allowed,|ui|{
                 ui.collapsing("Изменить координаты контуров",|ui|{
@@ -1303,12 +1449,12 @@ impl Editor {
             return;
         }
         let mut object=self.doc.objects[index].clone();
-        let editing_allowed=self.doc.layer(object.layer_id).map(|l|l.visible&&!l.locked).unwrap_or(false);
+        let editing_allowed=self.doc.is_object_editable(id);
         ui.heading(format!("Объект #{id}"));
         if !self.multi_selected.is_empty(){
             ui.label(format!("Выделено {} объектов. Свойства основного объекта:",self.selection_ids().len()));
         }
-        if !editing_allowed {ui.colored_label(Color32::RED,"Слой скрыт или заблокирован");}
+        if !editing_allowed {ui.colored_label(Color32::RED,"Объект или слой скрыт/заблокирован");}
         ui.add_enabled_ui(editing_allowed,|ui|{
             let mut changed=false;
             match &mut object.shape{
@@ -1818,17 +1964,16 @@ impl Editor {
         if !valid_paint(value){return;}
         let ids:HashSet<u64>=self.selection_ids().into_iter().collect();
         if ids.is_empty(){self.status="Сначала выберите объект".into();return;}
-        let editable:HashSet<u64>=self.doc.layers.iter()
-            .filter(|l|l.visible&&!l.locked).map(|l|l.id).collect();
+        let editable=self.doc.editable_object_ids();
         if self.doc.objects.iter().filter(|o|ids.contains(&o.id))
-            .any(|o|!editable.contains(&o.layer_id)){
+            .any(|o|!editable.contains(&o.id)){
             self.status="Цвет не изменён: часть выделения находится в закрытом слое".into();
             return;
         }
         if !self.doc.objects.iter().any(|o|ids.contains(&o.id)){return;}
         self.checkpoint();
         for obj in self.doc.objects.iter_mut(){
-            if ids.contains(&obj.id)&&editable.contains(&obj.layer_id){
+            if ids.contains(&obj.id)&&editable.contains(&obj.id){
                 if is_stroke{
                     obj.style.stroke=value.into();
                     if value!="none" && obj.style.stroke_width_mm==0.0{
@@ -1838,14 +1983,66 @@ impl Editor {
             }
         }
     }
+    pub(super) fn set_selection_visibility(&mut self,visible:bool){
+        let ids:HashSet<u64>=self.selection_ids().into_iter().collect();
+        if ids.is_empty(){self.status="Сначала выделите объекты".into();return;}
+        let changed=self.doc.objects.iter().filter(|o|ids.contains(&o.id))
+            .any(|o|o.visible!=visible);
+        if !changed{
+            self.status=if visible{"Выделенные объекты уже видимы".into()}
+                else{"Выделенные объекты уже скрыты".into()};
+            return;
+        }
+        self.checkpoint();
+        for object in &mut self.doc.objects{
+            if ids.contains(&object.id){object.visible=visible;}
+        }
+        self.status=if visible{"Видимость выделенных объектов восстановлена".into()}
+            else{"Выделенные объекты скрыты; их можно вернуть из панели объектов".into()};
+    }
+    pub(super) fn set_selection_locked(&mut self,locked:bool){
+        let ids:HashSet<u64>=self.selection_ids().into_iter().collect();
+        if ids.is_empty(){self.status="Сначала выделите объекты".into();return;}
+        let changed=self.doc.objects.iter().filter(|o|ids.contains(&o.id))
+            .any(|o|o.locked!=locked);
+        if !changed{
+            self.status=if locked{"Выделенные объекты уже заблокированы".into()}
+                else{"Выделенные объекты уже разблокированы".into()};
+            return;
+        }
+        self.checkpoint();
+        for object in &mut self.doc.objects{
+            if ids.contains(&object.id){object.locked=locked;}
+        }
+        self.status=if locked{"Выделенные объекты заблокированы".into()}
+            else{"Выделенные объекты разблокированы".into()};
+    }
+    pub(super) fn create_layer_from_selection(&mut self){
+        let ids=self.selection_ids();
+        if ids.is_empty(){self.status="Выделите объекты для нового слоя".into();return;}
+        if self.doc.layers.len()>=1024||self.doc.next_layer_id==u64::MAX{
+            self.status="Достигнут лимит слоёв".into();return;
+        }
+        let mut candidate=self.doc.clone();
+        let layer_id=candidate.add_layer(format!("Выделение {}",candidate.layers.len()));
+        match candidate.move_objects_to_layer(&ids,layer_id){
+            Ok(count)=>{
+                if let Err(e)=candidate.validate(){self.status=e;return;}
+                self.checkpoint();self.doc=candidate;self.active_layer=layer_id;
+                self.layer_rename_target=Some(layer_id);
+                self.layer_rename_draft=self.doc.layer(layer_id)
+                    .map(|l|l.name.clone()).unwrap_or_default();
+                self.status=format!("Создан новый слой из {} объектов",count);
+            },
+            Err(e)=>self.status=format!("Новый слой не создан: {e}"),
+        }
+    }
     pub(super) fn delete_selection(&mut self){
         let ids:HashSet<u64>=self.selection_ids().into_iter().collect();
         if ids.is_empty(){return;}
-        let editable:HashSet<u64>=self.doc.layers.iter()
-            .filter(|l|l.visible&&!l.locked).map(|l|l.id).collect();
-        if self.doc.objects.iter().any(|o|ids.contains(&o.id)&&
-            !editable.contains(&o.layer_id)){
-            self.status="Удаление отменено: выделение включает заблокированные слои".into();
+        if self.doc.objects.iter().filter(|o|ids.contains(&o.id))
+            .any(|o|!self.doc.object_is_editable(o)){
+            self.status="Удаление отменено: выделение содержит скрытый или заблокированный объект/слой".into();
             return;
         }
         if !self.doc.objects.iter().any(|o|ids.contains(&o.id)){return;}
@@ -1862,31 +2059,39 @@ impl Editor {
         self.duplicate_preserving_styles();
     }
     pub(super) fn reorder_selection(&mut self,front:bool){
-        let ids:HashSet<u64>=self.selection_ids().into_iter().collect();
+        let ids=self.selection_ids();
         if ids.is_empty(){return;}
-        let editable:HashSet<u64>=self.doc.layers.iter()
-            .filter(|l|l.visible&&!l.locked).map(|l|l.id).collect();
-        if self.doc.objects.iter().any(|o|ids.contains(&o.id)&&
-            !editable.contains(&o.layer_id)){
-            self.status="Порядок не изменён: слой заблокирован".into();return;
-        }
-        if !self.doc.objects.iter().any(|o|ids.contains(&o.id)){return;}
-        self.checkpoint();
-        let mut selected=Vec::new();
-        let mut rest=Vec::new();
-        for obj in self.doc.objects.drain(..){
-            if ids.contains(&obj.id){selected.push(obj);}
-            else{rest.push(obj);}
-        }
-        self.doc.objects=if front{
-            rest.extend(selected);rest
+        let mut candidate=self.doc.clone();
+        let movement=if front{
+            opencorel_core::object_manager::ObjectStackMove::Front
         }else{
-            selected.extend(rest);selected
+            opencorel_core::object_manager::ObjectStackMove::Back
         };
-        self.status=if front{
-            "Выделенные объекты перемещены на передний план".into()
+        match candidate.reorder_objects_in_layer(&ids,movement){
+            Ok(0)=>self.status="Порядок уже соответствует выбранной позиции".into(),
+            Ok(count)=>{
+                self.checkpoint();self.doc=candidate;
+                self.status=format!("Порядок изменён для объектов: {count}");
+            },
+            Err(e)=>self.status=e,
+        }
+    }
+    pub(super) fn reorder_selection_step(&mut self,forward:bool){
+        let ids=self.selection_ids();
+        if ids.is_empty(){return;}
+        let mut candidate=self.doc.clone();
+        let movement=if forward{
+            opencorel_core::object_manager::ObjectStackMove::Forward
         }else{
-            "Выделенные объекты перемещены на задний план".into()
+            opencorel_core::object_manager::ObjectStackMove::Backward
         };
+        match candidate.reorder_objects_in_layer(&ids,movement){
+            Ok(0)=>self.status="Объекты уже находятся на границе порядка".into(),
+            Ok(count)=>{
+                self.checkpoint();self.doc=candidate;
+                self.status=format!("Объекты перемещены на один уровень: {count}");
+            },
+            Err(e)=>self.status=e,
+        }
     }
 }

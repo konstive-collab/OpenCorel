@@ -326,7 +326,7 @@ mod tests{
         doc.append_page(false).unwrap();
         doc.page_slots[0].objects.push(Object{
             id:0,shape:Shape::Rectangle{x:0.,y:0.,w:1.,h:1.},
-            style:Style::default(),layer_id:1,text_format:Default::default(),
+            style:Style::default(),layer_id:1,visible:true,locked:false,text_format:Default::default(),
             name:String::new(),group_id:None,node_modes:vec![]});
         assert!(doc.validate().is_err());
     }

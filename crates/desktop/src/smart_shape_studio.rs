@@ -92,7 +92,7 @@ impl Editor{
         if self.doc.objects.iter().filter(|o|ids.contains(&o.id)).count()!=ids.len()||
             self.doc.objects.iter().filter(|o|ids.contains(&o.id)).any(|o|
                 o.group_id.is_some() ||
-                !self.doc.layer(o.layer_id).is_some_and(|l|l.visible&&!l.locked)||
+                !self.doc.object_is_editable(o)||
                 matches!(o.shape,Shape::Raster{..}|Shape::EmbeddedSvg{..}|Shape::Text{..}))||
             self.doc.clip_links.iter().any(|l|
                 ids.contains(&l.source_id)||ids.contains(&l.target_id)){
