@@ -73,7 +73,7 @@ pub(super) enum TextPreset{
 impl TextPreset{
     const ALL:[Self;7]=[Self::Display,Self::Heading,Self::Subheading,
         Self::Body,Self::Caption,Self::Technical,Self::Quote];
-    fn label(self)->&'static str{
+    pub(super) fn label(self)->&'static str{
         match self{
             Self::Display=>"Крупный заголовок",
             Self::Heading=>"Заголовок",
