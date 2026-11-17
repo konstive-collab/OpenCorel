@@ -703,7 +703,7 @@ impl Editor{
     }
     fn select_all(&mut self){
         let ids:Vec<u64>=self.doc.objects.iter()
-            .filter(|o|self.doc.is_object_editable(o.id)).map(|o|o.id).collect();
+            .filter(|o|self.doc.object_is_editable(o)).map(|o|o.id).collect();
         self.selected=ids.first().copied();
         self.multi_selected=ids.into_iter().skip(1).collect();
         self.status=format!("Выбрано объектов: {}",self.selection_ids().len());
@@ -727,7 +727,7 @@ impl Editor{
     fn layout_selection_available(&mut self,ids:&[u64])->bool{
         let ids:HashSet<u64>=ids.iter().copied().collect();
         if self.doc.objects.iter().any(|o|ids.contains(&o.id)
-            && (!self.doc.is_object_editable(o.id)||o.group_id.is_some())){
+            && (!self.doc.object_is_editable(o)||o.group_id.is_some())){
             self.status="Выровнять можно только отдельные незаблокированные объекты. Группу сначала разгруппируйте.".into();
             return false;
         }
@@ -907,7 +907,7 @@ impl Editor{
         if close{
             if let Some(id)=self.curve_draft{
                 let can_close=self.doc.objects.iter().find(|o|o.id==id)
-                    .is_some_and(|o|self.doc.is_object_editable(o.id)
+                    .is_some_and(|o|self.doc.object_is_editable(o)
                         && matches!(&o.shape,Shape::Bezier{segments,closed:false,..}
                             if segments.len()>=2));
                 if can_close {
