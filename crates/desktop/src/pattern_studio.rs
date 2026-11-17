@@ -154,7 +154,7 @@ fn generate_pattern(doc:&mut Document,ids:&[u64],opts:PatternOptions)
     if originals.is_empty()||originals.len()!=selected.len(){
         return Err("Выберите хотя бы один существующий объект".into());
     }
-    if originals.iter().any(|o|o.group_id.is_some()||
+    if originals.iter().any(|o|o.group_id.is_some()||!o.visible||o.locked||
         !doc.layer(o.layer_id).is_some_and(|l|l.visible&&!l.locked)){
         return Err("Массив требует незаблокированные несгруппированные объекты".into());
     }
