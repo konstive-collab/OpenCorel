@@ -14,7 +14,7 @@ impl Editor{
             let Some(obj)=self.doc.objects.iter().find(|o|o.id==*id) else{
                 self.status="Выделенный объект не найден".into();return;
             };
-            if !self.doc.layer(obj.layer_id).is_some_and(|l|l.visible&&!l.locked)
+            if !self.doc.is_object_editable(obj.id)
                 || obj.group_id.is_some(){
                 self.status="Объекты должны быть на видимых незаблокированных слоях без групп".into();
                 return;
@@ -70,7 +70,7 @@ impl Editor{
         }
         let Some(original)=self.doc.objects.iter().find(|o|o.id==id).cloned() else{return;};
         if original.group_id.is_some() ||
-            !self.doc.layer(original.layer_id).is_some_and(|l|l.visible&&!l.locked){
+            !self.doc.is_object_editable(original.id){
             self.status="Составной объект сгруппирован либо слой заблокирован".into();
             return;
         }
