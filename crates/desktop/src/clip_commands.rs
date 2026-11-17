@@ -31,7 +31,9 @@ impl Editor {
         if candidates.is_empty(){self.status="У выделенных объектов нет обтравки".into();return;}
         let editable=candidates.iter().all(|id|self.doc.objects.iter().find(|o|o.id==*id)
             .and_then(|o|self.doc.layer(o.layer_id))
-            .is_some_and(|layer|layer.visible&&!layer.locked));
+            .is_some_and(|layer|layer.visible&&!layer.locked)&&
+                self.doc.objects.iter().find(|o|o.id==*id)
+                    .is_some_and(|o|o.visible&&!o.locked));
         if !editable{
             self.status="Нельзя изменить обтравку на скрытом или заблокированном слое".into();
             return;
