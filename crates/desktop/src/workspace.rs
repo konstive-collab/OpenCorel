@@ -693,12 +693,16 @@ impl Editor {
         ui.horizontal(|ui|{
             ui.heading("СЛОИ");
             if ui.small_button("+ Слой").on_hover_text("Создать новый слой сверху стека").clicked(){
-                self.checkpoint();
-                let name=format!("Слой {}",self.doc.layers.len()+1);
-                self.active_layer=self.doc.add_layer(name);
-                self.layer_rename_target=Some(self.active_layer);
-                self.layer_rename_draft=self.doc.layer(self.active_layer)
-                    .map(|l|l.name.clone()).unwrap_or_default();
+                if self.doc.layers.len()>=1024||self.doc.next_layer_id==u64::MAX{
+                    self.status="Достигнут лимит слоёв".into();
+                }else{
+                    self.checkpoint();
+                    let name=format!("Слой {}",self.doc.layers.len()+1);
+                    self.active_layer=self.doc.add_layer(name);
+                    self.layer_rename_target=Some(self.active_layer);
+                    self.layer_rename_draft=self.doc.layer(self.active_layer)
+                        .map(|l|l.name.clone()).unwrap_or_default();
+                }
             }
             ui.label(RichText::new(format!("{}/1024",self.doc.layers.len()))
                 .small().color(Color32::GRAY));
@@ -1298,7 +1302,7 @@ impl Editor {
             if self.multi_selected.len()>0{
                 ui.label(format!("Выбрано {} объектов",self.selection_ids().len()));
             }
-            if !allowed{ui.colored_label(Color32::RED,"Слой заблокирован");}
+            if !allowed{ui.colored_label(Color32::RED,"Объект или слой скрыт/заблокирован");}
             let mut changed=false;
             ui.add_enabled_ui(allowed,|ui|{
                 if raster{
@@ -1384,7 +1388,7 @@ impl Editor {
             ui.heading(format!("Составной векторный объект #{id}"));
             ui.label(format!("Контуров: {total}, сегментов: {segments}"));
             ui.label("Отверстия букв сохраняются (even-odd).");
-            if !allowed {ui.colored_label(Color32::RED,"Слой заблокирован");}
+            if !allowed {ui.colored_label(Color32::RED,"Объект или слой скрыт/заблокирован");}
             let mut changed=false;
             ui.add_enabled_ui(allowed,|ui|{
                 ui.collapsing("Изменить координаты контуров",|ui|{
@@ -1450,7 +1454,7 @@ impl Editor {
         if !self.multi_selected.is_empty(){
             ui.label(format!("Выделено {} объектов. Свойства основного объекта:",self.selection_ids().len()));
         }
-        if !editing_allowed {ui.colored_label(Color32::RED,"Слой скрыт или заблокирован");}
+        if !editing_allowed {ui.colored_label(Color32::RED,"Объект или слой скрыт/заблокирован");}
         ui.add_enabled_ui(editing_allowed,|ui|{
             let mut changed=false;
             match &mut object.shape{
