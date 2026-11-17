@@ -558,12 +558,15 @@ impl Editor{
             self.status="Выделите один или несколько текстовых объектов".into();
             return;
         }
+        if ids.iter().any(|id|!self.doc.is_object_editable(*id)){
+            self.status="Преобразование отменено: выделение содержит скрытые или заблокированные объекты".into();
+            return;
+        }
         let mut converted=Vec::new();
-        // Atomic batch: an unavailable font or glyph must not convert only half
-        // of a customer document.
+        // Atomic batch: an unavailable font, glyph or object lock must not
+        // convert only half of a selected document.
         for id in ids{
             let Some(obj)=self.doc.objects.iter().find(|o|o.id==id) else{continue;};
-            if !self.doc.is_object_editable(id){continue;}
             if !matches!(obj.shape,Shape::Text{..}){continue;}
             match self.text_outliner.convert_object(obj){
                 Ok(shape)=>converted.push((id,shape)),
