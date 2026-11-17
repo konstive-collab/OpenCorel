@@ -25,14 +25,20 @@ fn bounded_copy_name(name:&str)->String{
 }
 
 impl Document{
+    pub fn object_is_visible(&self,object:&Object)->bool{
+        object.visible&&self.layer(object.layer_id).is_some_and(|l|l.visible)
+    }
     pub fn is_object_visible(&self,id:u64)->bool{
-        self.objects.iter().find(|o|o.id==id).is_some_and(|o|
-            o.visible&&self.layer(o.layer_id).is_some_and(|l|l.visible))
+        self.objects.iter().find(|o|o.id==id)
+            .is_some_and(|o|self.object_is_visible(o))
+    }
+    pub fn object_is_editable(&self,object:&Object)->bool{
+        object.visible&&!object.locked&&self.layer(object.layer_id)
+            .is_some_and(|l|l.visible&&!l.locked)
     }
     pub fn is_object_editable(&self,id:u64)->bool{
-        self.objects.iter().find(|o|o.id==id).is_some_and(|o|
-            o.visible&&!o.locked&&self.layer(o.layer_id)
-                .is_some_and(|l|l.visible&&!l.locked))
+        self.objects.iter().find(|o|o.id==id)
+            .is_some_and(|o|self.object_is_editable(o))
     }
     /// Return IDs that can be edited by the current canvas selection model.
     pub fn editable_object_ids(&self)->HashSet<u64>{
@@ -55,7 +61,7 @@ impl Document{
         if chosen.len()!=wanted.len(){
             return Err("Выделение содержит отсутствующие объекты".into());
         }
-        if chosen.iter().any(|o|!self.is_object_editable(o.id)){
+        if chosen.iter().any(|o|!self.object_is_editable(o)){
             return Err("Порядок нельзя менять у скрытых или заблокированных объектов".into());
         }
         let layer_id=chosen[0].layer_id;
