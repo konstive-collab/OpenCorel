@@ -28,6 +28,7 @@ mod vector_effects;
 mod color_studio;
 mod smart_shape_studio;
 mod smart_shape_catalog;
+mod object_studio;
 mod text_path_commands;
 mod bezier_preview;
 mod bezier_pen;
@@ -169,6 +170,8 @@ struct Editor{
     text_path_start_mm:f32,
     text_path_shift_mm:f32,
     text_path_reverse:bool,
+    layer_rename_id:Option<u64>,
+    layer_rename_draft:String,
     active_layer:u64,
     pan:Vec2,
     undo:Vec<Document>,
@@ -282,6 +285,7 @@ impl Default for Editor{
             smart_inset:0.42,smart_detail:8,smart_rotation_degrees:0.0,
             smart_width_mm:60.0,smart_height_mm:60.0,
             text_path_start_mm:0.0,text_path_shift_mm:0.0,text_path_reverse:false,
+            layer_rename_id:None,layer_rename_draft:String::new(),
             active_layer:1,pan:Vec2::ZERO,
             undo:Vec::new(),redo:Vec::new(),
             inspector_tab:InspectorTab::Objects,show_inspector:true,
