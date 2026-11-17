@@ -201,7 +201,7 @@ fn generate_effect(doc:&mut Document,ids:&[u64],opts:&EffectOptions)->Result<Vec
         return Err("Сначала выберите редактируемые объекты".into());
     }
     if originals.iter().any(|o|o.group_id.is_some()||
-        !doc.is_object_editable(o.id)){
+        !doc.object_is_editable(o)){
         return Err("Эффекты недоступны для групп или закрытых слоёв".into());
     }
     if doc.clip_links.iter().any(|link|
