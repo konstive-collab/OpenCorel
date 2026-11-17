@@ -2256,6 +2256,48 @@ mod tests {
         assert_eq!(editor.doc.objects.len(),original+1);
     }
     #[test]
+    fn select_all_skips_hidden_and_locked_objects(){
+        let mut editor=Editor::default();
+        editor.doc=Document::default();
+        let visible=editor.doc.add(Shape::Rectangle{x:0.,y:0.,w:10.,h:10.},Style::default());
+        let hidden=editor.doc.add(Shape::Rectangle{x:20.,y:0.,w:10.,h:10.},Style::default());
+        let locked=editor.doc.add(Shape::Rectangle{x:40.,y:0.,w:10.,h:10.},Style::default());
+        editor.doc.get_mut(hidden).unwrap().visible=false;
+        editor.doc.get_mut(locked).unwrap().locked=true;
+        editor.select_all();
+        assert_eq!(editor.selection_ids(),vec![visible]);
+    }
+    #[test]
+    fn locked_object_cannot_be_picked_or_deleted_but_can_be_unlocked_from_manager(){
+        let mut editor=Editor::default();
+        editor.doc=Document::default();
+        let id=editor.doc.add(Shape::Rectangle{x:0.,y:0.,w:20.,h:20.},Style::default());
+        editor.doc.get_mut(id).unwrap().locked=true;
+        assert_eq!(editor.hit_test_at(Point{x:10.,y:10.},0.),None);
+        editor.selected=Some(id);
+        editor.delete_selection();
+        assert!(editor.doc.get_mut(id).is_some());
+        assert!(editor.undo.is_empty());
+        editor.doc.get_mut(id).unwrap().locked=false;
+        editor.delete_selection();
+        assert!(editor.doc.get_mut(id).is_none());
+        assert_eq!(editor.undo.len(),1);
+    }
+    #[test]
+    fn one_step_object_reorder_is_undoable_and_layer_scoped(){
+        let mut editor=Editor::default();
+        editor.doc=Document::default();
+        let a=editor.doc.add(Shape::Rectangle{x:0.,y:0.,w:5.,h:5.},Style::default());
+        let b=editor.doc.add(Shape::Rectangle{x:10.,y:0.,w:5.,h:5.},Style::default());
+        let c=editor.doc.add(Shape::Rectangle{x:20.,y:0.,w:5.,h:5.},Style::default());
+        editor.selected=Some(b);
+        editor.reorder_selection_step(true);
+        assert_eq!(editor.doc.objects.iter().map(|o|o.id).collect::<Vec<_>>(),vec![a,c,b]);
+        assert_eq!(editor.undo.len(),1);
+        editor.undo();
+        assert_eq!(editor.doc.objects.iter().map(|o|o.id).collect::<Vec<_>>(),vec![a,b,c]);
+    }
+    #[test]
     fn concave_polygon_fill_is_triangulated(){
         let xy:Vec<f64>=vec![0.0,0.0, 20.0,0.0, 20.0,20.0, 10.0,5.0, 0.0,20.0];
         let indices=earcutr::earcut(&xy,&[],2).unwrap();
