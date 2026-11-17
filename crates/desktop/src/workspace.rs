@@ -769,10 +769,12 @@ impl Editor {
                     let mut candidate=self.doc.clone();
                     match candidate.delete_layer(id){
                         Ok(fallback)=>{
+                            let fallback_name=candidate.layer(fallback)
+                                .map(|l|l.name.clone()).unwrap_or_else(||format!("#{fallback}"));
                             self.checkpoint();self.doc=candidate;
                             if self.active_layer==id{self.active_layer=fallback;}
                             self.layer_rename_target=None;
-                            self.status=format!("Слой «{name}» удалён; объекты перенесены в основной слой");
+                            self.status=format!("Слой «{name}» удалён; объекты перенесены в «{fallback_name}»");
                         },Err(e)=>self.status=e,
                     }
                 }
