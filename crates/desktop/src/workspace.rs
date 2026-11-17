@@ -1,8 +1,9 @@
 //! Corel-style, independently implemented workspace layout.
 //! Uses familiar panel positions and workflows but no proprietary assets.
-use super::{color, productivity, Editor, Tool};
+use super::{color, productivity, text_edit_ops, Editor, Tool};
 use eframe::egui::{self, Color32, RichText, Vec2};
 use opencorel_core::{Bounds, Shape, Alignment, Distribution, TextAlign, valid_paint};
+use opencorel_core::object_studio::StackOrder;
 use std::collections::HashSet;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -19,12 +20,24 @@ const SWATCHES: [&str; 27] = [
 impl Editor {
     pub(super) fn change_tool(&mut self, next: Tool) {
         self.tool=next;
-        if next!=Tool::Curve { self.curve_start=None; self.curve_draft=None; }
+        self.guide_drag=None;
+        if next!=Tool::Freehand{
+            self.freehand_samples.clear();self.freehand_overflow=false;
+        }
+        if next!=Tool::Curve {
+            self.curve_start=None;self.curve_draft=None;
+            self.curve_resumed=false;
+            self.curve_outgoing=None;self.curve_drag_anchor=None;
+        }
         self.drag_start=None;
+        self.selection_drag_checkpointed=false;
+        self.marquee_drag=None;
         self.creation_start=None;
         self.resize_drag=None;self.node_drag=None;
+        self.resize_drag_base=None;self.resize_drag_checkpointed=false;
+        self.node_drag_checkpointed=false;
         if next!=Tool::Nodes{self.active_node=None;}
-        if matches!(next,Tool::Text|Tool::Nodes){
+        if matches!(next,Tool::Text|Tool::Nodes|Tool::Freehand|Tool::Smart){
             self.inspector_tab=InspectorTab::Properties;
             self.show_inspector=true;
         }
@@ -34,18 +47,28 @@ impl Editor {
         self.checkpoint();
         self.doc=Default::default();
         self.active_node=None;self.node_drag=None;
+        self.node_drag_checkpointed=false;
         self.fill_cache.entries.clear();
         self.vector_cache.clear();
         self.raster_cache.clear();
         self.compound_cache.clear();
         self.selected=None;
         self.multi_selected.clear();
-        self.resize_drag=None;
+        self.resize_drag=None;self.resize_drag_base=None;
+        self.resize_drag_checkpointed=false;
+        self.drag_start=None;self.selection_drag_checkpointed=false;
+        self.marquee_drag=None;self.creation_start=None;
         self.active_layer=1;
         self.pan=Vec2::ZERO;
         self.zoom=1.0;
         self.curve_start=None;
         self.curve_draft=None;
+        self.curve_resumed=false;
+        self.curve_outgoing=None;
+        self.curve_drag_anchor=None;
+        self.freehand_samples.clear();self.freehand_overflow=false;
+        self.guide_drag=None;
+        self.guide_numeric_session=None;
         self.file="untitled.kdr".into();
         self.status="Создан новый документ. Выберите инструмент слева или нажмите F1 для помощи.".into();
     }
@@ -64,6 +87,15 @@ impl Editor {
                     if ui.button("Новый лист A3").clicked(){self.blank_page(297.0,420.0);ui.close_menu();}
                     if ui.button("Новый баннер 3×2 м").clicked(){self.blank_page(3000.0,2000.0);ui.close_menu();}
                     if ui.button("Пример готового макета").clicked(){self.sample_design();ui.close_menu();}
+                    ui.menu_button("Создать из шаблона",|ui|{
+                        ui.small("Готовые редактируемые макеты — без растровой подложки");
+                        for kind in super::starter_templates::StarterTemplate::ALL{
+                            if ui.button(kind.title()).clicked(){
+                                self.create_starter_template(kind);
+                                ui.close_menu();
+                            }
+                        }
+                    });
                     ui.separator();
                     if ui.button("Новый документ       Ctrl+N").clicked(){self.new_document();ui.close_menu();}
                     if ui.button("Открыть...         Ctrl+O").clicked(){self.open_picker();ui.close_menu();}
@@ -73,7 +105,19 @@ impl Editor {
                     if ui.button("Сохранить как...  Ctrl+Shift+S").clicked(){self.save_as_picker();ui.close_menu();}
                     if ui.button("Экспорт SVG...").clicked(){self.export_dialog("svg");ui.close_menu();}
                     if ui.button("Экспорт SVGZ...").clicked(){self.export_dialog("svgz");ui.close_menu();}
-                    if ui.button("Экспорт PDF (RGB)...").clicked(){self.export_dialog("pdf");ui.close_menu();}
+                    if ui.button("Экспорт PDF (все страницы, RGB)...").clicked(){self.export_dialog("pdf");ui.close_menu();}
+                    ui.menu_button("Экспортировать все страницы...",|ui|{
+                        ui.small("В отдельную папку, по одному файлу на страницу");
+                        if ui.button("Все страницы → SVG").clicked(){
+                            self.export_all_pages_dialog("svg");ui.close_menu();
+                        }
+                        if ui.button("Все страницы → PDF (RGB)").clicked(){
+                            self.export_all_pages_dialog("pdf");ui.close_menu();
+                        }
+                    });
+                    if ui.button("Печатный SVG с вылетами и метками реза...").clicked(){
+                        self.export_print_sheet_dialog();ui.close_menu();
+                    }
                     ui.separator();
                     ui.horizontal(|ui|{
                         ui.label("DPI");
@@ -87,7 +131,32 @@ impl Editor {
                 ui.menu_button("Правка",|ui|{
                     if ui.add_enabled(!self.undo.is_empty(),egui::Button::new("Отменить      Ctrl+Z")).clicked(){self.undo();ui.close_menu();}
                     if ui.add_enabled(!self.redo.is_empty(),egui::Button::new("Повторить     Ctrl+Y")).clicked(){self.redo();ui.close_menu();}
-                    if ui.button("Дублировать     Ctrl+D").clicked(){self.duplicate_preserving_styles();ui.close_menu();}
+                    if ui.button("Дублировать     Ctrl+D").clicked(){self.object_duplicate_selection();ui.close_menu();}
+                    ui.menu_button("Массив копий / сетка...",|ui|{
+                        ui.label("Размножить выделенные объекты по строкам и столбцам");
+                        ui.horizontal(|ui|{
+                            ui.label("Столбцы");
+                            ui.add(egui::DragValue::new(&mut self.array_columns).range(1..=50));
+                            ui.label("Строки");
+                            ui.add(egui::DragValue::new(&mut self.array_rows).range(1..=50));
+                        });
+                        ui.horizontal(|ui|{
+                            ui.label("Зазор X, мм");
+                            ui.add(egui::DragValue::new(&mut self.array_gap_x_mm)
+                                .range(-9999.0..=10000.0).speed(0.5));
+                        });
+                        ui.horizontal(|ui|{
+                            ui.label("Зазор Y, мм");
+                            ui.add(egui::DragValue::new(&mut self.array_gap_y_mm)
+                                .range(-9999.0..=10000.0).speed(0.5));
+                        });
+                        ui.small("Первая ячейка — исходные объекты; не более 2000 новых объектов.");
+                        if ui.add_enabled(!self.selection_ids().is_empty(),
+                            egui::Button::new("Создать сетку")).clicked(){
+                            self.repeat_selection_as_grid();
+                            ui.close_menu();
+                        }
+                    });
                     ui.separator();
                     if ui.button("Копировать      Ctrl+C").clicked(){self.copy_selection();ui.close_menu();}
                     if ui.button("Вырезать        Ctrl+X").clicked(){self.cut_selection();ui.close_menu();}
@@ -100,10 +169,99 @@ impl Editor {
                     if ui.button("Показать всю страницу  F4").clicked(){self.fit_page();ui.close_menu();}
                     ui.checkbox(&mut self.show_grid,"Сетка");
                     ui.checkbox(&mut self.snap_grid,"Привязка к сетке");
+                    ui.checkbox(&mut self.show_guides,"Показать направляющие");
+                    ui.checkbox(&mut self.snap_guides,"Привязка к направляющим");
+                    ui.checkbox(&mut self.snap_nodes,"Привязка к узлам объектов");
+                    if self.snap_nodes{
+                        ui.horizontal(|ui|{
+                            ui.label("Допуск, пикс.");
+                            ui.add(egui::DragValue::new(&mut self.snap_tolerance_px)
+                                .speed(0.2).range(2.0..=30.0));
+                        });
+                    }
                     ui.checkbox(&mut self.show_rulers,"Линейки");
                     ui.checkbox(&mut self.light_theme,"Светлая тема");
                 });
+                ui.menu_button("Текст",|ui|{
+                    ui.label(RichText::new("ТЕКСТОВАЯ МАСТЕРСКА").strong());
+                    ui.small("23 массовые операции и 7 стилевых пресетов");
+                    ui.horizontal(|ui|{
+                        ui.label("Перенос");
+                        ui.add(egui::DragValue::new(&mut self.text_studio_wrap_columns)
+                            .range(8..=160).suffix(" зн."));
+                    });
+                    ui.menu_button("Регистр и слова",|ui|{
+                        for action in super::text_studio::TextAction::ALL.iter().take(6){
+                            if ui.button(action.label()).clicked(){
+                                self.run_text_action(*action);ui.close_menu();
+                            }
+                        }
+                    });
+                    ui.menu_button("Абзацы и списки",|ui|{
+                        for action in super::text_studio::TextAction::ALL.iter().skip(6){
+                            if ui.button(action.label()).clicked(){
+                                self.run_text_action(*action);ui.close_menu();
+                            }
+                        }
+                    });
+                    ui.menu_button("Текст по кривой...",|ui|{
+                        ui.set_min_width(315.0);
+                        self.text_path_controls(ui);
+                    });
+                    ui.separator();
+                    ui.menu_button("Стили типографики",|ui|{
+                        for preset in [
+                            super::text_studio::TextPreset::Display,
+                            super::text_studio::TextPreset::Heading,
+                            super::text_studio::TextPreset::Subheading,
+                            super::text_studio::TextPreset::Body,
+                            super::text_studio::TextPreset::Caption,
+                            super::text_studio::TextPreset::Technical,
+                            super::text_studio::TextPreset::Quote,
+                        ]{
+                            if ui.button(preset.label()).clicked(){
+                                self.run_text_preset(preset);ui.close_menu();
+                            }
+                        }
+                    });
+                });
+                ui.menu_button("Композиции",|ui|{
+                    ui.set_min_width(275.0);
+                    self.pattern_studio_panel(ui);
+                });
+                ui.menu_button("Эффекты",|ui|{
+                    ui.set_min_width(285.0);
+                    self.vector_effects_panel(ui);
+                });
+                ui.menu_button("Цвет",|ui|{
+                    ui.set_min_width(330.0);
+                    egui::ScrollArea::vertical().max_height(590.0).show(ui,|ui|{
+                        self.color_studio_panel(ui);
+                    });
+                });
                 ui.menu_button("Макет",|ui|{
+                    ui.menu_button("Страницы документа",|ui|{
+                        ui.label(format!("Страниц: {} / максимум 64",self.doc.page_count()));
+                        for index in 0..self.doc.page_count(){
+                            let name=self.doc.page_title(index).unwrap_or("Страница").to_string();
+                            if ui.selectable_label(index==self.doc.active_page_index,
+                                format!("{} — {}",index+1,name)).clicked(){
+                                self.navigate_page(index);ui.close_menu();
+                            }
+                        }
+                        ui.separator();
+                        if ui.button("+ Пустая страница").clicked(){
+                            self.create_page(false);ui.close_menu();
+                        }
+                        if ui.button("Дублировать текущую страницу").clicked(){
+                            self.create_page(true);ui.close_menu();
+                        }
+                        if ui.add_enabled(self.doc.page_count()>1,
+                            egui::Button::new("Удалить текущую страницу")).clicked(){
+                            self.remove_current_page();ui.close_menu();
+                        }
+                    });
+                    ui.separator();
                     if ui.button("A0 — 841×1189 мм").clicked(){self.page_size(841.0,1189.0);ui.close_menu();}
                     if ui.button("A2 — 420×594 мм").clicked(){self.page_size(420.0,594.0);ui.close_menu();}
                     if ui.button("A4 — 210×297 мм").clicked(){self.page_size(210.0,297.0);ui.close_menu();}
@@ -129,6 +287,23 @@ impl Editor {
                         }
                     });
                     ui.separator();
+                    ui.label(RichText::new("СОСТАВНЫЕ КОНТУРЫ (EVEN-ODD)").strong());
+                    ui.small("Без сваривания: кривые сохраняют исходную геометрию, а пересечения меняют правило заливки.");
+                    let selected_count=self.selection_ids().len();
+                    if ui.add_enabled(selected_count>=2,
+                        egui::Button::new("Объединить контуры (Combine)")).clicked(){
+                        self.combine_selected_contours();ui.close_menu();
+                    }
+                    let one_compound=if selected_count==1{
+                        self.selected.and_then(|id|self.doc.objects.iter()
+                            .find(|o|o.id==id)).is_some_and(|o|
+                                matches!(o.shape,opencorel_core::Shape::CompoundPath{..}))
+                    }else{false};
+                    if ui.add_enabled(one_compound,
+                        egui::Button::new("Разделить контуры (Break Apart)")).clicked(){
+                        self.break_apart_selected_contour();ui.close_menu();
+                    }
+                    ui.separator();
                     ui.label("Результат: редактируемые контуры.");
                     ui.label("Ctrl+Z возвращает обе фигуры.");
                 });
@@ -150,10 +325,47 @@ impl Editor {
                     ui.small("Экспорт: SVG/PDF. Просмотр на холсте пока предварительный.");
                 });
                 ui.menu_button("Объект",|ui|{
+                    ui.menu_button("Библиотека фигур — 93",|ui|{
+                        ui.set_min_width(320.0);
+                        self.smart_shape_picker(ui);
+                    });
+                    ui.separator();
                     ui.label(RichText::new("ГРУППЫ").strong());
                     if ui.button("Центрировать по листу").clicked(){
                         self.center_selection_on_page();ui.close_menu();
                     }
+                    ui.menu_button("Выравнивание и распределение",|ui|{
+                        use opencorel_core::{Alignment,Distribution};
+                        let count=self.selection_ids().len();
+                        ui.label("Выравнивание по общему габариту выделения");
+                        ui.add_enabled_ui(count>=2,|ui|{
+                            for (title,mode) in [
+                                ("По левому краю",Alignment::Left),
+                                ("По центру X",Alignment::CenterX),
+                                ("По правому краю",Alignment::Right),
+                                ("По верхнему краю",Alignment::Top),
+                                ("По центру Y",Alignment::CenterY),
+                                ("По нижнему краю",Alignment::Bottom),
+                            ]{
+                                if ui.button(title).clicked(){
+                                    self.align_selection_precise(mode);ui.close_menu();
+                                }
+                            }
+                        });
+                        ui.separator();
+                        ui.label("Равные интервалы между центрами объектов");
+                        ui.add_enabled_ui(count>=3,|ui|{
+                            if ui.button("По горизонтали").clicked(){
+                                self.distribute_selection_precise(Distribution::HorizontalCenters);
+                                ui.close_menu();
+                            }
+                            if ui.button("По вертикали").clicked(){
+                                self.distribute_selection_precise(Distribution::VerticalCenters);
+                                ui.close_menu();
+                            }
+                        });
+                        ui.small("Ctrl+Z отменяет выравнивание одним действием.");
+                    });
                     if ui.button("Группировать       Ctrl+G").clicked(){
                         self.group_selection();ui.close_menu();
                     }
@@ -163,7 +375,7 @@ impl Editor {
                     ui.separator();
                     if ui.button("На передний план").clicked(){self.reorder_selection(true);ui.close_menu();}
                     if ui.button("На задний план").clicked(){self.reorder_selection(false);ui.close_menu();}
-                    if ui.button("Дублировать").clicked(){self.duplicate_preserving_styles();ui.close_menu();}
+                    if ui.button("Дублировать").clicked(){self.object_duplicate_selection();ui.close_menu();}
                     ui.separator();
                     if ui.button("Повернуть вправо на 90°").clicked(){self.rotate_selection(opencorel_core::transform::QuarterTurn::Clockwise);ui.close_menu();}
                     if ui.button("Повернуть влево на 90°").clicked(){self.rotate_selection(opencorel_core::transform::QuarterTurn::CounterClockwise);ui.close_menu();}
@@ -391,7 +603,7 @@ impl Editor {
                         self.center_selection_on_page();
                     }
                     if ui.small_button("Копия").on_hover_text("Ctrl+D").clicked(){
-                        self.duplicate_preserving_styles();
+                        self.object_duplicate_selection();
                     }
                     if ui.small_button("Удалить").on_hover_text("Delete").clicked(){
                         self.delete_selection();
@@ -407,10 +619,12 @@ impl Editor {
                             Tool::Nodes=>"F10",
                             Tool::Text=>"F8",
                             Tool::Curve=>"B",
+                            Tool::Freehand=>"H",
                             Tool::Rect=>"F6",
                             Tool::Ellipse=>"F7",
                             Tool::Line=>"L",
                             Tool::Polygon=>"P",
+                            Tool::Smart=>"S", 
                         }))
                         .on_hover_text(productivity::tool_hint(self.tool));
                 }
@@ -477,34 +691,82 @@ impl Editor {
     }
 
     fn inspector_objects(&mut self,ui:&mut egui::Ui){
+        use opencorel_core::object_studio::StackOrder;
+        #[derive(Clone)]
+        struct Row{
+            group_header:bool,id:u64,group:Option<u64>,label:String,
+            visible:bool,locked:bool,depth:usize,collapsed:bool,
+        }
         ui.horizontal(|ui|{
             ui.heading("СЛОИ");
+            ui.label(RichText::new(format!("{}",self.doc.layers.len()))
+                .small().color(Color32::GRAY));
             if ui.small_button("+ Слой").on_hover_text("Создать новый слой").clicked(){
                 self.checkpoint();
                 let name=format!("Слой {}",self.doc.layers.len()+1);
                 self.active_layer=self.doc.add_layer(name);
             }
         });
-        let layers:Vec<_>=self.doc.layers.iter()
-            .map(|layer|(layer.id,layer.name.clone(),layer.visible,layer.locked)).collect();
-        for (id,name,mut visible,mut locked) in layers{
+        let layers:Vec<_>=self.doc.layers.iter().enumerate().map(|(index,l)|
+            (index,l.id,l.name.clone(),l.visible,l.locked,
+                self.doc.objects.iter().filter(|o|o.layer_id==l.id).count()))
+            .collect();
+        for (index,id,name,mut visible,mut locked,count) in layers{
             ui.horizontal(|ui|{
                 if ui.selectable_label(self.active_layer==id,
-                    format!("{} {}",if visible{"●"}else{"○"},name)).clicked(){
+                    format!("{}  {}",if self.active_layer==id{"▸"}else{" "},name))
+                    .on_hover_text(format!("Активный слой · {count} объектов")).clicked(){
                     self.active_layer=id;
                 }
-                if ui.checkbox(&mut visible,"").on_hover_text("Видимость").changed(){
+                if ui.small_button(if visible{"◉"}else{"○"})
+                    .on_hover_text(if visible{"Скрыть слой"}else{"Показать слой"}).clicked(){
                     self.checkpoint();
                     if let Some(layer)=self.doc.layers.iter_mut().find(|l|l.id==id){
-                        layer.visible=visible;
+                        layer.visible=!visible;
                     }
+                    if visible{self.selected=None;self.multi_selected.clear();}
                 }
-                if ui.checkbox(&mut locked,"").on_hover_text("Блокировка").changed(){
+                if ui.small_button(if locked{"🔒"}else{"🔓"})
+                    .on_hover_text(if locked{"Разблокировать слой"}else{"Заблокировать слой"}).clicked(){
                     self.checkpoint();
                     if let Some(layer)=self.doc.layers.iter_mut().find(|l|l.id==id){
-                        layer.locked=locked;
+                        layer.locked=!locked;
                     }
                 }
+                if ui.small_button("✎").on_hover_text("Переименовать слой").clicked(){
+                    self.layer_rename_id=Some(id);
+                    self.layer_rename_draft=name.clone();
+                }
+                if ui.add_enabled(index>0,egui::Button::new("↑"))
+                    .on_hover_text("Поднять слой в списке").clicked(){
+                    self.object_move_layer(id,index-1);
+                }
+                if ui.add_enabled(index+1<self.doc.layers.len(),
+                    egui::Button::new("↓")).on_hover_text("Опустить слой в списке").clicked(){
+                    self.object_move_layer(id,index+1);
+                }
+                if ui.add_enabled(self.doc.layers.len()>1&&id!=self.active_layer,
+                    egui::Button::new("×")).on_hover_text("Удалить слой и перенести его объекты на активный слой").clicked(){
+                    self.object_remove_layer(id);
+                }
+            });
+        }
+        if let Some(id)=self.layer_rename_id{
+            ui.group(|ui|{
+                ui.label("Новое название слоя");
+                ui.text_edit_singleline(&mut self.layer_rename_draft);
+                ui.horizontal(|ui|{
+                    if ui.button("Сохранить").clicked(){
+                        let draft=self.layer_rename_draft.clone();
+                        self.object_rename_layer(id,&draft);
+                        self.layer_rename_id=None;
+                        self.layer_rename_draft.clear();
+                    }
+                    if ui.button("Отмена").clicked(){
+                        self.layer_rename_id=None;
+                        self.layer_rename_draft.clear();
+                    }
+                });
             });
         }
         ui.separator();
@@ -512,79 +774,192 @@ impl Editor {
             ui.heading("ОБЪЕКТЫ");
             ui.label(RichText::new(format!("{}",self.doc.objects.len()))
                 .color(Color32::from_rgb(33,187,161)));
+            ui.label(RichText::new(format!("выбрано {}",self.selection_ids().len()))
+                .small().color(Color32::GRAY));
         });
         ui.add(egui::TextEdit::singleline(&mut self.object_filter)
-            .hint_text("Поиск объекта или названия..."));
-        ui.horizontal(|ui|{
-            if ui.add_enabled(self.selection_ids().len()>=2,
-                egui::Button::new("Группа  Ctrl+G")).clicked(){
-                self.group_selection();
+            .hint_text("Поиск: название, тип, слой, ID..."));
+        let has_selection=!self.selection_ids().is_empty();
+        ui.horizontal_wrapped(|ui|{
+            if ui.add_enabled(has_selection,egui::Button::new("Копия"))
+                .on_hover_text("Дублировать выделенные объекты с сохранением групп, эффектов и масок")
+                .clicked(){self.object_duplicate_selection();}
+            if ui.add_enabled(has_selection,egui::Button::new("Удалить"))
+                .on_hover_text("Удалить выделенные объекты").clicked(){
+                self.object_delete_selection();
             }
-            if ui.button("Разгрупп.").on_hover_text("Ctrl+Shift+G").clicked(){
-                self.ungroup_selection();
+            if ui.add_enabled(has_selection,egui::Button::new("Вперёд"))
+                .on_hover_text("Поднять на один уровень").clicked(){
+                self.object_reorder_selection(StackOrder::RaiseOne);
+            }
+            if ui.add_enabled(has_selection,egui::Button::new("Назад"))
+                .on_hover_text("Опустить на один уровень").clicked(){
+                self.object_reorder_selection(StackOrder::LowerOne);
             }
         });
+        ui.horizontal_wrapped(|ui|{
+            if ui.add_enabled(has_selection,egui::Button::new("На передний план"))
+                .clicked(){self.object_reorder_selection(StackOrder::Front);}
+            if ui.add_enabled(has_selection,egui::Button::new("На задний план"))
+                .clicked(){self.object_reorder_selection(StackOrder::Back);}
+            if ui.add_enabled(has_selection&&self.doc.layer(self.active_layer)
+                .is_some_and(|l|l.visible&&!l.locked),
+                egui::Button::new("На активный слой"))
+                .on_hover_text("Переместить выделенные объекты на выбранный слой")
+                .clicked(){self.object_move_to_active_layer();}
+        });
+        ui.horizontal_wrapped(|ui|{
+            if ui.add_enabled(self.selected.is_some(),
+                egui::Button::new("Выбрать тот же тип")).clicked(){
+                self.object_select_same_type();
+            }
+            if ui.add_enabled(self.selection_ids().len()>=2,
+                egui::Button::new("Группировать  Ctrl+G")).clicked(){
+                self.group_selection();
+            }
+            if ui.add_enabled(has_selection,egui::Button::new("Разгруппировать"))
+                .clicked(){self.ungroup_selection();}
+        });
         let query=self.object_filter.trim().to_lowercase();
-        let filtered:Option<Vec<usize>>=if query.is_empty(){None}else{
-            Some(self.doc.objects.iter().enumerate().filter_map(|(index,obj)|{
-                let label=if !obj.name.is_empty(){obj.name.to_lowercase()}else{
-                    match &obj.shape{
-                        Shape::Text{value,..}=>value.to_lowercase(),
-                        Shape::Rectangle{..}=>"прямоугольник".into(),
-                        Shape::Ellipse{..}=>"эллипс".into(),
-                        Shape::Raster{..}=>"фото изображение".into(),
-                        Shape::EmbeddedSvg{..}=>"вектор".into(),
-                        Shape::CompoundPath{..}=>"контуры".into(),
-                        Shape::Bezier{..}=>"кривая".into(),
-                        Shape::Polyline{..}=>"линия".into(),
+        let mut rows=Vec::<Row>::new();
+        let mut emitted=HashSet::<u64>::new();
+        for obj in self.doc.objects.iter().rev(){
+            let group=obj.group_id;
+            let label=if !obj.name.is_empty(){obj.name.clone()}else{
+                match &obj.shape{
+                    Shape::Rectangle{..}=>"Прямоугольник".into(),
+                    Shape::Ellipse{..}=>"Эллипс".into(),
+                    Shape::Text{value,..}=>format!("Текст: {}",value.chars().take(24).collect::<String>()),
+                    Shape::Bezier{..}=>"Кривая Безье".into(),
+                    Shape::CompoundPath{contours}=>format!("Составной контур ({})",contours.len()),
+                    Shape::Polyline{..}=>"Ломаная".into(),
+                    Shape::EmbeddedSvg{source_format,..}=>format!("Вектор SVG ({source_format})"),
+                    Shape::Raster{pixel_width,pixel_height,..}=>format!("Изображение {pixel_width}×{pixel_height}"),
+                }
+            };
+            let matches=|o:&opencorel_core::Object|{
+                let title=if o.name.is_empty(){match &o.shape{
+                    Shape::Rectangle{..}=>"прямоугольник",
+                    Shape::Ellipse{..}=>"эллипс",
+                    Shape::Text{..}=>"текст",
+                    Shape::Bezier{..}=>"безье",
+                    Shape::CompoundPath{..}=>"контур",
+                    Shape::Polyline{..}=>"ломаная",
+                    Shape::EmbeddedSvg{..}=>"svg вектор",
+                    Shape::Raster{..}=>"изображение",
+                }}else{o.name.as_str()};
+                let layer=self.doc.layer(o.layer_id).map(|l|l.name.as_str()).unwrap_or("");
+                query.is_empty()||title.to_lowercase().contains(&query)||
+                    o.id.to_string().contains(&query)||layer.to_lowercase().contains(&query)
+            };
+            if let Some(group_id)=group{
+                if !emitted.insert(group_id){continue;}
+                let members:Vec<_>=self.doc.objects.iter().rev()
+                    .filter(|o|o.group_id==Some(group_id)).collect();
+                let group_matches=query.is_empty()||group_id.to_string().contains(&query)||
+                    members.iter().any(|member|matches(member));
+                if !group_matches{continue;}
+                let first=members.first().map(|o|o.id).unwrap_or(obj.id);
+                let collapsed=self.collapsed_groups.contains(&group_id);
+                rows.push(Row{group_header:true,id:first,group:Some(group_id),
+                    label:format!("Группа {} · {} объектов",group_id,members.len()),
+                    visible:members.iter().all(|o|o.visible),
+                    locked:members.iter().all(|o|o.locked),depth:0,collapsed});
+                if !collapsed{for member in members{
+                    if !query.is_empty()&&!group_id.to_string().contains(&query)&&!matches(member){
+                        continue;
                     }
-                };
-                if label.contains(&query)||obj.id.to_string().contains(&query){
-                    Some(index)
-                }else{None}
-            }).collect())
-        };
-        let count=filtered.as_ref().map_or(self.doc.objects.len(),Vec::len);
-        ui.label(RichText::new(format!("Показано: {count}. Shift — множественное выделение."))
+                    let text=if member.name.is_empty(){match &member.shape{
+                        Shape::Rectangle{..}=>"Прямоугольник".into(),
+                        Shape::Ellipse{..}=>"Эллипс".into(),
+                        Shape::Text{value,..}=>format!("Текст: {}",value.chars().take(24).collect::<String>()),
+                        Shape::Bezier{..}=>"Кривая Безье".into(),
+                        Shape::CompoundPath{contours}=>format!("Контур ({})",contours.len()),
+                        Shape::Polyline{..}=>"Ломаная".into(),
+                        Shape::EmbeddedSvg{source_format,..}=>format!("Вектор {source_format}"),
+                        Shape::Raster{pixel_width,pixel_height,..}=>format!("Фото {pixel_width}×{pixel_height}"),
+                    }}else{member.name.clone()};
+                    rows.push(Row{group_header:false,id:member.id,group,
+                        label:text,visible:member.visible,locked:member.locked,depth:1,collapsed:false});
+                }}
+            }else if matches(obj){
+                rows.push(Row{group_header:false,id:obj.id,group:None,
+                    label,visible:obj.visible,locked:obj.locked,depth:0,collapsed:false});
+            }
+        }
+        ui.label(RichText::new(format!("Показано строк: {} · Shift — множественный выбор · верхний объект рисуется последним",rows.len()))
             .small().color(Color32::GRAY));
-        egui::ScrollArea::vertical().id_salt("objects_list")
-            .show_rows(ui,26.0,count,|ui,rows|{
-                for row in rows{
-                    let index=if let Some(ref filtered)=filtered{
-                        filtered[count-1-row]
-                    }else{count-1-row};
-                    let obj=&self.doc.objects[index];
-                    let id=obj.id;let layer_id=obj.layer_id;
-                    let display=if obj.name.is_empty(){
-                        match &obj.shape{
-                            Shape::Rectangle{..}=>"▭ Прямоугольник".to_string(),
-                            Shape::Ellipse{..}=>"◯ Эллипс".into(),
-                            Shape::Text{value,..}=>format!("T {}",value.chars().take(20).collect::<String>()),
-                            Shape::Bezier{..}=>"⌁ Безье".into(),
-                            Shape::CompoundPath{contours}=>format!("✒ Контуры ({})",contours.len()),
-                            Shape::Polyline{..}=>"╱ Линия".into(),
-                            Shape::EmbeddedSvg{source_format,..}=>format!("▧ Вектор {source_format}"),
-                            Shape::Raster{pixel_width,pixel_height,..}=>format!("▧ Фото {pixel_width}×{pixel_height}"),
+        egui::ScrollArea::vertical().id_salt("objects_tree_studio")
+            .auto_shrink([false,false]).show_rows(ui,27.0,rows.len(),|ui,range|{
+                for row_index in range{
+                    let row=&rows[row_index];
+                    ui.horizontal(|ui|{
+                        if row.group_header{
+                            ui.add_space(2.0);
+                            if ui.small_button(if row.collapsed{"▶"}else{"▼"})
+                                .on_hover_text(if row.collapsed{"Развернуть группу"}else{"Свернуть группу"})
+                                .clicked(){
+                                if let Some(group)=row.group{
+                                    if row.collapsed{self.collapsed_groups.remove(&group);}
+                                    else{self.collapsed_groups.insert(group);}
+                                }
+                            }
+                            if ui.selectable_label(
+                                self.selection_ids().iter().any(|id|
+                                    self.doc.objects.iter().find(|o|o.id==*id)
+                                        .is_some_and(|o|o.group_id==row.group)),
+                                row.label.as_str()).clicked(){
+                                self.select_object(Some(row.id),false);
+                                self.inspector_tab=InspectorTab::Properties;
+                            }
+                        }else{
+                            ui.add_space(if row.depth>0{16.0}else{0.0});
+                            if ui.small_button(if row.visible{"◉"}else{"○"})
+                                .on_hover_text(if row.visible{"Скрыть объект"}else{"Показать объект"})
+                                .clicked(){self.object_visibility(row.id,!row.visible);}
+                            if ui.small_button(if row.locked{"🔒"}else{"🔓"})
+                                .on_hover_text(if row.locked{"Разблокировать объект"}else{"Заблокировать объект"})
+                                .clicked(){self.object_lock(row.id,!row.locked);}
+                            let layer_id=self.doc.objects.iter().find(|o|o.id==row.id)
+                                .map(|o|o.layer_id).unwrap_or(self.active_layer);
+                            if ui.add(egui::Button::new(row.label.as_str())
+                                .selected(self.is_selected(row.id))
+                                .min_size(Vec2::new(ui.available_width(),23.0)))
+                                .on_hover_text(format!("Объект #{} · слой {}",row.id,layer_id))
+                                .clicked(){
+                                let shift=ui.input(|i|i.modifiers.shift);
+                                self.select_object(Some(row.id),shift);
+                                self.active_layer=layer_id;
+                                self.inspector_tab=InspectorTab::Properties;
+                            }
                         }
-                    }else{obj.name.clone()};
-                    let name=if let Some(group)=obj.group_id{
-                        format!("▣ {}  · G{}",display,group)
-                    }else{display};
-                    let visible=self.doc.layer(layer_id).map(|l|l.visible).unwrap_or(false);
-                    let button=egui::Button::new(name)
-                        .selected(self.is_selected(id))
-                        .min_size(Vec2::new(ui.available_width(),23.0));
-                    if ui.add_enabled(visible,button).clicked(){
-                        let shift=ui.input(|i|i.modifiers.shift);
-                        self.select_object(Some(id),shift);
-                        self.active_layer=layer_id;
-                        self.inspector_tab=InspectorTab::Properties;
-                    }
+                    });
                 }
             });
     }
 
     fn inspector_properties(&mut self,ui:&mut egui::Ui){
+        if self.tool==Tool::Smart{
+            ui.heading("Профессиональные фигуры");
+            self.smart_shape_picker(ui);
+            return;
+        }
+        if self.tool==Tool::Freehand{
+            ui.heading("Свободное рисование");
+            ui.label("Удерживайте кнопку мыши и ведите линию. После отпускания появится редактируемая кривая Безье.");
+            ui.separator();
+            ui.label("Точность линии, пикс.");
+            ui.add(egui::Slider::new(&mut self.freehand_precision_px,0.5..=12.0)
+                .step_by(0.5).suffix(" px"));
+            ui.label("Плавность изгибов");
+            ui.add(egui::Slider::new(&mut self.freehand_smoothness,0.0..=1.0)
+                .step_by(0.05));
+            ui.checkbox(&mut self.freehand_closed,"Замкнутый контур");
+            ui.small("Для замкнутого контура плавность сохраняется и на стыке начала с концом. Заливку можно назначить после рисования.");
+            ui.small("Меньший допуск — больше узлов, лучше повторяет движение мыши. Больший допуск — проще контур.");
+            ui.small("Штрихи до 4096 отсчётов; одна линия = одна запись Ctrl+Z. Клавиша H — этот инструмент.");
+            return;
+        }
         // Context tools live here, not in the permanent left rail. A user
         // can always find the active text and node controls even with the
         // minimal panel collapsed to just icons.
@@ -596,9 +971,104 @@ impl Editor {
             ui.label("F8 — текст. Esc — выделение. Шрифт можно изменить после создания.");
             return;
         }
+        if matches!(self.tool,Tool::Nodes|Tool::Select) &&
+            self.selected.is_some() && self.multi_selected.is_empty(){
+            let can_offset=self.doc.objects.iter()
+                .find(|o|Some(o.id)==self.selected)
+                .is_some_and(|o|matches!(&o.shape,
+                    opencorel_core::Shape::Polyline{..}|
+                    opencorel_core::Shape::Bezier{..}|
+                    opencorel_core::Shape::Rectangle{..}|
+                    opencorel_core::Shape::Ellipse{..}));
+            if can_offset{
+                ui.heading("Параллельный контур");
+                ui.horizontal(|ui|{
+                    ui.label("Смещение");
+                    ui.add(egui::DragValue::new(&mut self.offset_distance_mm)
+                        .range(-1000.0..=1000.0).speed(0.2)
+                        .fixed_decimals(2).suffix(" мм"));
+                });
+                if ui.button("Создать смещённую копию")
+                    .on_hover_text("Создаёт новый редактируемый контур, исходный объект сохраняется")
+                    .clicked(){
+                    self.offset_selected_path();
+                }
+                ui.small("Знак задаёт сторону относительно направления контура. Безье/эллипс — приближённая ломаная; острые углы ограничиваются.");
+                ui.separator();
+            }
+        }
         if self.tool==Tool::Nodes{
             ui.heading("Редактирование узлов");
             ui.label("Клик по кривой — выбор. Двойной клик по сегменту — новый узел.");
+            if let Some(id)=self.selected{
+                if self.multi_selected.is_empty() && self.node_edit_allowed(id){
+                    let editable_kind=self.doc.objects.iter().find(|o|o.id==id)
+                        .map(|o|match &o.shape{
+                            opencorel_core::Shape::Polyline{..}=>1u8,
+                            opencorel_core::Shape::Bezier{..}=>2u8,
+                            _=>0u8,
+                        }).unwrap_or(0);
+                    if editable_kind!=0{
+                        ui.separator();
+                        if editable_kind==1 &&
+                            ui.button("Ломаную → Безье (точно)")
+                                .on_hover_text("Без сглаживания: каждый прямой сегмент остаётся геометрически прямым")
+                                .clicked(){
+                            self.convert_selected_polyline_exact();
+                        }
+                        ui.label("Упрощение и сглаживание");
+                        ui.horizontal(|ui|{
+                            ui.label("Допуск, мм");
+                            ui.add(egui::DragValue::new(&mut self.refit_tolerance_mm)
+                                .speed(0.1).range(0.0..=100.0).fixed_decimals(2));
+                        });
+                        ui.label("Плавность");
+                        ui.add(egui::Slider::new(&mut self.freehand_smoothness,0.0..=1.0)
+                            .step_by(0.05));
+                        let clicked=if editable_kind==1{
+                            ui.button("Ломаную → плавная кривая")
+                                .on_hover_text("Преобразовать прямые сегменты в редактируемую кривую (в том числе замкнутую)")
+                                .clicked()
+                        }else{
+                            ui.button("Упростить число узлов кривой")
+                                .on_hover_text("Повторная аппроксимация меняет геометрию и сбрасывает прежние типы узлов")
+                                .clicked()
+                        };
+                        if clicked{self.refit_selected_path(editable_kind==1);}
+                        ui.small("Повторная аппроксимация изменяет геометрию. Ctrl+Z восстанавливает исходные узлы и их типы.");
+                    }
+                }
+            }
+            if self.selection_ids().len()==2{
+                use opencorel_core::path_topology::JoinMode;
+                ui.separator();
+                ui.label("Соединить две открытые кривые или ломаные");
+                ui.small("V → Shift+щелчок по второй кривой → F10");
+                ui.horizontal(|ui|{
+                    ui.label("Допуск сшивки, мм");
+                    ui.add(egui::DragValue::new(&mut self.join_tolerance_mm)
+                        .speed(0.1).range(0.0..=1000.0).fixed_decimals(2));
+                });
+                ui.horizontal_wrapped(|ui|{
+                    if ui.button("Сшить концы")
+                        .on_hover_text("Совместить ближайшие конечные узлы с заданным допуском")
+                        .clicked(){
+                        self.join_selected_beziers(JoinMode::Snap{
+                            tolerance_mm:self.join_tolerance_mm});
+                    }
+                    if ui.button("Сшить плавно")
+                        .on_hover_text("Только для кривых Безье: выровнять касательные и сохранить гладкость")
+                        .clicked(){
+                        self.join_selected_beziers(JoinMode::SmoothSnap{
+                            tolerance_mm:self.join_tolerance_mm});
+                    }
+                    if ui.button("Соединить мостиком")
+                        .on_hover_text("Прямой сегмент между концами без смещения исходных точек")
+                        .clicked(){
+                        self.join_selected_beziers(JoinMode::Bridge);
+                    }
+                });
+            }
             if let Some((id,address))=self.active_node{
                 ui.label(format!("Узел: {address:?}"));
                 let location=self.doc.objects.iter().find(|o|o.id==id)
@@ -620,11 +1090,102 @@ impl Editor {
                     if ui.button("Удалить выбранный узел  Del").clicked(){
                         self.remove_active_node();
                     }
+                    let can_split=self.doc.objects.iter().find(|o|o.id==id)
+                        .is_some_and(|o|match (&o.shape,address){
+                            (opencorel_core::Shape::Bezier{segments,closed:false,..},
+                             opencorel_core::node_edit::NodeAddress::BezierEnd(i))=>
+                                i.checked_add(1).is_some_and(|n|n<segments.len()),
+                            (opencorel_core::Shape::Polyline{points,closed:false},
+                             opencorel_core::node_edit::NodeAddress::Polyline(i))=>
+                                i>0 && i.checked_add(1).is_some_and(|n|n<points.len()),
+                            _=>false,
+                        });
+                    if can_split && ui.button("Разрезать контур в этом узле")
+                        .on_hover_text("Создаёт два отдельных открытых контура с общей конечной точкой")
+                        .clicked(){
+                        self.split_selected_bezier();
+                    }
+                    let has_pair=self.doc.objects.iter().find(|o|o.id==id)
+                        .is_some_and(|o|
+                            opencorel_core::node_edit::has_tangent_pair(&o.shape,address));
+                    if has_pair{
+                        use opencorel_core::node_edit::TangentOperation;
+                        ui.separator();
+                        let current=self.doc.objects.iter().find(|o|o.id==id)
+                            .and_then(|o|opencorel_core::node_edit::mode_at(
+                                &o.node_modes,address));
+                        let mode_text=match current{
+                            Some(TangentOperation::Corner)=>"Угловой — независимые рычаги",
+                            Some(TangentOperation::Smooth)=>"Гладкий — сохраняет направление",
+                            Some(TangentOperation::Symmetric)=>"Симметричный — равные рычаги",
+                            None=>"Свободный — рычаги независимы",
+                        };
+                        ui.label(format!("Режим узла: {mode_text}"));
+                        ui.horizontal_wrapped(|ui|{
+                            if ui.button("Угол")
+                                .on_hover_text("Сбросить оба рычага в узел").clicked(){
+                                self.apply_tangent_operation(TangentOperation::Corner);
+                            }
+                            if ui.button("Гладкий")
+                                .on_hover_text("Сделать касательные коллинеарными; длины сохранить")
+                                .clicked(){
+                                self.apply_tangent_operation(TangentOperation::Smooth);
+                            }
+                            if ui.button("Симметрия")
+                                .on_hover_text("Выровнять направления и длины обоих рычагов")
+                                .clicked(){
+                                self.apply_tangent_operation(TangentOperation::Symmetric);
+                            }
+                            if ui.button("Свободно")
+                                .on_hover_text("Отключить автоматическую связь рычагов без изменения формы")
+                                .clicked(){
+                                self.unlink_active_tangents();
+                            }
+                        });
+                        ui.small("Гладкий и Симметрия автоматически связывают рычаги при перетаскивании. Режим сохраняется в .kdr.");
+                    }
                 }
             }else{
                 ui.label("Выберите опорную точку для точного позиционирования.");
             }
+            if self.selected.is_some_and(|id|self.node_edit_allowed(id)){
+                ui.separator();
+                ui.label("Операции с контуром");
+                let resumable=self.selected
+                    .and_then(|id|self.doc.objects.iter().find(|o|o.id==id))
+                    .is_some_and(|obj|matches!(&obj.shape,
+                        opencorel_core::Shape::Bezier{segments,closed:false,..}
+                            if !segments.is_empty() && segments.len()<10_000));
+                if resumable && ui.button("Продолжить кривую инструментом B")
+                    .on_hover_text("Добавить новые сегменты к существующей кривой без создания второго объекта")
+                    .clicked(){
+                    self.continue_selected_bezier();
+                }
+                ui.horizontal_wrapped(|ui|{
+                    if ui.button("Развернуть направление")
+                        .on_hover_text("Поменять начало и конец пути, сохранив форму и типы узлов")
+                        .clicked(){
+                        self.reverse_selected_path();
+                    }
+                    if ui.button("Замкнуть")
+                        .on_hover_text("Соединить начало и конец контура")
+                        .clicked(){
+                        self.set_selected_path_closed(true);
+                    }
+                    if ui.button("Разомкнуть")
+                        .on_hover_text("Убрать замыкающий сегмент")
+                        .clicked(){
+                        self.set_selected_path_closed(false);
+                    }
+                });
+            }
             ui.small("F10 — узлы. Стрелки — сдвиг. Ctrl+Z — отмена.");
+            ui.separator();
+        }
+        if self.selection_is_text_plus_guide(){
+            ui.collapsing("Текст по кривой — профессиональный инструмент",|ui|{
+                self.text_path_controls(ui);
+            });
             ui.separator();
         }
         let Some(id)=self.selected else{
@@ -697,6 +1258,27 @@ impl Editor {
                 }
             }
         });
+        // Text Studio is a batch action: it operates on the selected set,
+        // not only the single object currently shown in this inspector.
+        let has_text_selection=self.selection_ids().iter().any(|selected_id|
+            self.doc.objects.iter().any(|o|
+                o.id==*selected_id&&matches!(o.shape,Shape::Text{..})));
+        if has_text_selection{
+            ui.collapsing("Мастерская текста — 30 инструментов",|ui|{
+                self.text_studio_panel(ui);
+            });
+        }
+        if !self.selection_ids().is_empty(){
+            ui.collapsing("Композиции — 7 массивов и розеток",|ui|{
+                self.pattern_studio_panel(ui);
+            });
+            ui.collapsing("Векторные эффекты — 9 инструментов",|ui|{
+                self.vector_effects_panel(ui);
+            });
+            ui.collapsing("Студия цвета — 16 гармоний",|ui|{
+                self.color_studio_panel(ui);
+            });
+        }
         ui.separator();
         // Images may contain tens of megabytes of Base64. Never clone the
         // whole object per GUI frame just to show a few numeric fields.
@@ -884,6 +1466,44 @@ impl Editor {
                 Shape::Text{x,y,value,size_mm}=>{
                     ui.label("Текст:");
                     changed|=ui.text_edit_multiline(value).changed();
+                    ui.horizontal(|ui|{
+                        if ui.small_button("АБВ → верхний регистр")
+                            .on_hover_text("Unicode-преобразование, включая кириллицу")
+                            .clicked(){
+                            let converted=value.to_uppercase();
+                            if *value!=converted{*value=converted;changed=true;}
+                        }
+                        if ui.small_button("абв → нижний регистр").clicked(){
+                            let converted=value.to_lowercase();
+                            if *value!=converted{*value=converted;changed=true;}
+                        }
+                    });
+                    ui.label(format!("Символов: {} · Строк: {}",
+                        value.chars().count(),value.lines().count().max(1)));
+                    ui.collapsing("Найти и заменить в надписи",|ui|{
+                        ui.add(egui::TextEdit::singleline(&mut self.text_find)
+                            .hint_text("Искать точное совпадение"));
+                        ui.add(egui::TextEdit::singleline(&mut self.text_replacement)
+                            .hint_text("Заменить на..."));
+                        let count=if self.text_find.is_empty(){0}else{
+                            value.matches(self.text_find.as_str()).count()
+                        };
+                        ui.label(format!("Совпадений: {count} · Поиск с учётом регистра"));
+                        if ui.add_enabled(count>0,egui::Button::new("Заменить все")).clicked(){
+                            match text_edit_ops::replace_all_literal(
+                                value,&self.text_find,&self.text_replacement){
+                                Ok((updated,replaced))=>{
+                                    if updated!=*value{
+                                        *value=updated;
+                                        changed=true;
+                                        self.status=format!(
+                                            "Заменено совпадений в тексте: {replaced}");
+                                    }
+                                },
+                                Err(reason)=>{self.status=format!("Замена отклонена: {reason}");}
+                            }
+                        }
+                    });
                     for (label,num) in [("X мм",x),("Y мм",y),("Размер мм",size_mm)]{
                         ui.horizontal(|ui|{
                             ui.label(label);
@@ -993,8 +1613,40 @@ impl Editor {
                 ui.label(RichText::new("Типографика").strong());
                 ui.label("Название шрифта (системного):");
                 changed|=ui.text_edit_singleline(&mut object.text_format.family).changed();
+                ui.collapsing("Выбрать из установленных шрифтов",|ui|{
+                    ui.add(egui::TextEdit::singleline(&mut self.font_search)
+                        .hint_text("Поиск по названию шрифта..."));
+                    let query=self.font_search.trim().to_lowercase();
+                    let fonts=self.text_outliner.font_families();
+                    let matches:Vec<_>=fonts.into_iter().filter(|name|
+                        name.to_lowercase().contains(&query)).collect();
+                    if matches.is_empty(){
+                        ui.label(if query.is_empty() {
+                            "Системные шрифты не обнаружены"
+                        } else {
+                            "По запросу шрифты не найдены"
+                        });
+                    }else{
+                        ui.label(format!("Найдено семейств: {}",matches.len()));
+                        egui::ScrollArea::vertical().max_height(180.0)
+                            .id_salt("font_family_list")
+                            .show_rows(ui,24.0,matches.len(),|ui,rows|{
+                                for index in rows{
+                                    let family=&matches[index];
+                                    changed|=ui.selectable_value(
+                                        &mut object.text_format.family,
+                                        family.clone(),family
+                                    ).changed();
+                                }
+                            });
+                    }
+                });
                 if ui.button("Шрифт по умолчанию").clicked(){
                     object.text_format.family="sans-serif".into();changed=true;
+                }
+                if !self.text_outliner.font_available(&object.text_format.family){
+                    ui.colored_label(Color32::from_rgb(231,156,69),
+                        "Шрифт не найден в системе: возможна подмена при экспорте. Выберите установленный шрифт.");
                 }
                 ui.horizontal(|ui|{
                     ui.label("Начертание:");
@@ -1053,7 +1705,13 @@ impl Editor {
                     self.doc.objects[index]=object.clone();
                     self.compound_cache.clear();
                 }else{
-                    self.status="Цвет задаётся в виде #RRGGBB или none".into();
+                    self.status=if !valid_paint(&object.style.fill) ||
+                        !valid_paint(&object.style.stroke) {
+                        "Цвет задаётся в виде #RRGGBB или none".into()
+                    }else{
+                        format!("Недопустимые параметры текста: {}",
+                            object.text_format.validate().unwrap_err())
+                    };
                 }
             }
             ui.separator();
@@ -1069,6 +1727,70 @@ impl Editor {
     }
 
     fn inspector_page(&mut self,ui:&mut egui::Ui){
+        ui.heading("Страницы документа");
+        ui.label(format!("Страница {} из {}",
+            self.doc.active_page_index+1,self.doc.page_count()));
+        let entries:Vec<_>=(0..self.doc.page_count()).map(|index|{
+            let label=self.doc.page_title(index).unwrap_or("Страница").to_owned();
+            let dims=self.doc.page_dimensions(index).unwrap_or((0.,0.));
+            (index,label,dims)
+        }).collect();
+        egui::ScrollArea::vertical()
+            .id_salt("pages_list")
+            .max_height(190.0).show(ui,|ui|{
+                for (index,label,(w,h)) in entries{
+                    let title=format!("{} — {}  ({w:.0}×{h:.0} мм)",
+                        index+1,label);
+                    if ui.selectable_label(self.doc.active_page_index==index,title).clicked(){
+                        self.navigate_page(index);
+                    }
+                }
+            });
+        ui.horizontal_wrapped(|ui|{
+            if ui.button("+ Страница").clicked(){self.create_page(false);}
+            if ui.button("Дублировать").clicked(){self.create_page(true);}
+            if ui.add_enabled(self.doc.page_count()>1,
+                egui::Button::new("Удалить")).clicked(){self.remove_current_page();}
+        });
+        ui.horizontal_wrapped(|ui|{
+            if ui.add_enabled(self.doc.active_page_index>0,
+                egui::Button::new("← Ранее")).clicked(){self.shift_current_page(false);}
+            if ui.add_enabled(self.doc.active_page_index+1<self.doc.page_count(),
+                egui::Button::new("Позднее →")).clicked(){self.shift_current_page(true);}
+        });
+        if !self.page_rename_mode{
+            ui.horizontal(|ui|{
+                ui.label(format!("Название: {}",self.doc.active_page_title));
+                if ui.small_button("Изменить").clicked(){
+                    self.page_name_edit=self.doc.active_page_title.clone();
+                    self.page_rename_mode=true;
+                }
+            });
+        }else{
+            ui.label("Новое имя страницы");
+            ui.text_edit_singleline(&mut self.page_name_edit);
+            ui.horizontal(|ui|{
+                if ui.button("Применить").clicked(){
+                    let next=self.page_name_edit.clone();
+                    self.rename_current_page(&next);
+                }
+                if ui.button("Отмена").clicked(){self.page_rename_mode=false;}
+            });
+        }
+        ui.horizontal(|ui|{
+            if ui.small_button("Все SVG").on_hover_text("Экспорт всех страниц в отдельные SVG-файлы").clicked(){
+                self.export_all_pages_dialog("svg");
+            }
+            if ui.small_button("Все PDF").on_hover_text("Экспорт по одному RGB PDF на страницу").clicked(){
+                self.export_all_pages_dialog("pdf");
+            }
+        });
+        ui.small("Страницы хранят собственные объекты, слои, направляющие и размеры.");
+        ui.collapsing("Заменить фирменный цвет во всех страницах",|ui|{
+            self.color_studio_panel(ui);
+        });
+        ui.small("Экспорт PDF из меню «Файл» объединяет все страницы в один векторный документ.");
+        ui.separator();
         ui.heading("Параметры листа");
         ui.label("Наименование документа");
         let mut name=self.doc.name.clone();
@@ -1097,6 +1819,45 @@ impl Editor {
                 .speed(0.5).range(0.5..=1000.0));
         });
         ui.checkbox(&mut self.show_rulers,"Показать линейки");
+        ui.checkbox(&mut self.show_guides,"Показать направляющие");
+        ui.checkbox(&mut self.snap_guides,"Привязка к направляющим");
+        ui.small("Тяните из линеек для создания направляющих; Alt+перетаскивание — перемещение.");
+        ui.horizontal_wrapped(|ui|{
+            if ui.button("+ Вертикальная").clicked(){
+                self.add_guide(opencorel_core::guides::GuideAxis::Vertical,
+                    self.doc.page.width_mm/2.0);
+            }
+            if ui.button("+ Горизонтальная").clicked(){
+                self.add_guide(opencorel_core::guides::GuideAxis::Horizontal,
+                    self.doc.page.height_mm/2.0);
+            }
+            if ui.button("Удалить все").clicked(){self.clear_guides();}
+        });
+        ui.label(format!("Направляющих: {}",self.doc.guides.len()));
+        let mut guide_update=None;
+        let mut guide_remove=None;
+        let mut guide_edit_finished=false;
+        for (i,guide) in self.doc.guides.iter().enumerate(){
+            ui.horizontal(|ui|{
+                let axis=match guide.axis{
+                    opencorel_core::guides::GuideAxis::Horizontal=>"Г",
+                    opencorel_core::guides::GuideAxis::Vertical=>"В",
+                };
+                ui.label(format!("{axis} #{}",i+1));
+                let mut coordinate=guide.position_mm;
+                let response=ui.add(egui::DragValue::new(&mut coordinate)
+                    .speed(0.2).range(-100_000.0..=100_000.0)
+                    .fixed_decimals(2).suffix(" мм"));
+                if response.changed(){guide_update=Some((i,coordinate));}
+                if response.drag_stopped() || response.lost_focus(){
+                    guide_edit_finished=true;
+                }
+                if ui.small_button("×").clicked(){guide_remove=Some(i);}
+            });
+        }
+        if let Some(i)=guide_remove{self.remove_guide(i);}
+        else if let Some((i,p))=guide_update{self.edit_guide_numeric(i,p);}
+        if guide_edit_finished{self.guide_numeric_session=None;}
         ui.checkbox(&mut self.show_safe_area,"Показать безопасную область");
         ui.horizontal(|ui|{
             ui.label("Отступ от края, мм");
@@ -1105,6 +1866,19 @@ impl Editor {
         });
         ui.label("Оранжевая рамка — только экранная подсказка, в файл не выводится.");
         ui.separator();
+        ui.heading("Печатный лист SVG");
+        ui.horizontal(|ui|{
+            ui.label("Вылет, мм");
+            ui.add(egui::DragValue::new(&mut self.print_bleed_mm)
+                .speed(0.25).range(0.0..=25.0));
+        });
+        ui.checkbox(&mut self.print_crop_marks,"Печатать метки реза");
+        if ui.button("Экспортировать печатный SVG...").clicked(){
+            self.export_print_sheet_dialog();
+        }
+        ui.small("Вылеты показывают только рисунок, уже выходящий за границы листа; края автоматически не растягиваются.");
+        ui.small("Отдельный файл RGB SVG, без PDF/X и CMYK. Исходный .kdr не меняется.");
+        ui.separator();
         ui.heading("Предпечатная проверка");
         ui.horizontal(|ui|{
             ui.label("Порог DPI для фото");
@@ -1112,7 +1886,7 @@ impl Editor {
                 .speed(5.0).range(30.0..=600.0));
         });
         if ui.button("Проверить макет").clicked(){self.run_preflight();}
-        ui.label("Один редактируемый лист. Многостраничность — следующий этап.");
+        ui.label("Многостраничные проекты сохраняются в KDR. SVG/PDF в обычном экспорте содержат только активную страницу.");
     }
 
     pub(super) fn workspace_footer(&mut self,ctx:&egui::Context){
@@ -1136,8 +1910,27 @@ impl Editor {
         });
         egui::TopBottomPanel::bottom("page_navigator").exact_height(29.0).show(ctx,|ui|{
             ui.horizontal(|ui|{
-                ui.label(RichText::new("Страница 1 из 1").strong())
-                    .on_hover_text("Многостраничные проекты пока не реализованы.");
+                if ui.add_enabled(self.doc.active_page_index>0,
+                    egui::Button::new("◀")).on_hover_text("Предыдущая страница").clicked(){
+                    self.navigate_page(self.doc.active_page_index-1);
+                }
+                ui.menu_button(format!("Страница {} из {}",
+                    self.doc.active_page_index+1,self.doc.page_count()),|ui|{
+                    for i in 0..self.doc.page_count(){
+                        let name=self.doc.page_title(i).unwrap_or("Страница").to_owned();
+                        if ui.selectable_label(i==self.doc.active_page_index,
+                            format!("{} — {}",i+1,name)).clicked(){
+                            self.navigate_page(i);ui.close_menu();
+                        }
+                    }
+                });
+                if ui.add_enabled(self.doc.active_page_index+1<self.doc.page_count(),
+                    egui::Button::new("▶")).on_hover_text("Следующая страница").clicked(){
+                    self.navigate_page(self.doc.active_page_index+1);
+                }
+                if ui.small_button("+").on_hover_text("Добавить пустую страницу").clicked(){
+                    self.create_page(false);
+                }
                 ui.separator();
                 ui.label(RichText::new("ЦВЕТА").strong().small());
                 for swatch in SWATCHES.iter().take(14){
@@ -1169,14 +1962,14 @@ impl Editor {
         let editable:HashSet<u64>=self.doc.layers.iter()
             .filter(|l|l.visible&&!l.locked).map(|l|l.id).collect();
         if self.doc.objects.iter().filter(|o|ids.contains(&o.id))
-            .any(|o|!editable.contains(&o.layer_id)){
+            .any(|o|!o.visible||o.locked||!editable.contains(&o.layer_id)){
             self.status="Цвет не изменён: часть выделения находится в закрытом слое".into();
             return;
         }
         if !self.doc.objects.iter().any(|o|ids.contains(&o.id)){return;}
         self.checkpoint();
         for obj in self.doc.objects.iter_mut(){
-            if ids.contains(&obj.id)&&editable.contains(&obj.layer_id){
+            if ids.contains(&obj.id)&&obj.visible&&!obj.locked&&editable.contains(&obj.layer_id){
                 if is_stroke{
                     obj.style.stroke=value.into();
                     if value!="none" && obj.style.stroke_width_mm==0.0{
@@ -1187,54 +1980,12 @@ impl Editor {
         }
     }
     pub(super) fn delete_selection(&mut self){
-        let ids:HashSet<u64>=self.selection_ids().into_iter().collect();
-        if ids.is_empty(){return;}
-        let editable:HashSet<u64>=self.doc.layers.iter()
-            .filter(|l|l.visible&&!l.locked).map(|l|l.id).collect();
-        if self.doc.objects.iter().any(|o|ids.contains(&o.id)&&
-            !editable.contains(&o.layer_id)){
-            self.status="Удаление отменено: выделение включает заблокированные слои".into();
-            return;
-        }
-        if !self.doc.objects.iter().any(|o|ids.contains(&o.id)){return;}
-        self.checkpoint();
-        self.doc.objects.retain(|o|!ids.contains(&o.id));
-        self.doc.clip_links.retain(|clip|
-            !ids.contains(&clip.source_id)&&!ids.contains(&clip.target_id));
-        self.doc.appearances.retain(|id,_|!ids.contains(id));
-        self.selected=None;self.multi_selected.clear();
-        self.status="Выделенные объекты удалены".into();
+        self.object_delete_selection();
     }
     pub(super) fn duplicate_selection(&mut self){
-        // Kept for existing keyboard/UI call sites; preserves text formatting.
-        self.duplicate_preserving_styles();
+        self.object_duplicate_selection();
     }
     pub(super) fn reorder_selection(&mut self,front:bool){
-        let ids:HashSet<u64>=self.selection_ids().into_iter().collect();
-        if ids.is_empty(){return;}
-        let editable:HashSet<u64>=self.doc.layers.iter()
-            .filter(|l|l.visible&&!l.locked).map(|l|l.id).collect();
-        if self.doc.objects.iter().any(|o|ids.contains(&o.id)&&
-            !editable.contains(&o.layer_id)){
-            self.status="Порядок не изменён: слой заблокирован".into();return;
-        }
-        if !self.doc.objects.iter().any(|o|ids.contains(&o.id)){return;}
-        self.checkpoint();
-        let mut selected=Vec::new();
-        let mut rest=Vec::new();
-        for obj in self.doc.objects.drain(..){
-            if ids.contains(&obj.id){selected.push(obj);}
-            else{rest.push(obj);}
-        }
-        self.doc.objects=if front{
-            rest.extend(selected);rest
-        }else{
-            selected.extend(rest);selected
-        };
-        self.status=if front{
-            "Выделенные объекты перемещены на передний план".into()
-        }else{
-            "Выделенные объекты перемещены на задний план".into()
-        };
+        self.object_reorder_selection(if front{StackOrder::Front}else{StackOrder::Back});
     }
 }

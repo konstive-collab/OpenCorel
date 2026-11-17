@@ -4,6 +4,7 @@
 
 **Alpha development preview — NOT a fully compatible replacement for CorelDRAW.** Designed for posters, maps and large advertising sheets, currently targeting Windows 10/11 x64 and Linux x64. Windows 7 is not tested.
 
+- v0.19 STUDIO: persistent per-object visibility and locks, searchable grouped Object Studio, atomic duplication preserving styles/groups/clip pairs, stable raise/lower/front/back stacking, layer rename/reorder/delete-and-transfer, and one-step undo. Legacy KDR objects default to visible/unlocked.
 - v0.10: **Boolean operations** for two selected, editable closed filled figures: union, A minus B, intersection, and XOR. Results remain native compound KDR contours, including disconnected shapes and holes. Uses bounded 0.1mm curve flattening, refuses unsupported/empty/error cases without changing the source, and offers Undo.
 - v0.9: interactive **F10 node-editing tool** for polylines, Bézier curves and individual contours: mouse dragging of anchors and handles, double-click to insert nodes, Del to remove anchors, arrow-key nudging; undo and native KDR persistence.
 - [20-iteration engineering plan](docs/ROADMAP_20_ITERATIONS.md) defines ordered work, quality gates and transparent progress.

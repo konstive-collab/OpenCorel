@@ -29,3 +29,17 @@ Provide anonymized documents with rights to use for testing:
 - Expected results: screenshots/renders, physical sizes, fonts, color mode and editable entities
 
 A claim of full compatibility requires exact measurable per-version pass rates. Do not market 100% support without the relevant regression corpus.
+
+## v0.19 Object Studio regression gates
+
+| Scenario | Required evidence |
+| --- | --- |
+| Legacy object records | Deserializing a KDR object without `visible`/`locked` defaults to visible/unlocked; re-save/load preserves explicit state |
+| Object visibility | Hidden object is absent from canvas, SVG/PDF export, hit testing and marquee; can still be selected and shown from Object Studio |
+| Object lock | Locked object remains visible/exportable but is excluded from canvas picking, movement, node editing, color/appearance changes and batch transforms |
+| Duplicate | Complete group and clip pairs preserve geometry, text format, style, appearance and links; partial group/clip selection fails without mutation |
+| Stacking | Raise/lower one and front/back preserve relative order; no-op does not create an undo checkpoint |
+| Layers | Rename/reorder; moving objects validates target; deleting a non-final layer transfers its objects; deleting the last layer is refused |
+| Undo | Every successful manager action is one checkpoint; invalid or no-op actions do not change document/history |
+| Scale | Object manager must remain virtualized and responsive with 1k / 10k / 100k objects; avoid building a widget for every object each frame |
+
