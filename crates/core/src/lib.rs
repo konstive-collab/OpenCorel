@@ -503,7 +503,7 @@ impl Document {
         let editable:HashSet<u64>=self.layers.iter()
             .filter(|l|l.visible&&!l.locked).map(|l|l.id).collect();
         if self.objects.iter().any(|o|wanted.contains(&o.id)
-            && (!editable.contains(&o.layer_id)||o.group_id.is_some())){
+            && (!o.visible||o.locked||!editable.contains(&o.layer_id)||o.group_id.is_some())){
             return 0;
         }
         let mut positions:Vec<(u64,f32)>=self.objects.iter().filter(|o|
