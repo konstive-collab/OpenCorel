@@ -460,8 +460,7 @@ fn trim_history(history:&mut Vec<Document>) {
 impl Editor{
     fn begin_inline_text_edit(&mut self,id:u64,pos:Pos2){
         let Some(object)=self.doc.objects.iter().find(|o|o.id==id) else{return;};
-        let editable=self.doc.layer(object.layer_id)
-            .is_some_and(|layer|layer.visible&&!layer.locked);
+        let editable=self.doc.is_object_editable(id);
         if !editable {
             self.status="Текст находится на скрытом или заблокированном слое".into();
             return;
@@ -483,8 +482,7 @@ impl Editor{
         let Some(object)=self.doc.objects.iter().find(|o|o.id==session.object_id) else{
             self.status="Объект больше не существует".into();return;
         };
-        let editable=self.doc.layer(object.layer_id)
-            .is_some_and(|layer|layer.visible&&!layer.locked);
+        let editable=self.doc.is_object_editable(session.object_id);
         if !editable {
             self.status="Нельзя изменять текст на заблокированном слое".into();return;
         }
@@ -555,14 +553,12 @@ impl Editor{
             self.status="Выделите один или несколько текстовых объектов".into();
             return;
         }
-        let editable:HashSet<u64>=self.doc.layers.iter()
-            .filter(|l|l.visible&&!l.locked).map(|l|l.id).collect();
         let mut converted=Vec::new();
         // Atomic batch: an unavailable font or glyph must not convert only half
         // of a customer document.
         for id in ids{
             let Some(obj)=self.doc.objects.iter().find(|o|o.id==id) else{continue;};
-            if !editable.contains(&obj.layer_id){continue;}
+            if !self.doc.is_object_editable(id){continue;}
             if !matches!(obj.shape,Shape::Text{..}){continue;}
             match self.text_outliner.convert_object(obj){
                 Ok(shape)=>converted.push((id,shape)),
@@ -603,9 +599,7 @@ impl Editor{
         if self.tool!=Tool::Select || !self.multi_selected.is_empty(){return None;}
         let id=self.selected?;
         let o=self.doc.objects.iter().find(|o|o.id==id)?;
-        let editable=self.doc.layer(o.layer_id)
-            .map(|l|l.visible&&!l.locked).unwrap_or(false);
-        if !editable||!transform::resizable(&o.shape){return None;}
+        if !self.doc.is_object_editable(id)||!transform::resizable(&o.shape){return None;}
         let b=self.text_preview.ink_bounds(o).unwrap_or_else(||o.bounds());
         if b.w<0.1||b.h<0.1{return None;}
         for corner in [ResizeCorner::TopLeft,ResizeCorner::TopRight,
@@ -623,8 +617,7 @@ impl Editor{
             self.status="Недопустимая координата изменения размера".into();
             return;
         }
-        if !self.doc.layer(self.doc.objects[index].layer_id)
-            .is_some_and(|l|l.visible&&!l.locked) ||
+        if !self.doc.is_object_editable(id)||
             !transform::resizable(&self.doc.objects[index].shape){
             self.status="Размер заблокированного объекта изменить нельзя".into();
             return;
@@ -704,10 +697,8 @@ impl Editor{
         self.multi_selected=next.into_iter().skip(1).collect();
     }
     fn select_all(&mut self){
-        let editable:HashSet<u64>=self.doc.layers.iter().filter(|l|l.visible&&!l.locked)
-            .map(|l|l.id).collect();
         let ids:Vec<u64>=self.doc.objects.iter()
-            .filter(|o|editable.contains(&o.layer_id)).map(|o|o.id).collect();
+            .filter(|o|self.doc.is_object_editable(o.id)).map(|o|o.id).collect();
         self.selected=ids.first().copied();
         self.multi_selected=ids.into_iter().skip(1).collect();
         self.status=format!("Выбрано объектов: {}",self.selection_ids().len());
@@ -730,10 +721,8 @@ impl Editor{
     }
     fn layout_selection_available(&mut self,ids:&[u64])->bool{
         let ids:HashSet<u64>=ids.iter().copied().collect();
-        let editable:HashSet<u64>=self.doc.layers.iter()
-            .filter(|l|l.visible&&!l.locked).map(|l|l.id).collect();
         if self.doc.objects.iter().any(|o|ids.contains(&o.id)
-            && (!editable.contains(&o.layer_id)||o.group_id.is_some())){
+            && (!self.doc.is_object_editable(o.id)||o.group_id.is_some())){
             self.status="Выровнять можно только отдельные незаблокированные объекты. Группу сначала разгруппируйте.".into();
             return false;
         }
@@ -819,8 +808,9 @@ impl Editor{
         let layer_id=self.curve_draft
             .and_then(|id|self.doc.objects.iter().find(|o|o.id==id))
             .map(|o|o.layer_id).unwrap_or(self.active_layer);
-        if !self.doc.layer(layer_id).is_some_and(|layer|layer.visible&&!layer.locked){
-            self.status="Слой кривой скрыт или заблокирован".into();return;
+        if self.curve_draft.is_some_and(|id|!self.doc.is_object_editable(id))||
+            !self.doc.layer(layer_id).is_some_and(|layer|layer.visible&&!layer.locked){
+            self.status="Кривая находится на скрытом или заблокированном объекте/слое".into();return;
         }
         let Some(start)=self.curve_start else {
             self.curve_outgoing=None;
@@ -913,8 +903,7 @@ impl Editor{
         if close{
             if let Some(id)=self.curve_draft{
                 let can_close=self.doc.objects.iter().find(|o|o.id==id)
-                    .is_some_and(|o|self.doc.layer(o.layer_id)
-                        .is_some_and(|l|l.visible&&!l.locked)
+                    .is_some_and(|o|self.doc.is_object_editable(o.id)
                         && matches!(&o.shape,Shape::Bezier{segments,closed:false,..}
                             if segments.len()>=2));
                 if can_close {
@@ -1332,7 +1321,7 @@ impl Editor{
             }
             let selected:HashSet<u64>=self.selection_ids().into_iter().collect();
             for o in self.doc.objects.iter().filter(|o|selected.contains(&o.id)){
-                if self.doc.layer(o.layer_id).map(|l|l.visible).unwrap_or(false){
+                if self.doc.is_object_visible(o.id){
                     let bounds=self.text_preview.ink_bounds(o).unwrap_or_else(||o.bounds());
                     outline(&page_painter,v.bounds(bounds).expand(3.0),
                         Color32::from_rgb(22,175,148),1.5);
