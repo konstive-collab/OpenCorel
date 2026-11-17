@@ -170,7 +170,7 @@ fn generate_pattern(doc:&mut Document,ids:&[u64],opts:PatternOptions)
         .ok_or("Переполнение количества копий")?;
     if extra>MAX_PATTERN_NEW_OBJECTS||
         doc.objects.len().saturating_add(extra)>100_000 ||
-        doc.next_id.checked_add(extra as u64).is_none_or(|id|id>=u64::MAX){
+        doc.next_id.checked_add(extra as u64).is_none_or(|id|id==u64::MAX){
         return Err("Массив превышает предел 1800 объектов".into());
     }
     // Bound expensive raster clones before touching the document.
