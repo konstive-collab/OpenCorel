@@ -269,7 +269,7 @@ fn text_ids(doc:&Document,ids:&[u64])->Result<Vec<u64>,String>{
         if !unique.insert(id){continue;}
         let o=doc.objects.iter().find(|o|o.id==id)
             .ok_or("Текстовый объект не найден")?;
-        if !doc.layer(o.layer_id).is_some_and(|l|l.visible&&!l.locked){
+        if !doc.is_object_editable(o.id){
             return Err("Выделение включает скрытый или заблокированный слой".into());
         }
         if matches!(o.shape,Shape::Text{..}){result.push(id);}
