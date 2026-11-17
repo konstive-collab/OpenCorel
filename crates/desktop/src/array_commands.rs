@@ -52,7 +52,7 @@ impl Editor{
         if self.doc.objects.iter().filter(|o|chosen.contains(&o.id)).count()!=chosen.len() ||
             self.doc.objects.iter().filter(|o|chosen.contains(&o.id)).any(|o|
                 o.group_id.is_some() ||
-                !self.doc.is_object_editable(o.id)) ||
+                !self.doc.object_is_editable(o)) ||
             self.doc.clip_links.iter().any(|l|
                 chosen.contains(&l.source_id)||chosen.contains(&l.target_id)){
             self.status="Выравнивание: нужны доступные объекты без групп и обтравки".into();
@@ -90,7 +90,7 @@ impl Editor{
             self.status="Один или несколько выделенных объектов не найдены".into();return;
         }
         if sources.iter().any(|o|o.group_id.is_some() ||
-            !self.doc.is_object_editable(o.id)){
+            !self.doc.object_is_editable(o)){
             self.status="Сетка: сначала разгруппируйте объекты и разблокируйте слои".into();
             return;
         }
