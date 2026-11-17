@@ -23,6 +23,7 @@ mod compound_render;
 mod text_preview;
 mod text_edit_ops;
 mod text_studio;
+mod pattern_studio;
 mod bezier_preview;
 mod bezier_pen;
 mod snap_targets;
@@ -130,6 +131,14 @@ struct Editor{
     array_rows:u32,
     array_gap_x_mm:f32,
     array_gap_y_mm:f32,
+    pattern_copies:u32,
+    pattern_radius_mm:f32,
+    pattern_step_mm:f32,
+    pattern_amplitude_mm:f32,
+    pattern_cycles:f32,
+    pattern_start_angle:f32,
+    pattern_sweep_angle:f32,
+    pattern_rotate_objects:bool,
     active_layer:u64,
     pan:Vec2,
     undo:Vec<Document>,
@@ -225,6 +234,10 @@ impl Default for Editor{
             refit_tolerance_mm:0.8,
             array_columns:3,array_rows:2,
             array_gap_x_mm:5.0,array_gap_y_mm:5.0,
+            pattern_copies:12,pattern_radius_mm:50.0,pattern_step_mm:25.0,
+            pattern_amplitude_mm:12.0,pattern_cycles:1.0,
+            pattern_start_angle:0.0,pattern_sweep_angle:360.0,
+            pattern_rotate_objects:false,
             active_layer:1,pan:Vec2::ZERO,
             undo:Vec::new(),redo:Vec::new(),
             inspector_tab:InspectorTab::Objects,show_inspector:true,
