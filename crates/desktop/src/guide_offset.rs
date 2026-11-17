@@ -150,7 +150,7 @@ impl Editor{
         }
         let Some(source)=self.doc.objects.iter().find(|o|o.id==id).cloned()
             else{return;};
-        if source.group_id.is_some() ||
+        if source.group_id.is_some()||!source.visible||source.locked||
             !self.doc.layer(source.layer_id)
                 .is_some_and(|l|l.visible&&!l.locked){
             self.status="Смещение недоступно для групп и заблокированных слоёв".into();
