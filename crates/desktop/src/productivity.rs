@@ -204,9 +204,7 @@ impl Editor{
             new_x.abs()>100_000.0||new_y.abs()>100_000.0{return;}
         let Some(bounds)=self.selection_bounds() else{return;};
         let ids:HashSet<u64>=self.selection_ids().into_iter().collect();
-        let layers:HashSet<u64>=self.doc.layers.iter()
-            .filter(|layer|layer.visible&&!layer.locked).map(|l|l.id).collect();
-        if self.doc.objects.iter().any(|o|ids.contains(&o.id)&&!layers.contains(&o.layer_id)){
+        if self.doc.objects.iter().any(|o|ids.contains(&o.id)&&!self.doc.is_object_editable(o.id)){
             self.status="Выделение включает заблокированный слой".into();return;
         }
         let dx=new_x-bounds.x;
