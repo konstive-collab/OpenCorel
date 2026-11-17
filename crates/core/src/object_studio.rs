@@ -279,7 +279,7 @@ mod tests{
         let b=d.add(Shape::Text{x:20.,y:4.,value:"Ёжик".into(),size_mm:8.},
             Style{fill:"#AA1133".into(),stroke:"none".into(),stroke_width_mm:0.});
         d.group_objects(&[a,b]).unwrap();
-        let appearance=Appearance::default();
+        let appearance=Appearance{opacity:0.75,..Appearance::default()};
         d.set_appearance(a,appearance.clone()).unwrap();
         let before=d.objects.len();
         let ids=d.duplicate_objects(&[a,b],5.,7.).unwrap();
