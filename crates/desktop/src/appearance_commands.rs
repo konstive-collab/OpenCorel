@@ -48,7 +48,7 @@ impl Editor{
             Err(e)=>{self.status=format!("Недопустимое оформление: {e}");return;}
         };
         if !self.doc.objects.iter().filter(|o|ids.contains(&o.id)).all(|o|
-            self.doc.is_object_editable(o.id)){
+            self.doc.object_is_editable(o)){
             self.status="Оформление нельзя менять на заблокированном слое".into();
             return;
         }
@@ -66,7 +66,7 @@ impl Editor{
         let ids:HashSet<u64>=self.selection_ids().into_iter().collect();
         if !ids.iter().any(|id|self.doc.appearances.contains_key(id)){return;}
         if !self.doc.objects.iter().filter(|o|ids.contains(&o.id)).all(|o|
-            self.doc.is_object_editable(o.id)){
+            self.doc.object_is_editable(o)){
             self.status="Не удалось сбросить оформление на заблокированном слое".into();
             return;
         }
