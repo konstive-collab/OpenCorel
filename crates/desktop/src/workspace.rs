@@ -3,6 +3,7 @@
 use super::{color, productivity, text_edit_ops, Editor, Tool};
 use eframe::egui::{self, Color32, RichText, Vec2};
 use opencorel_core::{Bounds, Shape, Alignment, Distribution, TextAlign, valid_paint};
+use opencorel_core::object_studio::StackOrder;
 use std::collections::HashSet;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -690,34 +691,82 @@ impl Editor {
     }
 
     fn inspector_objects(&mut self,ui:&mut egui::Ui){
+        use opencorel_core::object_studio::StackOrder;
+        #[derive(Clone)]
+        struct Row{
+            group_header:bool,id:u64,group:Option<u64>,label:String,
+            visible:bool,locked:bool,depth:usize,
+        }
         ui.horizontal(|ui|{
             ui.heading("СЛОИ");
+            ui.label(RichText::new(format!("{}",self.doc.layers.len()))
+                .small().color(Color32::GRAY));
             if ui.small_button("+ Слой").on_hover_text("Создать новый слой").clicked(){
                 self.checkpoint();
                 let name=format!("Слой {}",self.doc.layers.len()+1);
                 self.active_layer=self.doc.add_layer(name);
             }
         });
-        let layers:Vec<_>=self.doc.layers.iter()
-            .map(|layer|(layer.id,layer.name.clone(),layer.visible,layer.locked)).collect();
-        for (id,name,mut visible,mut locked) in layers{
+        let layers:Vec<_>=self.doc.layers.iter().enumerate().map(|(index,l)|
+            (index,l.id,l.name.clone(),l.visible,l.locked,
+                self.doc.objects.iter().filter(|o|o.layer_id==l.id).count()))
+            .collect();
+        for (index,id,name,mut visible,mut locked,count) in layers{
             ui.horizontal(|ui|{
                 if ui.selectable_label(self.active_layer==id,
-                    format!("{} {}",if visible{"●"}else{"○"},name)).clicked(){
+                    format!("{}  {}",if self.active_layer==id{"▸"}else{" "},name))
+                    .on_hover_text(format!("Активный слой · {count} объектов")).clicked(){
                     self.active_layer=id;
                 }
-                if ui.checkbox(&mut visible,"").on_hover_text("Видимость").changed(){
+                if ui.small_button(if visible{"◉"}else{"○"})
+                    .on_hover_text(if visible{"Скрыть слой"}else{"Показать слой"}).clicked(){
                     self.checkpoint();
                     if let Some(layer)=self.doc.layers.iter_mut().find(|l|l.id==id){
-                        layer.visible=visible;
+                        layer.visible=!visible;
                     }
+                    if !visible{self.selected=None;self.multi_selected.clear();}
                 }
-                if ui.checkbox(&mut locked,"").on_hover_text("Блокировка").changed(){
+                if ui.small_button(if locked{"🔒"}else{"🔓"})
+                    .on_hover_text(if locked{"Разблокировать слой"}else{"Заблокировать слой"}).clicked(){
                     self.checkpoint();
                     if let Some(layer)=self.doc.layers.iter_mut().find(|l|l.id==id){
-                        layer.locked=locked;
+                        layer.locked=!locked;
                     }
                 }
+                if ui.small_button("✎").on_hover_text("Переименовать слой").clicked(){
+                    self.layer_rename_id=Some(id);
+                    self.layer_rename_draft=name.clone();
+                }
+                if ui.add_enabled(index>0,egui::Button::new("↑"))
+                    .on_hover_text("Поднять слой в списке").clicked(){
+                    self.object_move_layer(id,index-1);
+                }
+                if ui.add_enabled(index+1<self.doc.layers.len(),
+                    egui::Button::new("↓")).on_hover_text("Опустить слой в списке").clicked(){
+                    self.object_move_layer(id,index+1);
+                }
+                if ui.add_enabled(self.doc.layers.len()>1&&id!=self.active_layer,
+                    egui::Button::new("×")).on_hover_text("Удалить слой и перенести его объекты на активный слой").clicked(){
+                    self.object_remove_layer(id);
+                }
+            });
+        }
+        if let Some(id)=self.layer_rename_id{
+            ui.group(|ui|{
+                ui.label("Новое название слоя");
+                ui.text_edit_singleline(&mut self.layer_rename_draft);
+                ui.horizontal(|ui|{
+                    if ui.button("Сохранить").clicked(){
+                        let draft=self.layer_rename_draft.clone();
+                        self.object_rename_layer(id,&draft);
+                        self.layer_rename_id=None;
+                        self.layer_rename_draft.clear();
+                    }
+                    if ui.button("Отмена").clicked(){
+                        self.layer_rename_id=None;
+                        self.layer_rename_draft.clear();
+                    }
+                });
             });
         }
         ui.separator();
@@ -725,74 +774,160 @@ impl Editor {
             ui.heading("ОБЪЕКТЫ");
             ui.label(RichText::new(format!("{}",self.doc.objects.len()))
                 .color(Color32::from_rgb(33,187,161)));
+            ui.label(RichText::new(format!("выбрано {}",self.selection_ids().len()))
+                .small().color(Color32::GRAY));
         });
         ui.add(egui::TextEdit::singleline(&mut self.object_filter)
-            .hint_text("Поиск объекта или названия..."));
-        ui.horizontal(|ui|{
-            if ui.add_enabled(self.selection_ids().len()>=2,
-                egui::Button::new("Группа  Ctrl+G")).clicked(){
-                self.group_selection();
+            .hint_text("Поиск: название, тип, слой, ID..."));
+        let has_selection=!self.selection_ids().is_empty();
+        ui.horizontal_wrapped(|ui|{
+            if ui.add_enabled(has_selection,egui::Button::new("Копия"))
+                .on_hover_text("Дублировать выделенные объекты с сохранением групп, эффектов и масок")
+                .clicked(){self.object_duplicate_selection();}
+            if ui.add_enabled(has_selection,egui::Button::new("Удалить"))
+                .on_hover_text("Удалить выделенные объекты").clicked(){
+                self.object_delete_selection();
             }
-            if ui.button("Разгрупп.").on_hover_text("Ctrl+Shift+G").clicked(){
-                self.ungroup_selection();
+            if ui.add_enabled(has_selection,egui::Button::new("Вперёд"))
+                .on_hover_text("Поднять на один уровень").clicked(){
+                self.object_reorder_selection(StackOrder::RaiseOne);
+            }
+            if ui.add_enabled(has_selection,egui::Button::new("Назад"))
+                .on_hover_text("Опустить на один уровень").clicked(){
+                self.object_reorder_selection(StackOrder::LowerOne);
             }
         });
+        ui.horizontal_wrapped(|ui|{
+            if ui.add_enabled(has_selection,egui::Button::new("На передний план"))
+                .clicked(){self.object_reorder_selection(StackOrder::Front);}
+            if ui.add_enabled(has_selection,egui::Button::new("На задний план"))
+                .clicked(){self.object_reorder_selection(StackOrder::Back);}
+            if ui.add_enabled(has_selection&&self.doc.layer(self.active_layer)
+                .is_some_and(|l|l.visible&&!l.locked),
+                egui::Button::new("На активный слой"))
+                .on_hover_text("Переместить выделенные объекты на выбранный слой")
+                .clicked(){self.object_move_to_active_layer();}
+        });
+        ui.horizontal_wrapped(|ui|{
+            if ui.add_enabled(self.selected.is_some(),
+                egui::Button::new("Выбрать тот же тип")).clicked(){
+                self.object_select_same_type();
+            }
+            if ui.add_enabled(self.selection_ids().len()>=2,
+                egui::Button::new("Группировать  Ctrl+G")).clicked(){
+                self.group_selection();
+            }
+            if ui.add_enabled(has_selection,egui::Button::new("Разгруппировать"))
+                .clicked(){self.ungroup_selection();}
+        });
         let query=self.object_filter.trim().to_lowercase();
-        let filtered:Option<Vec<usize>>=if query.is_empty(){None}else{
-            Some(self.doc.objects.iter().enumerate().filter_map(|(index,obj)|{
-                let label=if !obj.name.is_empty(){obj.name.to_lowercase()}else{
-                    match &obj.shape{
-                        Shape::Text{value,..}=>value.to_lowercase(),
-                        Shape::Rectangle{..}=>"прямоугольник".into(),
-                        Shape::Ellipse{..}=>"эллипс".into(),
-                        Shape::Raster{..}=>"фото изображение".into(),
-                        Shape::EmbeddedSvg{..}=>"вектор".into(),
-                        Shape::CompoundPath{..}=>"контуры".into(),
-                        Shape::Bezier{..}=>"кривая".into(),
-                        Shape::Polyline{..}=>"линия".into(),
+        let mut rows=Vec::<Row>::new();
+        let mut emitted=HashSet::<u64>::new();
+        for obj in self.doc.objects.iter().rev(){
+            let group=obj.group_id;
+            let label=if !obj.name.is_empty(){obj.name.clone()}else{
+                match &obj.shape{
+                    Shape::Rectangle{..}=>"Прямоугольник".into(),
+                    Shape::Ellipse{..}=>"Эллипс".into(),
+                    Shape::Text{value,..}=>format!("Текст: {}",value.chars().take(24).collect::<String>()),
+                    Shape::Bezier{..}=>"Кривая Безье".into(),
+                    Shape::CompoundPath{contours}=>format!("Составной контур ({})",contours.len()),
+                    Shape::Polyline{..}=>"Ломаная".into(),
+                    Shape::EmbeddedSvg{source_format,..}=>format!("Вектор SVG ({source_format})"),
+                    Shape::Raster{pixel_width,pixel_height,..}=>format!("Изображение {pixel_width}×{pixel_height}"),
+                }
+            };
+            let layer_name=self.doc.layer(obj.layer_id).map(|l|l.name.as_str()).unwrap_or("");
+            let matches=|o:&opencorel_core::Object|{
+                let title=if o.name.is_empty(){match &o.shape{
+                    Shape::Rectangle{..}=>"прямоугольник",
+                    Shape::Ellipse{..}=>"эллипс",
+                    Shape::Text{..}=>"текст",
+                    Shape::Bezier{..}=>"безье",
+                    Shape::CompoundPath{..}=>"контур",
+                    Shape::Polyline{..}=>"ломаная",
+                    Shape::EmbeddedSvg{..}=>"svg вектор",
+                    Shape::Raster{..}=>"изображение",
+                }}else{o.name.as_str()};
+                let layer=self.doc.layer(o.layer_id).map(|l|l.name.as_str()).unwrap_or("");
+                query.is_empty()||title.to_lowercase().contains(&query)||
+                    o.id.to_string().contains(&query)||layer.to_lowercase().contains(&query)
+            };
+            if let Some(group_id)=group{
+                if !emitted.insert(group_id){continue;}
+                let members:Vec<_>=self.doc.objects.iter().rev()
+                    .filter(|o|o.group_id==Some(group_id)).collect();
+                let group_matches=query.is_empty()||group_id.to_string().contains(&query)||
+                    members.iter().any(|member|matches(member));
+                if !group_matches{continue;}
+                let first=members.first().map(|o|o.id).unwrap_or(obj.id);
+                rows.push(Row{group_header:true,id:first,group:Some(group_id),
+                    label:format!("Группа {} · {} объектов",group_id,members.len()),
+                    visible:members.iter().all(|o|o.visible),
+                    locked:members.iter().all(|o|o.locked),depth:0});
+                for member in members{
+                    if !query.is_empty()&&!group_id.to_string().contains(&query)&&!matches(member){
+                        continue;
                     }
-                };
-                if label.contains(&query)||obj.id.to_string().contains(&query){
-                    Some(index)
-                }else{None}
-            }).collect())
-        };
-        let count=filtered.as_ref().map_or(self.doc.objects.len(),Vec::len);
-        ui.label(RichText::new(format!("Показано: {count}. Shift — множественное выделение."))
+                    let text=if member.name.is_empty(){match &member.shape{
+                        Shape::Rectangle{..}=>"Прямоугольник".into(),
+                        Shape::Ellipse{..}=>"Эллипс".into(),
+                        Shape::Text{value,..}=>format!("Текст: {}",value.chars().take(24).collect::<String>()),
+                        Shape::Bezier{..}=>"Кривая Безье".into(),
+                        Shape::CompoundPath{contours}=>format!("Контур ({})",contours.len()),
+                        Shape::Polyline{..}=>"Ломаная".into(),
+                        Shape::EmbeddedSvg{source_format,..}=>format!("Вектор {source_format}"),
+                        Shape::Raster{pixel_width,pixel_height,..}=>format!("Фото {pixel_width}×{pixel_height}"),
+                    }}else{member.name.clone()};
+                    rows.push(Row{group_header:false,id:member.id,group,
+                        label:text,visible:member.visible,locked:member.locked,depth:1});
+                }
+            }else if matches(obj){
+                rows.push(Row{group_header:false,id:obj.id,group:None,
+                    label,visible:obj.visible,locked:obj.locked,depth:0});
+            }
+        }
+        ui.label(RichText::new(format!("Показано строк: {} · Shift — множественный выбор · верхний объект рисуется последним",rows.len()))
             .small().color(Color32::GRAY));
-        egui::ScrollArea::vertical().id_salt("objects_list")
-            .show_rows(ui,26.0,count,|ui,rows|{
-                for row in rows{
-                    let index=if let Some(ref filtered)=filtered{
-                        filtered[count-1-row]
-                    }else{count-1-row};
-                    let obj=&self.doc.objects[index];
-                    let id=obj.id;let layer_id=obj.layer_id;
-                    let display=if obj.name.is_empty(){
-                        match &obj.shape{
-                            Shape::Rectangle{..}=>"▭ Прямоугольник".to_string(),
-                            Shape::Ellipse{..}=>"◯ Эллипс".into(),
-                            Shape::Text{value,..}=>format!("T {}",value.chars().take(20).collect::<String>()),
-                            Shape::Bezier{..}=>"⌁ Безье".into(),
-                            Shape::CompoundPath{contours}=>format!("✒ Контуры ({})",contours.len()),
-                            Shape::Polyline{..}=>"╱ Линия".into(),
-                            Shape::EmbeddedSvg{source_format,..}=>format!("▧ Вектор {source_format}"),
-                            Shape::Raster{pixel_width,pixel_height,..}=>format!("▧ Фото {pixel_width}×{pixel_height}"),
+        egui::ScrollArea::vertical().id_salt("objects_tree_studio")
+            .auto_shrink([false,false]).show_rows(ui,27.0,rows.len(),|ui,range|{
+                for row_index in range{
+                    let row=&rows[row_index];
+                    ui.horizontal(|ui|{
+                        if row.group_header{
+                            ui.add_space(2.0);
+                            if ui.selectable_label(
+                                self.selection_ids().iter().any(|id|
+                                    self.doc.objects.iter().find(|o|o.id==*id)
+                                        .is_some_and(|o|o.group_id==row.group)),
+                                &row.label).clicked(){
+                                self.select_object(Some(row.id),false);
+                                self.inspector_tab=InspectorTab::Properties;
+                            }
+                        }else{
+                            ui.add_space(if row.depth>0{16.0}else{0.0});
+                            if ui.small_button(if row.visible{"◉"}else{"○"})
+                                .on_hover_text(if row.visible{"Скрыть объект"}else{"Показать объект"})
+                                .clicked(){self.object_visibility(row.id,!row.visible);}
+                            if ui.small_button(if row.locked{"🔒"}else{"🔓"})
+                                .on_hover_text(if row.locked{"Разблокировать объект"}else{"Заблокировать объект"})
+                                .clicked(){self.object_lock(row.id,!row.locked);}
+                            let layer_id=self.doc.objects.iter().find(|o|o.id==row.id)
+                                .map(|o|o.layer_id).unwrap_or(self.active_layer);
+                            if ui.add_enabled(row.visible&&self.doc.layer(layer_id)
+                                .is_some_and(|l|l.visible),
+                                egui::Button::new(&row.label)
+                                    .selected(self.is_selected(row.id))
+                                    .min_size(Vec2::new(ui.available_width(),23.0)))
+                                .on_hover_text(format!("Объект #{} · слой {}",row.id,layer_id))
+                                .clicked(){
+                                let shift=ui.input(|i|i.modifiers.shift);
+                                self.select_object(Some(row.id),shift);
+                                self.active_layer=layer_id;
+                                self.inspector_tab=InspectorTab::Properties;
+                            }
                         }
-                    }else{obj.name.clone()};
-                    let name=if let Some(group)=obj.group_id{
-                        format!("▣ {}  · G{}",display,group)
-                    }else{display};
-                    let visible=self.doc.layer(layer_id).map(|l|l.visible).unwrap_or(false);
-                    let button=egui::Button::new(name)
-                        .selected(self.is_selected(id))
-                        .min_size(Vec2::new(ui.available_width(),23.0));
-                    if ui.add_enabled(visible,button).clicked(){
-                        let shift=ui.input(|i|i.modifiers.shift);
-                        self.select_object(Some(id),shift);
-                        self.active_layer=layer_id;
-                        self.inspector_tab=InspectorTab::Properties;
-                    }
+                    });
                 }
             });
     }
