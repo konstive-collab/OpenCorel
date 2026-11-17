@@ -104,7 +104,7 @@ impl Editor {
                     if ui.button("Сохранить как...  Ctrl+Shift+S").clicked(){self.save_as_picker();ui.close_menu();}
                     if ui.button("Экспорт SVG...").clicked(){self.export_dialog("svg");ui.close_menu();}
                     if ui.button("Экспорт SVGZ...").clicked(){self.export_dialog("svgz");ui.close_menu();}
-                    if ui.button("Экспорт PDF (RGB)...").clicked(){self.export_dialog("pdf");ui.close_menu();}
+                    if ui.button("Экспорт PDF (все страницы, RGB)...").clicked(){self.export_dialog("pdf");ui.close_menu();}
                     ui.menu_button("Экспортировать все страницы...",|ui|{
                         ui.small("В отдельную папку, по одному файлу на страницу");
                         if ui.button("Все страницы → SVG").clicked(){
@@ -180,6 +180,44 @@ impl Editor {
                     }
                     ui.checkbox(&mut self.show_rulers,"Линейки");
                     ui.checkbox(&mut self.light_theme,"Светлая тема");
+                });
+                ui.menu_button("Текст",|ui|{
+                    ui.label(RichText::new("ТЕКСТОВАЯ МАСТЕРСКА").strong());
+                    ui.small("23 массовые операции и 7 стилевых пресетов");
+                    ui.horizontal(|ui|{
+                        ui.label("Перенос");
+                        ui.add(egui::DragValue::new(&mut self.text_studio_wrap_columns)
+                            .range(8..=160).suffix(" зн."));
+                    });
+                    ui.menu_button("Регистр и слова",|ui|{
+                        for action in super::text_studio::TextAction::ALL.iter().take(6){
+                            if ui.button(action.label()).clicked(){
+                                self.run_text_action(*action);ui.close_menu();
+                            }
+                        }
+                    });
+                    ui.menu_button("Абзацы и списки",|ui|{
+                        for action in super::text_studio::TextAction::ALL.iter().skip(6){
+                            if ui.button(action.label()).clicked(){
+                                self.run_text_action(*action);ui.close_menu();
+                            }
+                        }
+                    });
+                    ui.menu_button("Стили типографики",|ui|{
+                        for preset in [
+                            super::text_studio::TextPreset::Display,
+                            super::text_studio::TextPreset::Heading,
+                            super::text_studio::TextPreset::Subheading,
+                            super::text_studio::TextPreset::Body,
+                            super::text_studio::TextPreset::Caption,
+                            super::text_studio::TextPreset::Technical,
+                            super::text_studio::TextPreset::Quote,
+                        ]{
+                            if ui.button(preset.label()).clicked(){
+                                self.run_text_preset(preset);ui.close_menu();
+                            }
+                        }
+                    });
                 });
                 ui.menu_button("Макет",|ui|{
                     ui.menu_button("Страницы документа",|ui|{
@@ -1043,6 +1081,16 @@ impl Editor {
                 }
             }
         });
+        // Text Studio is a batch action: it operates on the selected set,
+        // not only the single object currently shown in this inspector.
+        let has_text_selection=self.selection_ids().iter().any(|selected_id|
+            self.doc.objects.iter().any(|o|
+                o.id==*selected_id&&matches!(o.shape,Shape::Text{..})));
+        if has_text_selection{
+            ui.collapsing("Мастерская текста — 30 инструментов",|ui|{
+                self.text_studio_panel(ui);
+            });
+        }
         ui.separator();
         // Images may contain tens of megabytes of Base64. Never clone the
         // whole object per GUI frame just to show a few numeric fields.
@@ -1550,6 +1598,7 @@ impl Editor {
             }
         });
         ui.small("Страницы хранят собственные объекты, слои, направляющие и размеры.");
+        ui.small("Экспорт PDF из меню «Файл» объединяет все страницы в один векторный документ.");
         ui.separator();
         ui.heading("Параметры листа");
         ui.label("Наименование документа");
