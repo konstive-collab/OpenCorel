@@ -142,7 +142,7 @@ fn apply_harmony(doc:&mut Document,ids:&[u64],mode:HarmonyMode,
         return Err("Объект выделения отсутствует".into());
     }
     if doc.objects.iter().filter(|o|selected.contains(&o.id)).any(|o|
-        !doc.layer(o.layer_id).is_some_and(|l|l.visible&&!l.locked)){
+        !o.visible||o.locked||!doc.layer(o.layer_id).is_some_and(|l|l.visible&&!l.locked)){
         return Err("В выделении есть заблокированные или скрытые слои".into());
     }
     let mut changed=0usize;
@@ -190,8 +190,8 @@ fn replace_active_page(doc:&mut Document,find:&str,replacement:&str,
         let gradient=flags.gradients&&doc.appearances.get(&o.id)
             .and_then(|a|a.gradient.as_ref()).is_some_and(|g|
                 g.stops.iter().any(|s|eq_color(&s.color,find)));
-        if (regular||gradient)&&!doc.layer(o.layer_id)
-            .is_some_and(|l|l.visible&&!l.locked){
+        if (regular||gradient)&&(!o.visible||o.locked||!doc.layer(o.layer_id)
+            .is_some_and(|l|l.visible&&!l.locked)){
             return Err(format!("Объект #{} на скрытом или заблокированном слое",o.id));
         }
     }
