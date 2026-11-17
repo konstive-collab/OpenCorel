@@ -2312,7 +2312,7 @@ mod tests {
         editor.create_layer_from_selection();
         assert_eq!(editor.doc.objects.iter().find(|o|o.id==a).unwrap().layer_id,editor.active_layer);
         assert_eq!(editor.doc.objects.iter().find(|o|o.id==b).unwrap().layer_id,editor.active_layer);
-        assert_eq!(editor.doc.layer(editor.active_layer).unwrap().name,"Выделение 2");
+        assert_eq!(editor.doc.layer(editor.active_layer).unwrap().name,"Выделение 1");
         assert_eq!(editor.undo.len(),1);
         editor.undo();
         assert_eq!(editor.doc.objects.iter().find(|o|o.id==a).unwrap().layer_id,1);
