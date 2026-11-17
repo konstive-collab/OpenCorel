@@ -7,7 +7,7 @@ use eframe::egui::{self,Align2,Color32,FontId,Pos2,Rect,Stroke,Vec2};
 pub(super) const COMPACT_WIDTH:f32=64.0;
 pub(super) const EXPANDED_WIDTH:f32=182.0;
 const PRIMARY:[Tool;5]=[Tool::Select,Tool::Nodes,Tool::Text,Tool::Curve,Tool::Freehand];
-const SHAPES:[Tool;4]=[Tool::Rect,Tool::Ellipse,Tool::Line,Tool::Polygon];
+const SHAPES:[Tool;5]=[Tool::Rect,Tool::Ellipse,Tool::Line,Tool::Polygon,Tool::Smart];
 
 #[derive(Clone,Copy)]
 enum Glyph{Select,Nodes,Text,Curve,Freehand,Shapes,Image,Check,More,Help}
@@ -16,7 +16,7 @@ fn shortcut(tool:Tool)->&'static str{
     match tool{
         Tool::Select=>"V",Tool::Nodes=>"F10",Tool::Text=>"F8",Tool::Curve=>"B",
         Tool::Freehand=>"H",
-        Tool::Rect=>"F6",Tool::Ellipse=>"F7",Tool::Line=>"L",Tool::Polygon=>"P",
+        Tool::Rect=>"F6",Tool::Ellipse=>"F7",Tool::Line=>"L",Tool::Polygon=>"P",Tool::Smart=>"S",
     }
 }
 fn paint_icon(ui:&egui::Ui,rect:Rect,glyph:Glyph,expanded:bool,active:bool){
