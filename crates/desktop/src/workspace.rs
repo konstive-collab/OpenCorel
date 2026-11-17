@@ -838,6 +838,20 @@ impl Editor {
             }
         });
         ui.horizontal_wrapped(|ui|{
+            let has_selection=!self.selection_ids().is_empty();
+            if ui.add_enabled(has_selection,egui::Button::new("В новый слой"))
+                .on_hover_text("Создать слой и перенести в него всё выделение")
+                .clicked(){self.create_layer_from_selection();}
+            if ui.add_enabled(has_selection,egui::Button::new("Скрыть"))
+                .clicked(){self.set_selection_visibility(false);}
+            if ui.add_enabled(has_selection,egui::Button::new("Показать"))
+                .clicked(){self.set_selection_visibility(true);}
+            if ui.add_enabled(has_selection,egui::Button::new("Блок"))
+                .clicked(){self.set_selection_locked(true);}
+            if ui.add_enabled(has_selection,egui::Button::new("Разблок"))
+                .clicked(){self.set_selection_locked(false);}
+        });
+        ui.horizontal_wrapped(|ui|{
             if ui.add_enabled(self.selection_ids().len()>=2,
                 egui::Button::new("Группа  Ctrl+G")).clicked(){
                 self.group_selection();
@@ -1962,6 +1976,60 @@ impl Editor {
                     }
                 }else{obj.style.fill=value.into();}
             }
+        }
+    }
+    pub(super) fn set_selection_visibility(&mut self,visible:bool){
+        let ids:HashSet<u64>=self.selection_ids().into_iter().collect();
+        if ids.is_empty(){self.status="Сначала выделите объекты".into();return;}
+        let changed=self.doc.objects.iter().filter(|o|ids.contains(&o.id))
+            .any(|o|o.visible!=visible);
+        if !changed{
+            self.status=if visible{"Выделенные объекты уже видимы".into()}
+                else{"Выделенные объекты уже скрыты".into()};
+            return;
+        }
+        self.checkpoint();
+        for object in &mut self.doc.objects{
+            if ids.contains(&object.id){object.visible=visible;}
+        }
+        self.status=if visible{"Видимость выделенных объектов восстановлена".into()}
+            else{"Выделенные объекты скрыты; их можно вернуть из панели объектов".into()};
+    }
+    pub(super) fn set_selection_locked(&mut self,locked:bool){
+        let ids:HashSet<u64>=self.selection_ids().into_iter().collect();
+        if ids.is_empty(){self.status="Сначала выделите объекты".into();return;}
+        let changed=self.doc.objects.iter().filter(|o|ids.contains(&o.id))
+            .any(|o|o.locked!=locked);
+        if !changed{
+            self.status=if locked{"Выделенные объекты уже заблокированы".into()}
+                else{"Выделенные объекты уже разблокированы".into()};
+            return;
+        }
+        self.checkpoint();
+        for object in &mut self.doc.objects{
+            if ids.contains(&object.id){object.locked=locked;}
+        }
+        self.status=if locked{"Выделенные объекты заблокированы".into()}
+            else{"Выделенные объекты разблокированы".into()};
+    }
+    pub(super) fn create_layer_from_selection(&mut self){
+        let ids=self.selection_ids();
+        if ids.is_empty(){self.status="Выделите объекты для нового слоя".into();return;}
+        if self.doc.layers.len()>=1024||self.doc.next_layer_id==u64::MAX{
+            self.status="Достигнут лимит слоёв".into();return;
+        }
+        let mut candidate=self.doc.clone();
+        let layer_id=candidate.add_layer(format!("Выделение {}",candidate.layers.len()));
+        match candidate.move_objects_to_layer(&ids,layer_id){
+            Ok(count)=>{
+                if let Err(e)=candidate.validate(){self.status=e;return;}
+                self.checkpoint();self.doc=candidate;self.active_layer=layer_id;
+                self.layer_rename_target=Some(layer_id);
+                self.layer_rename_draft=self.doc.layer(layer_id)
+                    .map(|l|l.name.clone()).unwrap_or_default();
+                self.status=format!("Создан новый слой из {} объектов",count);
+            },
+            Err(e)=>self.status=format!("Новый слой не создан: {e}"),
         }
     }
     pub(super) fn delete_selection(&mut self){
