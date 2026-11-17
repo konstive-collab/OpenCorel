@@ -727,7 +727,7 @@ impl Editor {
                     }
                     self.status=format!("Слой «{name}»: видимость изменена");
                 }
-                if ui.small_button(if locked{"🔒"}else{"🔓"})
+                if ui.small_button(if locked{"■"}else{"□"})
                     .on_hover_text("Заблокировать/разблокировать слой").clicked(){
                     self.checkpoint();
                     if let Some(layer)=self.doc.layers.iter_mut().find(|l|l.id==id){
@@ -894,7 +894,7 @@ impl Editor {
                             if let Some(obj)=self.doc.get_mut(id){obj.visible=!visible;}
                             self.status=format!("Видимость объекта #{id} изменена");
                         }
-                        if ui.small_button(if locked{"🔒"}else{"🔓"})
+                        if ui.small_button(if locked{"■"}else{"□"})
                             .on_hover_text("Заблокировать/разблокировать объект").clicked(){
                             self.checkpoint();
                             if let Some(obj)=self.doc.get_mut(id){obj.locked=!locked;}
