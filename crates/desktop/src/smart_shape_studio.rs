@@ -202,6 +202,11 @@ impl Editor{
                 }
             });
         ui.separator();
+        if ui.button("Создать все 93 фигуры на четырёх листах A4")
+            .on_hover_text("Векторный каталог для просмотра, копирования и тестирования всех фигур")
+            .clicked(){
+            self.create_smart_catalog();
+        }
         self.smart_shape_parameters(ui);
     }
 }
