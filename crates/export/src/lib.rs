@@ -1,6 +1,7 @@
 //! Preliminary vector PDF export for RGB proofing and customer review.
 //! NOT a PDF/X prepress exporter: no CMYK, output intents, trapping, or bleed.
 pub mod raster_export;
+pub mod multipage_pdf;
 use opencorel_core::Document;
 use std::{fs, io::Write, path::Path};
 
@@ -29,7 +30,9 @@ pub fn pdf_bytes(doc:&Document)->Result<Vec<u8>,String>{
 
 /// Write a temporary PDF in the destination directory and then publish it.
 pub fn export_pdf(doc:&Document,path:impl AsRef<Path>)->Result<(),String>{
-    let bytes=pdf_bytes(doc)?;
+    let bytes=if doc.page_count()>1{
+        multipage_pdf::multipage_pdf_bytes(doc)?
+    }else{pdf_bytes(doc)?};
     let path=path.as_ref();
     let dir=path.parent().filter(|p|!p.as_os_str().is_empty())
         .unwrap_or_else(||Path::new("."));
