@@ -269,7 +269,7 @@ fn clean_effect_copies(doc:&mut Document,source_ids:&[u64])->Result<usize,String
         .map(|o|o.id).collect();
     if matching.is_empty(){return Ok(0);}
     for object in doc.objects.iter().filter(|o|matching.contains(&o.id)){
-        if !doc.is_object_editable(object.id){
+        if !doc.object_is_editable(object){
             return Err("Среди копий есть объекты на закрытых слоях".into());
         }
     }
