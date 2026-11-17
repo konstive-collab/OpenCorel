@@ -5,7 +5,7 @@ use super::{Editor,Tool};
 use opencorel_core::Document;
 
 impl Editor{
-    fn reset_page_interaction(&mut self){
+    pub(super) fn reset_page_interaction(&mut self){
         self.selected=None;self.multi_selected.clear();
         self.active_layer=1;
         self.tool=Tool::Select;
@@ -28,7 +28,7 @@ impl Editor{
         self.pan=eframe::egui::Vec2::ZERO;self.zoom=1.0;
         self.page_rename_mode=false;
     }
-    fn accept_page_change(&mut self,new_doc:Document,description:String){
+    pub(super) fn accept_page_change(&mut self,new_doc:Document,description:String){
         self.checkpoint();
         self.doc=new_doc;
         self.reset_page_interaction();
