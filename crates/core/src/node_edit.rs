@@ -444,6 +444,47 @@ pub fn reverse_path(shape:&mut Shape)->Result<(),String>{
         _=>Err("Selected object has no reversible path".into()),
     }
 }
+/// Open or close a contour without silently inserting another curve.
+/// Compound-path contours are switched together; their paths remain editable.
+pub fn set_closed(shape:&mut Shape,closed_value:bool)->Result<(),String>{
+    match shape{
+        Shape::Polyline{points,closed}=>{
+            if closed_value && points.len()<3{return Err("Closing requires three points".into());}
+            *closed=closed_value;Ok(())
+        }
+        Shape::Bezier{segments,closed,..}=>{
+            if closed_value && segments.is_empty(){return Err("Cannot close empty path".into());}
+            *closed=closed_value;Ok(())
+        }
+        Shape::CompoundPath{contours}=>{
+            if closed_value && contours.iter().any(|c|c.segments.is_empty()){
+                return Err("Cannot close empty contour".into());
+            }
+            for contour in contours{contour.closed=closed_value;}
+            Ok(())
+        }
+        _=>Err("Selected object has no closable contour".into())
+    }
+}
+/// Upgrade a polyline to editable cubic segments. Straight geometry is
+/// retained exactly: control handles lie at one and two thirds of each edge.
+pub fn polyline_to_bezier(shape:&mut Shape)->Result<(),String>{
+    let Shape::Polyline{points,closed}=&*shape else{
+        return Err("Select a polyline to convert".into());
+    };
+    if points.len()<2{return Err("Polyline has too few points".into());}
+    let start=points[0];
+    let mut segments=Vec::with_capacity(points.len()-1);
+    for pair in points.windows(2){
+        segments.push(CubicSegment{
+            control1:lerp(pair[0],pair[1],1.0/3.0),
+            control2:lerp(pair[0],pair[1],2.0/3.0),
+            end:pair[1],
+        });
+    }
+    *shape=Shape::Bezier{start,segments,closed:*closed};
+    Ok(())
+}
 #[cfg(test)]
 mod tests{
     use super::*;
@@ -580,6 +621,23 @@ mod tests{
         assert!(set_anchor_mode(&mut shape,NodeAddress::BezierEnd(0),AnchorMode::Smooth).is_err());
         assert!(straighten_segment(&mut shape,SegmentAddress::Bezier(9)).is_err());
         assert_eq!(shape,previous);
+    }
+    #[test] fn polyline_to_bezier_preserves_vertices_and_closure(){
+        let vertices=vec![Point{x:1.,y:2.},Point{x:6.,y:2.},Point{x:6.,y:9.}];
+        let mut shape=Shape::Polyline{points:vertices.clone(),closed:true};
+        polyline_to_bezier(&mut shape).unwrap();
+        let Shape::Bezier{start,segments,closed}=&shape else{panic!()};
+        assert!(*closed);
+        assert_eq!(*start,vertices[0]);
+        assert_eq!(segments[0].end,vertices[1]);
+        assert_eq!(segments[1].end,vertices[2]);
+        set_closed(&mut shape,false).unwrap();
+        let Shape::Bezier{closed,..}=&shape else{panic!()};
+        assert!(!closed);
+        set_closed(&mut shape,true).unwrap();
+        let mut doc=Document::default();
+        doc.add(shape,Style::default());
+        doc.validate().unwrap();
     }
     #[test] fn nearest_polyline_segment_respects_tolerance(){
         let shape=Shape::Polyline{points:vec![
