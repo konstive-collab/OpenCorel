@@ -645,6 +645,17 @@ impl Editor {
                     "Преобразовать сегмент, заканчивающийся выбранным узлом, в прямой").clicked(){
                     self.straighten_selected_segment();
                 }
+                ui.horizontal_wrapped(|ui|{
+                    if ui.button("Замкнуть контур").clicked(){
+                        self.set_selected_path_closed(true);
+                    }
+                    if ui.button("Разомкнуть контур").clicked(){
+                        self.set_selected_path_closed(false);
+                    }
+                });
+                if ui.button("Ломаная → кривая Безье").clicked(){
+                    self.convert_selected_polyline_to_bezier();
+                }
                 if ui.button("Развернуть направление контура").clicked(){
                     self.reverse_selected_path();
                 }
