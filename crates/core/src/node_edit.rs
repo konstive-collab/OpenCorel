@@ -346,6 +346,104 @@ pub fn nearest_segment(shape:&Shape,p:Point,tolerance:f32)
     }
     result
 }
+
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+pub enum AnchorMode{Cusp,Smooth,Symmetric}
+
+/// Set tangent continuity at an interior anchor. The incoming control is
+/// retained as the direction reference when possible; endpoint anchors are
+/// not eligible because they have only one adjacent segment.
+pub fn set_anchor_mode(shape:&mut Shape,address:NodeAddress,mode:AnchorMode)
+    ->Result<(),String>{
+    let (segments,index)=match (shape,address){
+        (Shape::Bezier{segments,..},NodeAddress::BezierEnd(i))=> (segments,i),
+        (Shape::CompoundPath{contours},NodeAddress::CompoundEnd(j,i))=>
+            (contours.get_mut(j).ok_or("Invalid contour")?.segments.as_mut(),i),
+        _=>return Err("Choose an interior Bézier anchor".into()),
+    };
+    if index+1>=segments.len(){return Err("Anchor has no following segment".into());}
+    let anchor=segments[index].end;
+    let incoming=segments[index].control2;
+    let outgoing=segments[index+1].control1;
+    if mode==AnchorMode::Cusp{
+        segments[index].control2=anchor;
+        segments[index+1].control1=anchor;
+        return Ok(());
+    }
+    let in_dx=anchor.x-incoming.x;
+    let in_dy=anchor.y-incoming.y;
+    let out_dx=outgoing.x-anchor.x;
+    let out_dy=outgoing.y-anchor.y;
+    let in_len=in_dx.hypot(in_dy);
+    let out_len=out_dx.hypot(out_dy);
+    let (dx,dy)=if in_len>1e-6{(in_dx/in_len,in_dy/in_len)}
+        else if out_len>1e-6{(out_dx/out_len,out_dy/out_len)}
+        else{return Err("Cannot infer tangent from two collapsed handles".into());};
+    let length=if mode==AnchorMode::Symmetric{(in_len+out_len)*0.5}else{out_len};
+    let in_length=if mode==AnchorMode::Symmetric{length}else{in_len};
+    let a=Point{x:anchor.x-dx*in_length,y:anchor.y-dy*in_length};
+    let b=Point{x:anchor.x+dx*length,y:anchor.y+dy*length};
+    if !valid(a)||!valid(b){return Err("Resulting control handle exceeds safe bounds".into());}
+    segments[index].control2=a;
+    segments[index+1].control1=b;
+    Ok(())
+}
+
+/// Replace one cubic with a mathematically straight cubic, preserving its
+/// endpoints and every other segment in the path.
+pub fn straighten_segment(shape:&mut Shape,address:SegmentAddress)->Result<(),String>{
+    let (start,segment)=match (shape,address){
+        (Shape::Bezier{start,segments,..},SegmentAddress::Bezier(i))=>{
+            if i>=segments.len(){return Err("Invalid Bézier segment".into());}
+            (if i==0{*start}else{segments[i-1].end},&mut segments[i])
+        },
+        (Shape::CompoundPath{contours},SegmentAddress::Compound(j,i))=>{
+            let c=contours.get_mut(j).ok_or("Invalid contour")?;
+            if i>=c.segments.len(){return Err("Invalid contour segment".into());}
+            (if i==0{c.start}else{c.segments[i-1].end},&mut c.segments[i])
+        },
+        _=>return Err("Select a cubic segment".into()),
+    };
+    let end=segment.end;
+    segment.control1=lerp(start,end,1.0/3.0);
+    segment.control2=lerp(start,end,2.0/3.0);
+    Ok(())
+}
+
+/// Reverse segment order and exchange control handles without changing the
+/// geometric locus of the path, including compound path contours.
+pub fn reverse_path(shape:&mut Shape)->Result<(),String>{
+    fn reverse(start:&mut Point,segments:&mut [CubicSegment]){
+        if segments.is_empty(){return;}
+        let original_start=*start;
+        let mut previous=original_start;
+        let mut reversed=Vec::with_capacity(segments.len());
+        for segment in segments.iter(){
+            reversed.push(CubicSegment{
+                control1:segment.control2,
+                control2:segment.control1,
+                end:previous,
+            });
+            previous=segment.end;
+        }
+        *start=previous;
+        for (dst,src) in segments.iter_mut().zip(reversed.into_iter().rev()){
+            *dst=src;
+        }
+    }
+    match shape{
+        Shape::Bezier{start,segments,..}=>{
+            reverse(start,segments);
+            Ok(())
+        }
+        Shape::CompoundPath{contours}=>{
+            for contour in contours{reverse(&mut contour.start,&mut contour.segments);}
+            Ok(())
+        }
+        Shape::Polyline{points,..}=>{points.reverse();Ok(())}
+        _=>Err("Selected object has no reversible path".into()),
+    }
+}
 #[cfg(test)]
 mod tests{
     use super::*;
@@ -442,6 +540,46 @@ mod tests{
         assert!((0.02..=0.98).contains(&t));
         let mut updated=shape;
         insert_node(&mut updated,address,t).unwrap();
+    }
+    #[test] fn anchor_modes_and_straightening(){
+        let mut shape=Shape::Bezier{start:Point{x:0.,y:0.},segments:vec![
+            CubicSegment{control1:Point{x:2.,y:0.},control2:Point{x:8.,y:4.},end:Point{x:10.,y:0.}},
+            CubicSegment{control1:Point{x:12.,y:3.},control2:Point{x:18.,y:0.},end:Point{x:20.,y:0.}}
+        ],closed:false};
+        set_anchor_mode(&mut shape,NodeAddress::BezierEnd(0),AnchorMode::Smooth).unwrap();
+        let Shape::Bezier{segments,..}=&shape else{panic!()};
+        let a=segments[0].control2;let b=segments[1].control1;
+        let cross=(10.-a.x)*b.y-(0.-a.y)*(b.x-10.);
+        assert!(cross.abs()<1e-4);
+        set_anchor_mode(&mut shape,NodeAddress::BezierEnd(0),AnchorMode::Symmetric).unwrap();
+        let Shape::Bezier{segments,..}=&shape else{panic!()};
+        assert!(((segments[0].control2.x-10.).hypot(segments[0].control2.y)-
+            (segments[1].control1.x-10.).hypot(segments[1].control1.y)).abs()<1e-4);
+        set_anchor_mode(&mut shape,NodeAddress::BezierEnd(0),AnchorMode::Cusp).unwrap();
+        let Shape::Bezier{segments,..}=&shape else{panic!()};
+        assert_eq!(segments[0].control2,Point{x:10.,y:0.});
+        assert_eq!(segments[1].control1,Point{x:10.,y:0.});
+        straighten_segment(&mut shape,SegmentAddress::Bezier(0)).unwrap();
+        let Shape::Bezier{segments,..}=&shape else{panic!()};
+        assert!((segments[0].control1.y).abs()<1e-5);
+        assert!((segments[0].control2.y).abs()<1e-5);
+    }
+    #[test] fn reverse_path_twice_restores_exact_geometry(){
+        let mut original=path();
+        let before=original.clone();
+        reverse_path(&mut original).unwrap();
+        reverse_path(&mut original).unwrap();
+        assert_eq!(original,before);
+        let mut doc=Document::default();
+        doc.add(original,Style::default());
+        doc.validate().unwrap();
+    }
+    #[test] fn anchor_operations_reject_invalid_indices_without_mutation(){
+        let mut shape=path();
+        let previous=shape.clone();
+        assert!(set_anchor_mode(&mut shape,NodeAddress::BezierEnd(0),AnchorMode::Smooth).is_err());
+        assert!(straighten_segment(&mut shape,SegmentAddress::Bezier(9)).is_err());
+        assert_eq!(shape,previous);
     }
     #[test] fn nearest_polyline_segment_respects_tolerance(){
         let shape=Shape::Polyline{points:vec![
