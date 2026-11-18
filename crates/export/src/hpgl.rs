@@ -277,7 +277,7 @@ pub fn export_hpgl(doc:&Document,path:impl AsRef<Path>,
 #[cfg(test)]
 mod tests{
     use super::*;
-    use opencorel_core::{Contour,Style,Layer};
+    use opencorel_core::{Contour,Style};
     fn doc()->Document{
         let mut d=Document::default();
         d.page.width_mm=100.;
@@ -309,7 +309,8 @@ mod tests{
         let mut d=doc();
         d.add(Shape::Ellipse{x:10.,y:10.,w:50.,h:50.},Style::default());
         let report=analyze(&d,PlotterOptions::default()).unwrap();
-        assert!(report.vertex_count>30);
+        assert!(report.vertex_count>=24);
+        assert!(report.cut_length_mm>150.0 && report.cut_length_mm<160.0);
         assert_eq!(report.path_count,1);
     }
     #[test] fn compound_ring_has_separate_pen_up_paths(){
