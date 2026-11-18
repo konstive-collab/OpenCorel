@@ -196,6 +196,15 @@ impl Editor{
         self.edit_active_shape(|shape|node_edit::straighten_segment(shape,segment),
             "Сегмент выпрямлен (Ctrl+Z — отмена)");
     }
+    pub(super) fn set_selected_path_closed(&mut self,closed:bool){
+        self.edit_active_shape(|shape|node_edit::set_closed(shape,closed),
+            if closed{"Контур замкнут (Ctrl+Z — отмена)"}
+            else{"Контур разомкнут (Ctrl+Z — отмена)"});
+    }
+    pub(super) fn convert_selected_polyline_to_bezier(&mut self){
+        self.edit_active_shape(node_edit::polyline_to_bezier,
+            "Ломаная преобразована в редактируемую кривую Безье (Ctrl+Z — отмена)");
+    }
     pub(super) fn reverse_selected_path(&mut self){
         self.edit_active_shape(node_edit::reverse_path,
             "Направление контура изменено (Ctrl+Z — отмена)");
