@@ -246,13 +246,57 @@ fn remove_cubic_anchor(segments:&mut Vec<CubicSegment>,i:usize)->Result<(),Strin
     }
     Ok(())
 }
+fn cubic_distance_sq(start:Point,segment:&CubicSegment,target:Point,t:f32)->f32{
+    let q=cubic(start,segment,t);
+    (target.x-q.x).powi(2)+(target.y-q.y).powi(2)
+}
+/// Find the nearest position on a cubic, not just the nearest sampled vertex.
+/// Bracket *each* sampled local minimum: a cubic can loop and have several
+/// locally nearest points. Golden-section refinement is bounded and stable.
 fn examine_cubic(address:SegmentAddress,start:Point,segment:&CubicSegment,
     target:Point,best:&mut f32,hit:&mut Option<(SegmentAddress,f32)>){
-    for sample in 1..=24{
-        let t=sample as f32/25.0;
-        let q=cubic(start,segment,t);
-        let d=(target.x-q.x).powi(2)+(target.y-q.y).powi(2);
-        if d<*best{*best=d;*hit=Some((address,t));}
+    const SAMPLES:usize=32;
+    const REFINE:usize=18;
+    let mut distances=[0.0f32;SAMPLES+1];
+    for (i,d) in distances.iter_mut().enumerate(){
+        *d=cubic_distance_sq(start,segment,target,i as f32/SAMPLES as f32);
+    }
+    for i in 1..SAMPLES{
+        if distances[i]>distances[i-1] || distances[i]>distances[i+1]{
+            continue;
+        }
+        let mut a=(i-1) as f32/SAMPLES as f32;
+        let mut b=(i+1) as f32/SAMPLES as f32;
+        let ratio=0.618_034_f32;
+        let mut left=b-(b-a)*ratio;
+        let mut right=a+(b-a)*ratio;
+        let mut dl=cubic_distance_sq(start,segment,target,left);
+        let mut dr=cubic_distance_sq(start,segment,target,right);
+        for _ in 0..REFINE{
+            if dl<=dr{
+                b=right;
+                right=left;dr=dl;
+                left=b-(b-a)*ratio;
+                dl=cubic_distance_sq(start,segment,target,left);
+            }else{
+                a=left;
+                left=right;dl=dr;
+                right=a+(b-a)*ratio;
+                dr=cubic_distance_sq(start,segment,target,right);
+            }
+        }
+        let t=((a+b)*0.5).clamp(0.02,0.98);
+        let distance=cubic_distance_sq(start,segment,target,t);
+        if distance.is_finite() && distance<*best{
+            *best=distance;
+            *hit=Some((address,t));
+        }
+    }
+    // The closest point can be near an endpoint with no interior sampled
+    // minimum. Insert at the closest legal parameter in that case.
+    for t in [0.02_f32,0.98_f32]{
+        let d=cubic_distance_sq(start,segment,target,t);
+        if d.is_finite() && d<*best{*best=d;*hit=Some((address,t));}
     }
 }
 /// Return nearest path segment and parameter for double-click insertion.
@@ -378,6 +422,26 @@ mod tests{
             Point{x:f32::NAN,y:0.}).is_err());
         assert_eq!(shape,previous);
         assert!(insert_node(&mut shape,SegmentAddress::Bezier(100),0.5).is_err());
+    }
+    #[test] fn nearest_bezier_parameter_is_subsample_accurate(){
+        let shape=path();
+        let Shape::Bezier{start,segments,..}=&shape else{unreachable!()};
+        for t in [0.071_f32,0.173,0.413,0.627,0.891]{
+            let target=cubic(*start,&segments[0],t);
+            let (address,found)=nearest_segment(&shape,target,0.01).unwrap();
+            assert_eq!(address,SegmentAddress::Bezier(0));
+            let nearest=cubic(*start,&segments[0],found);
+            assert!((nearest.x-target.x).hypot(nearest.y-target.y)<0.01,
+                "missed curve position at t={t}: found t={found}");
+        }
+    }
+    #[test] fn near_endpoint_bezier_insertion_uses_valid_parameter(){
+        let shape=path();
+        let (address,t)=nearest_segment(&shape,Point{x:0.,y:0.},1.).unwrap();
+        assert_eq!(address,SegmentAddress::Bezier(0));
+        assert!((0.02..=0.98).contains(&t));
+        let mut updated=shape;
+        insert_node(&mut updated,address,t).unwrap();
     }
     #[test] fn nearest_polyline_segment_respects_tolerance(){
         let shape=Shape::Polyline{points:vec![
