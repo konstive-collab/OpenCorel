@@ -73,6 +73,11 @@ fn pair(out:&mut String,code:u16,value:&str){
 fn pair_num(out:&mut String,code:u16,value:f64)->Result<(),String>{
     pair(out,code,&num(value)?);Ok(())
 }
+fn alloc_handle(next:&mut u32)->String{
+    let handle=format!("{:X}",*next);
+    *next+=1;
+    handle
+}
 fn coordinate(p:Point,page_height:f32,options:DxfOptions)->Result<(f64,f64),String>{
     let factor=match options.units{DxfUnits::Millimeters=>1.0,DxfUnits::Inches=>1.0/25.4};
     let x=(p.x as f64+options.offset_x_mm as f64)*factor;
@@ -112,6 +117,9 @@ pub fn dxf_bytes(doc:&Document,options:DxfOptions)->Result<Vec<u8>,String>{
     let mut out=String::with_capacity(4096usize.saturating_add(report.vertex_count.saturating_mul(100)));
     pair(&mut out,0,"SECTION");pair(&mut out,2,"HEADER");
     pair(&mut out,9,"$ACADVER");pair(&mut out,1,"AC1015");
+    let handseed=0x100u64+report.vertex_count as u64
+        +report.path_count as u64*2+layers.len() as u64+32;
+    pair(&mut out,9,"$HANDSEED");pair(&mut out,5,&format!("{handseed:X}"));
     pair(&mut out,9,"$INSUNITS");
     pair(&mut out,70,match options.units{DxfUnits::Millimeters=>"4",DxfUnits::Inches=>"1"});
     pair(&mut out,9,"$MEASUREMENT");
@@ -123,36 +131,103 @@ pub fn dxf_bytes(doc:&Document,options:DxfOptions)->Result<Vec<u8>,String>{
     pair_num(&mut out,20,doc.page.height_mm as f64*factor)?;
     pair(&mut out,0,"ENDSEC");
 
-    // Layer 0 is mandatory in common CAD workflows; source layers follow.
+    // R2000 symbol tables carry handles and subclass markers.
+    let mut next_handle=0x100u32;
+    let ltype_table=alloc_handle(&mut next_handle);
+    let continuous=alloc_handle(&mut next_handle);
     pair(&mut out,0,"SECTION");pair(&mut out,2,"TABLES");
+    pair(&mut out,0,"TABLE");pair(&mut out,2,"LTYPE");
+    pair(&mut out,5,&ltype_table);pair(&mut out,100,"AcDbSymbolTable");
+    pair(&mut out,70,"1");
+    pair(&mut out,0,"LTYPE");pair(&mut out,5,&continuous);
+    pair(&mut out,100,"AcDbSymbolTableRecord");
+    pair(&mut out,100,"AcDbLinetypeTableRecord");
+    pair(&mut out,2,"CONTINUOUS");pair(&mut out,70,"0");
+    pair(&mut out,3,"Solid line");pair(&mut out,72,"65");
+    pair(&mut out,73,"0");pair_num(&mut out,40,0.0)?;
+    pair(&mut out,0,"ENDTAB");
+
+    let layer_table=alloc_handle(&mut next_handle);
     pair(&mut out,0,"TABLE");pair(&mut out,2,"LAYER");
+    pair(&mut out,5,&layer_table);pair(&mut out,100,"AcDbSymbolTable");
     pair(&mut out,70,&(layers.len()+1).to_string());
-    pair(&mut out,0,"LAYER");pair(&mut out,2,"0");pair(&mut out,70,"0");
+    let layer_zero=alloc_handle(&mut next_handle);
+    pair(&mut out,0,"LAYER");pair(&mut out,5,&layer_zero);
+    pair(&mut out,100,"AcDbSymbolTableRecord");
+    pair(&mut out,100,"AcDbLayerTableRecord");
+    pair(&mut out,2,"0");pair(&mut out,70,"0");
     pair(&mut out,62,"7");pair(&mut out,6,"CONTINUOUS");
     for name in layers.values(){
-        pair(&mut out,0,"LAYER");pair(&mut out,2,name);pair(&mut out,70,"0");
+        let layer_handle=alloc_handle(&mut next_handle);
+        pair(&mut out,0,"LAYER");pair(&mut out,5,&layer_handle);
+        pair(&mut out,100,"AcDbSymbolTableRecord");
+        pair(&mut out,100,"AcDbLayerTableRecord");
+        pair(&mut out,2,name);pair(&mut out,70,"0");
         pair(&mut out,62,"7");pair(&mut out,6,"CONTINUOUS");
     }
+    pair(&mut out,0,"ENDTAB");
+
+    let block_table=alloc_handle(&mut next_handle);
+    let model_record=alloc_handle(&mut next_handle);
+    let paper_record=alloc_handle(&mut next_handle);
+    pair(&mut out,0,"TABLE");pair(&mut out,2,"BLOCK_RECORD");
+    pair(&mut out,5,&block_table);pair(&mut out,100,"AcDbSymbolTable");
+    pair(&mut out,70,"2");
+    for (name,handle) in [("*Model_Space",&model_record),("*Paper_Space",&paper_record)]{
+        pair(&mut out,0,"BLOCK_RECORD");pair(&mut out,5,handle);
+        pair(&mut out,100,"AcDbSymbolTableRecord");
+        pair(&mut out,100,"AcDbBlockTableRecord");
+        pair(&mut out,2,name);pair(&mut out,70,"0");
+    }
     pair(&mut out,0,"ENDTAB");pair(&mut out,0,"ENDSEC");
+
+    // Define model and paper space block records for CAD readers.
+    pair(&mut out,0,"SECTION");pair(&mut out,2,"BLOCKS");
+    for (name,owner) in [("*Model_Space",&model_record),("*Paper_Space",&paper_record)]{
+        let block_handle=alloc_handle(&mut next_handle);
+        pair(&mut out,0,"BLOCK");pair(&mut out,5,&block_handle);
+        pair(&mut out,330,owner);pair(&mut out,100,"AcDbEntity");
+        pair(&mut out,8,"0");pair(&mut out,100,"AcDbBlockBegin");
+        pair(&mut out,2,name);pair(&mut out,70,"0");
+        pair_num(&mut out,10,0.0)?;pair_num(&mut out,20,0.0)?;
+        pair_num(&mut out,30,0.0)?;pair(&mut out,3,name);pair(&mut out,1,"");
+        let end_handle=alloc_handle(&mut next_handle);
+        pair(&mut out,0,"ENDBLK");pair(&mut out,5,&end_handle);
+        pair(&mut out,330,owner);pair(&mut out,100,"AcDbEntity");
+        pair(&mut out,8,"0");pair(&mut out,100,"AcDbBlockEnd");
+    }
+    pair(&mut out,0,"ENDSEC");
 
     pair(&mut out,0,"SECTION");pair(&mut out,2,"ENTITIES");
     for path in &paths{
         let layer_id=*object_layers.get(&path.source_id)
             .ok_or_else(||format!("Missing source object #{}",path.source_id))?;
         let layer=layers.get(&layer_id).ok_or_else(||format!("Missing DXF layer #{layer_id}"))?;
-        pair(&mut out,0,"POLYLINE");pair(&mut out,100,"AcDbEntity");
+        let polyline_handle=alloc_handle(&mut next_handle);
+        pair(&mut out,0,"POLYLINE");pair(&mut out,5,&polyline_handle);
+        pair(&mut out,330,&model_record);pair(&mut out,100,"AcDbEntity");
         pair(&mut out,8,layer);pair(&mut out,100,"AcDb2dPolyline");
         pair(&mut out,66,"1");pair_num(&mut out,10,0.0)?;
         pair_num(&mut out,20,0.0)?;pair_num(&mut out,30,0.0)?;
         pair(&mut out,70,if path.closed{"1"}else{"0"});
         for point in &path.points{
             let (x,y)=coordinate(*point,doc.page.height_mm,options)?;
-            pair(&mut out,0,"VERTEX");pair(&mut out,100,"AcDbEntity");
+            let vertex_handle=alloc_handle(&mut next_handle);
+            pair(&mut out,0,"VERTEX");pair(&mut out,5,&vertex_handle);
+            pair(&mut out,330,&polyline_handle);pair(&mut out,100,"AcDbEntity");
             pair(&mut out,8,layer);pair(&mut out,100,"AcDbVertex");
             pair(&mut out,100,"AcDb2dVertex");
             pair_num(&mut out,10,x)?;pair_num(&mut out,20,y)?;
             pair_num(&mut out,30,0.0)?;pair(&mut out,70,"0");
             if out.len()>MAX_DXF_BYTES{return Err("DXF export exceeds 128 MiB safety limit".into());}
+        }
+        let seqend_handle=alloc_handle(&mut next_handle);
+        pair(&mut out,0,"SEQEND");pair(&mut out,5,&seqend_handle);
+        pair(&mut out,330,&polyline_handle);pair(&mut out,100,"AcDbEntity");
+        pair(&mut out,8,layer);pair(&mut out,100,"AcDbSequenceEnd");
+    }
+    pair(&mut out,0,"ENDSEC");pair(&mut out,0,"EOF");
+    if out.len()>MAX_DXF_BYTES{return Err("DXF export exceeds 128 MiB safety limit".into());}
         }
         pair(&mut out,0,"SEQEND");pair(&mut out,100,"AcDbEntity");
         pair(&mut out,8,layer);pair(&mut out,100,"AcDbSequenceEnd");
@@ -193,6 +268,13 @@ mod tests{
         assert!(out.contains("0\nPOLYLINE\n")&&out.contains("70\n1\n"));
         assert!(out.contains("10\n10.000000\n20\n80.000000\n"));
         assert!(out.ends_with("0\nEOF\n"));
+        assert!(out.contains("2\nLTYPE\n")&&out.contains("2\nBLOCK_RECORD\n"));
+        assert!(out.contains("100\nAcDb2dPolyline\n"));
+        let mut handles=std::collections::HashSet::new();
+        let lines:Vec<_>=out.lines().collect();
+        for pair in lines.windows(2){
+            if pair[0]=="5"{assert!(handles.insert(pair[1].to_string()),"duplicate DXF handle {}",pair[1]);}
+        }
         let r=analyze(&d,DxfOptions::default()).unwrap();
         assert_eq!(r.path_count,1);assert_eq!(r.vertex_count,4);
         assert!((r.cut_length_mm-140.0).abs()<0.001);
