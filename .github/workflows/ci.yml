@@ -33,7 +33,7 @@ jobs:
         run: cargo build --release -p opencorel-desktop
       - name: Build CLI
         run: cargo build --release -p opencorel-cli
-      - name: CLI smoke — native project to SVG and back
+      - name: CLI smoke — native project, PLT and DXF
         shell: bash
         run: |
           set -euo pipefail
@@ -53,30 +53,7 @@ jobs:
           cargo run --release -p opencorel-cli -- export-dxf ci-plot.kdr ci-plot.dxf
           grep -q 'AC1015' ci-plot.dxf
           grep -q 'POLYLINE' ci-plot.dxf
-          grep -q '^EOF          if cargo run --release -p opencorel-cli -- export-plt ci-smoke.kdr ci-invalid-cut.plt; then
-            echo 'Plotter export unexpectedly allowed unoutlined text' >&2
-            exit 1
-          fi
-          printf 'damaged file' > ci-invalid.kdr
-          if cargo run --release -p opencorel-cli -- inspect ci-invalid.kdr; then
-            echo 'Damaged native project was incorrectly accepted' >&2
-            exit 1
-          fi
-          if cargo run --release -p opencorel-cli -- inspect ci-does-not-exist.kdr; then
-            echo 'Missing file was incorrectly accepted' >&2
-            exit 1
-          fi
-      - name: Upload executable
-        uses: actions/upload-artifact@v4
-        with:
-          name: opencorel-${{ runner.os }}-x64
-          path: |
-            target/release/opencorel-desktop
-            target/release/opencorel-desktop.exe
-            target/release/opencorel-cli
-            target/release/opencorel-cli.exe
-          if-no-files-found: error
- ci-plot.dxf
+          grep -q '^EOF$' ci-plot.dxf
           if cargo run --release -p opencorel-cli -- export-dxf ci-smoke.kdr ci-invalid.dxf; then
             echo 'DXF export unexpectedly allowed unoutlined text' >&2
             exit 1
