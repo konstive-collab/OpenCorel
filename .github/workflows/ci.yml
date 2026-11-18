@@ -33,7 +33,7 @@ jobs:
         run: cargo build --release -p opencorel-desktop
       - name: Build CLI
         run: cargo build --release -p opencorel-cli
-      - name: CLI smoke — native project to SVG and back
+      - name: CLI smoke — native project, PLT and DXF
         shell: bash
         run: |
           set -euo pipefail
@@ -49,6 +49,15 @@ jobs:
           cargo run --release -p opencorel-cli -- export-plt ci-plot.kdr ci-plot.plt
           grep -q '^IN;SP1;PA;' ci-plot.plt
           grep -q 'SP0;' ci-plot.plt
+          cargo run --release -p opencorel-cli -- dxf-preflight ci-plot.kdr
+          cargo run --release -p opencorel-cli -- export-dxf ci-plot.kdr ci-plot.dxf
+          grep -q 'AC1015' ci-plot.dxf
+          grep -q 'POLYLINE' ci-plot.dxf
+          grep -q '^EOF$' ci-plot.dxf
+          if cargo run --release -p opencorel-cli -- export-dxf ci-smoke.kdr ci-invalid.dxf; then
+            echo 'DXF export unexpectedly allowed unoutlined text' >&2
+            exit 1
+          fi
           if cargo run --release -p opencorel-cli -- export-plt ci-smoke.kdr ci-invalid-cut.plt; then
             echo 'Plotter export unexpectedly allowed unoutlined text' >&2
             exit 1
@@ -62,6 +71,20 @@ jobs:
             echo 'Missing file was incorrectly accepted' >&2
             exit 1
           fi
+      - name: Validate DXF with independent ezdxf parser
+        shell: bash
+        run: |
+          python -m pip install --disable-pip-version-check --no-input ezdxf
+          python - <<'PY'
+          import ezdxf
+          drawing = ezdxf.readfile("ci-plot.dxf")
+          entities = list(drawing.modelspace())
+          assert len(entities) == 1, f"expected one modelspace entity, got {len(entities)}"
+          assert entities[0].dxftype() == "POLYLINE", entities[0].dxftype()
+          assert entities[0].dxf.layer == "OC1_LAYER", entities[0].dxf.layer
+          assert drawing.header.get("$INSUNITS") == 4, drawing.header.get("$INSUNITS")
+          print("DXF parsed by ezdxf: one POLYLINE, layer OC1_LAYER, units=mm")
+          PY
       - name: Upload executable
         uses: actions/upload-artifact@v4
         with:

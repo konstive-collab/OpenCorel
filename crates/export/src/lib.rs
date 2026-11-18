@@ -2,6 +2,7 @@
 //! NOT a PDF/X prepress exporter: no CMYK, output intents, trapping, or bleed.
 pub mod raster_export;
 pub mod hpgl;
+pub mod dxf;
 use opencorel_core::Document;
 use std::{fs, io::Write, path::Path};
 

@@ -121,6 +121,7 @@ struct Editor{
     text_outliner:TextOutliner,
     proof_dpi:u32,
     plotter_options:opencorel_export::hpgl::PlotterOptions,
+    dxf_options:opencorel_export::dxf::DxfOptions,
     keep_bitmap_ratio:bool,
     show_preflight:bool,
     preflight_lines:Vec<String>,
@@ -168,6 +169,7 @@ impl Default for Editor{
             custom_pivot:false,pivot_x:0.0,pivot_y:0.0,
             text_outliner:TextOutliner::new(),proof_dpi:96,
             plotter_options:opencorel_export::hpgl::PlotterOptions::default(),
+            dxf_options:opencorel_export::dxf::DxfOptions::default(),
             keep_bitmap_ratio:true,
             show_preflight:false,preflight_lines:Vec::new(),
             minimum_image_dpi:150.0,
@@ -652,6 +654,7 @@ impl Editor{
             "pdf"=>"PDF для просмотра (RGB)",
             "png"|"jpg"=>"Изображение для согласования",
             "plt"=>"HP-GL/1 режущий плоттер",
+            "dxf"=>"DXF R2000 — лазер / CNC",
             _=>return,
         };
         if let Some(chosen)=rfd::FileDialog::new()
@@ -664,12 +667,15 @@ impl Editor{
                     &self.doc,&path,self.proof_dpi),
                 "plt"=>opencorel_export::hpgl::export_hpgl(
                     &self.doc,&path,self.plotter_options),
+                "dxf"=>opencorel_export::dxf::export_dxf(
+                    &self.doc,&path,self.dxf_options),
                 _=>opencorel_formats::save_document(&self.doc,&path),
             };
             self.status=match result{
                 Ok(())=>format!("Экспортировано: {} ({}).",path.display(),
                     if ext=="pdf"{"PDF RGB, не PDF/X"}
                     else if ext=="plt"{"HP-GL/1, проверка на плоттере обязательна"}
+                    else if ext=="dxf"{"DXF R2000, передача в CAD/CAM"}
                     else{"контрольный файл"}),
                 Err(e)=>format!("Ошибка экспорта: {e}"),
             };

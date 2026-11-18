@@ -76,6 +76,18 @@ fn main()->ExitCode{
                 report.travel_length_mm,report.skipped_unstroked);
             Ok(())
         }),
+        [_,op,src] if op=="dxf-preflight" =>open_any(src).and_then(|r|{
+            let report=opencorel_export::dxf::analyze(&r.document,Default::default())?;
+            println!("DXF preflight: {} polylines, {} vertices, {} layers, {:.1}mm total geometry; {} unstroked objects skipped",
+                report.path_count,report.vertex_count,report.layer_count,
+                report.cut_length_mm,report.skipped_unstroked);
+            Ok(())
+        }),
+        [_,op,src,dst] if op=="export-dxf" => {
+            if src==dst{Err("Input and DXF output files must be different".into())}
+            else{open_any(src).and_then(|r|opencorel_export::dxf::export_dxf(
+                &r.document,dst,Default::default()))}
+        },
         [_,op,src,dst] if op=="export-plt" => {
             if src==dst{Err("Input and plotter output files must be different".into())}
             else{open_any(src).and_then(|r|opencorel_export::hpgl::export_hpgl(
@@ -85,7 +97,7 @@ fn main()->ExitCode{
             .and_then(|r|save_document(&r.document,dst)),
         [_,op,src,dst] if op=="export-svg" => open_any(src)
             .and_then(|r|save_document(&r.document,dst)),
-        _=>{eprintln!("Usage:\n  opencorel-cli benchmark COUNT\n  opencorel-cli new FILE.kdr\n  opencorel-cli inspect FILE.kdr\n  opencorel-cli preflight FILE.kdr\n  opencorel-cli convert INPUT OUTPUT\n  opencorel-cli outline-text INPUT.kdr OUTPUT.kdr\n  opencorel-cli export-bitmap FILE.kdr FILE.png DPI\n  opencorel-cli export-svg FILE.kdr FILE.svg\n  opencorel-cli export-pdf FILE.kdr FILE.pdf\n  opencorel-cli plotter-preflight FILE.kdr\n  opencorel-cli export-plt FILE.kdr FILE.plt\n  opencorel-cli import-svg FILE.svg FILE.kdr");
+        _=>{eprintln!("Usage:\n  opencorel-cli benchmark COUNT\n  opencorel-cli new FILE.kdr\n  opencorel-cli inspect FILE.kdr\n  opencorel-cli preflight FILE.kdr\n  opencorel-cli convert INPUT OUTPUT\n  opencorel-cli outline-text INPUT.kdr OUTPUT.kdr\n  opencorel-cli export-bitmap FILE.kdr FILE.png DPI\n  opencorel-cli export-svg FILE.kdr FILE.svg\n  opencorel-cli export-pdf FILE.kdr FILE.pdf\n  opencorel-cli plotter-preflight FILE.kdr\n  opencorel-cli export-plt FILE.kdr FILE.plt\n  opencorel-cli dxf-preflight FILE.kdr\n  opencorel-cli export-dxf FILE.kdr FILE.dxf\n  opencorel-cli import-svg FILE.svg FILE.kdr");
             return ExitCode::FAILURE;}
     };
     match outcome{
