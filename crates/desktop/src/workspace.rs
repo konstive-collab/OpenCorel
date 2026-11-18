@@ -624,6 +624,31 @@ impl Editor {
             }else{
                 ui.label("Выберите опорную точку для точного позиционирования.");
             }
+            ui.collapsing("Геометрия и касательные",|ui|{
+                use opencorel_core::node_edit::AnchorMode;
+                ui.label("Тип выбранного опорного узла:");
+                ui.horizontal_wrapped(|ui|{
+                    if ui.button("Острый").on_hover_text(
+                        "Сбросить касательные с обеих сторон узла").clicked(){
+                        self.set_selected_anchor_mode(AnchorMode::Cusp);
+                    }
+                    if ui.button("Гладкий").on_hover_text(
+                        "Совместить касательные, сохранив их длины").clicked(){
+                        self.set_selected_anchor_mode(AnchorMode::Smooth);
+                    }
+                    if ui.button("Симметричный").on_hover_text(
+                        "Совместить касательные и сделать длины равными").clicked(){
+                        self.set_selected_anchor_mode(AnchorMode::Symmetric);
+                    }
+                });
+                if ui.button("Выпрямить сегмент").on_hover_text(
+                    "Преобразовать сегмент, заканчивающийся выбранным узлом, в прямой").clicked(){
+                    self.straighten_selected_segment();
+                }
+                if ui.button("Развернуть направление контура").clicked(){
+                    self.reverse_selected_path();
+                }
+            });
             ui.small("F10 — узлы. Стрелки — сдвиг. Ctrl+Z — отмена.");
             ui.separator();
         }
