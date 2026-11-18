@@ -8,6 +8,8 @@ mod productivity;
 use opencorel_core::transform;
 use opencorel_core::node_edit::{self,NodeAddress};
 mod node_interaction;
+mod pro_tools;
+use pro_tools::ProToolsState;
 mod boolean_commands;
 mod clip_commands;
 mod masked_canvas;
@@ -129,6 +131,7 @@ struct Editor{
     toolbox_expanded:bool,
     resize_drag:Option<(u64,ResizeCorner)>,
     object_filter:String,
+    pro_tools:ProToolsState,
     active_node:Option<(u64,NodeAddress)>,
     node_drag:Option<(u64,NodeAddress)>,
 }
@@ -168,7 +171,8 @@ impl Default for Editor{
             show_safe_area:false,safe_margin_mm:5.0,
             internal_clipboard:Vec::new(),paste_number:0,
             show_welcome:true,toolbox_expanded:false,resize_drag:None,
-            object_filter:String::new(),active_node:None,node_drag:None}
+            object_filter:String::new(),pro_tools:ProToolsState::default(),
+            active_node:None,node_drag:None}
     }
 }
 #[derive(Clone,Copy)]

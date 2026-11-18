@@ -9,6 +9,8 @@ pub mod kdr;
 pub mod preflight;
 pub mod transform;
 pub mod node_edit;
+pub mod procedural;
+pub mod arrays;
 pub mod boolean_ops;
 pub mod appearance;
 use appearance::Appearance;
@@ -414,6 +416,10 @@ impl Document {
         let visible:HashSet<u64>=self.layers.iter().filter(|layer|layer.visible)
             .map(|layer|layer.id).collect();
         self.objects.iter().filter(move |obj|visible.contains(&obj.layer_id))
+    }
+    /// Read an object by its stable document identifier without mutating it.
+    pub fn get(&self,id:u64)->Option<&Object>{
+        self.objects.iter().find(|object|object.id==id)
     }
     pub fn get_mut(&mut self,id:u64) -> Option<&mut Object> {
         self.objects.iter_mut().find(|o|o.id==id)
