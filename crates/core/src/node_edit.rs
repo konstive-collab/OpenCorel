@@ -356,7 +356,7 @@ pub enum AnchorMode{Cusp,Smooth,Symmetric}
 pub fn set_anchor_mode(shape:&mut Shape,address:NodeAddress,mode:AnchorMode)
     ->Result<(),String>{
     let (segments,index)=match (shape,address){
-        (Shape::Bezier{segments,..},NodeAddress::BezierEnd(i))=> (segments,i),
+        (Shape::Bezier{segments,..},NodeAddress::BezierEnd(i))=> (segments.as_mut_slice(),i),
         (Shape::CompoundPath{contours},NodeAddress::CompoundEnd(j,i))=>
             (contours.get_mut(j).ok_or("Invalid contour")?.segments.as_mut(),i),
         _=>return Err("Choose an interior Bézier anchor".into()),
