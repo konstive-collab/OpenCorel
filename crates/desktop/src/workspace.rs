@@ -84,6 +84,7 @@ impl Editor {
                     ui.separator();
                     if ui.button("Проверка макета...").clicked(){self.run_preflight();ui.close_menu();}
                 });
+                ui.menu_button("Оборудование",|ui|self.device_menu(ui));
                 ui.menu_button("Правка",|ui|{
                     if ui.add_enabled(!self.undo.is_empty(),egui::Button::new("Отменить      Ctrl+Z")).clicked(){self.undo();ui.close_menu();}
                     if ui.add_enabled(!self.redo.is_empty(),egui::Button::new("Повторить     Ctrl+Y")).clicked(){self.redo();ui.close_menu();}

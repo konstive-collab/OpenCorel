@@ -8,6 +8,7 @@ mod productivity;
 use opencorel_core::transform;
 use opencorel_core::node_edit::{self,NodeAddress};
 mod node_interaction;
+mod device_tools;
 mod pro_tools;
 use pro_tools::ProToolsState;
 mod boolean_commands;
@@ -119,6 +120,7 @@ struct Editor{
     pivot_y:f32,
     text_outliner:TextOutliner,
     proof_dpi:u32,
+    plotter_options:opencorel_export::hpgl::PlotterOptions,
     keep_bitmap_ratio:bool,
     show_preflight:bool,
     preflight_lines:Vec<String>,
@@ -165,6 +167,7 @@ impl Default for Editor{
             appearance_cap:0,appearance_join:0,
             custom_pivot:false,pivot_x:0.0,pivot_y:0.0,
             text_outliner:TextOutliner::new(),proof_dpi:96,
+            plotter_options:opencorel_export::hpgl::PlotterOptions::default(),
             keep_bitmap_ratio:true,
             show_preflight:false,preflight_lines:Vec::new(),
             minimum_image_dpi:150.0,
@@ -648,6 +651,7 @@ impl Editor{
             "svg"|"svgz"=>"SVG векторная графика",
             "pdf"=>"PDF для просмотра (RGB)",
             "png"|"jpg"=>"Изображение для согласования",
+            "plt"=>"HP-GL/1 режущий плоттер",
             _=>return,
         };
         if let Some(chosen)=rfd::FileDialog::new()
@@ -658,11 +662,15 @@ impl Editor{
             let result=match ext{
                 "png"|"jpg"=>opencorel_export::raster_export::export_raster(
                     &self.doc,&path,self.proof_dpi),
+                "plt"=>opencorel_export::hpgl::export_hpgl(
+                    &self.doc,&path,self.plotter_options),
                 _=>opencorel_formats::save_document(&self.doc,&path),
             };
             self.status=match result{
                 Ok(())=>format!("Экспортировано: {} ({}).",path.display(),
-                    if ext=="pdf"{"PDF RGB, не PDF/X"}else{"контрольный файл"}),
+                    if ext=="pdf"{"PDF RGB, не PDF/X"}
+                    else if ext=="plt"{"HP-GL/1, проверка на плоттере обязательна"}
+                    else{"контрольный файл"}),
                 Err(e)=>format!("Ошибка экспорта: {e}"),
             };
         }
