@@ -112,6 +112,8 @@ impl Editor {
                     if ui.button("Баннер 3×2 м").clicked(){self.page_size(3000.0,2000.0);ui.close_menu();}
                     if ui.button("Баннер 6×3 м (SVG)").clicked(){self.page_size(6000.0,3000.0);ui.close_menu();}
                 });
+                ui.menu_button("Фигуры+",|ui|self.procedural_menu(ui));
+                ui.menu_button("Массивы",|ui|self.array_menu(ui));
                 ui.menu_button("Контуры",|ui|{
                     ui.label(RichText::new("ЛОГИЧЕСКИЕ ОПЕРАЦИИ").strong());
                     ui.label("Выделите две фигуры с Shift.");

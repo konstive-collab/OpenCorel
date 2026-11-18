@@ -9,6 +9,8 @@ pub mod kdr;
 pub mod preflight;
 pub mod transform;
 pub mod node_edit;
+pub mod procedural;
+pub mod arrays;
 pub mod boolean_ops;
 pub mod appearance;
 use appearance::Appearance;
