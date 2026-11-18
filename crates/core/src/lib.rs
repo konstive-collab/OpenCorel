@@ -417,6 +417,10 @@ impl Document {
             .map(|layer|layer.id).collect();
         self.objects.iter().filter(move |obj|visible.contains(&obj.layer_id))
     }
+    /// Read an object by its stable document identifier without mutating it.
+    pub fn get(&self,id:u64)->Option<&Object>{
+        self.objects.iter().find(|object|object.id==id)
+    }
     pub fn get_mut(&mut self,id:u64) -> Option<&mut Object> {
         self.objects.iter_mut().find(|o|o.id==id)
     }
