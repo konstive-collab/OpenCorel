@@ -53,7 +53,7 @@ impl PlotterOptions{
     }
 }
 #[derive(Clone)]
-struct CutPath{
+pub struct VectorPath{
     points:Vec<Point>,
     closed:bool,
     source_id:u64,
@@ -101,7 +101,7 @@ fn flatten_cubic(points:&mut Vec<Point>,start:Point,seg:&CubicSegment,
     Ok(())
 }
 fn flatten_segments(start:Point,segments:&[CubicSegment],closed:bool,
-    tolerance:f32)->Result<CutPath,String>{
+    tolerance:f32)->Result<VectorPath,String>{
     let mut points=Vec::with_capacity(segments.len().min(256)+1);
     points.push(start);
     let mut prev=start;
@@ -109,7 +109,7 @@ fn flatten_segments(start:Point,segments:&[CubicSegment],closed:bool,
         flatten_cubic(&mut points,prev,segment,tolerance*tolerance,0)?;
         prev=segment.end;
     }
-    Ok(CutPath{points,closed,source_id:0})
+    Ok(VectorPath{points,closed,source_id:0})
 }
 fn ellipse(x:f32,y:f32,w:f32,h:f32,tolerance:f32)->Result<Vec<Point>,String>{
     if w<=0.0||h<=0.0{return Err("Degenerate ellipse is not cuttable".into());}
@@ -127,18 +127,18 @@ fn ellipse(x:f32,y:f32,w:f32,h:f32,tolerance:f32)->Result<Vec<Point>,String>{
             y:y+h*0.5+(h as f64*0.5*angle.sin()) as f32}
     }).collect())
 }
-fn object_paths(id:u64,shape:&Shape,tolerance:f32)->Result<Vec<CutPath>,String>{
+fn object_paths(id:u64,shape:&Shape,tolerance:f32)->Result<Vec<VectorPath>,String>{
     let mut paths=match shape{
         Shape::Rectangle{x,y,w,h}=>{
             if *w<=0.0||*h<=0.0{return Err("Degenerate rectangle".into());}
-            vec![CutPath{points:vec![
+            vec![VectorPath{points:vec![
                 Point{x:*x,y:*y},Point{x:*x+*w,y:*y},
                 Point{x:*x+*w,y:*y+*h},Point{x:*x,y:*y+*h},
             ],closed:true,source_id:id}]
         }
-        Shape::Ellipse{x,y,w,h}=>vec![CutPath{points:ellipse(*x,*y,*w,*h,tolerance)?,
+        Shape::Ellipse{x,y,w,h}=>vec![VectorPath{points:ellipse(*x,*y,*w,*h,tolerance)?,
             closed:true,source_id:id}],
-        Shape::Polyline{points,closed}=>vec![CutPath{
+        Shape::Polyline{points,closed}=>vec![VectorPath{
             points:points.clone(),closed:*closed,source_id:id}],
         Shape::Bezier{start,segments,closed}=>vec![
             flatten_segments(*start,segments,*closed,tolerance)?],
@@ -163,7 +163,7 @@ fn object_paths(id:u64,shape:&Shape,tolerance:f32)->Result<Vec<CutPath>,String>{
     }
     Ok(paths)
 }
-fn collect_paths(doc:&Document,options:PlotterOptions)->Result<(Vec<CutPath>,PlotterReport),String>{
+fn collect_paths(doc:&Document,options:PlotterOptions)->Result<(Vec<VectorPath>,PlotterReport),String>{
     doc.validate()?;
     options.validate()?;
     if !doc.clip_links.is_empty(){
@@ -215,6 +215,14 @@ fn collect_paths(doc:&Document,options:PlotterOptions)->Result<(Vec<CutPath>,Plo
 pub fn analyze(doc:&Document,options:PlotterOptions)->Result<PlotterReport,String>{
     let (_,report)=collect_paths(doc,options)?;
     Ok(report)
+}
+
+/// Shared, validated geometry extraction for manufacturing interchange formats.
+pub fn collect_vector_paths(doc:&Document,tolerance_mm:f32,scope:Scope)
+    ->Result<(Vec<VectorPath>,PlotterReport),String>{
+    collect_paths(doc,PlotterOptions{
+        tolerance_mm,scope,..PlotterOptions::default()
+    })
 }
 fn machine_point(point:Point,height_mm:f32,options:PlotterOptions)
     ->Result<(i64,i64),String>{

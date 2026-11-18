@@ -61,5 +61,56 @@ impl Editor{
         }
         ui.small("Подготовьте текст в кривые. Обтравки и растр не режутся.");
         ui.small("Перед реальной резкой проверьте начало координат и масштаб на оборудовании.");
+
+        ui.separator();
+        ui.heading("Лазер / CNC — DXF R2000");
+        ui.label("Экспорт геометрии с сохранением видимых слоёв.");
+        ui.small("DXF — обменный файл. Скорость, мощность, глубина и G-code настраиваются в CAM ПО.");
+        ui.horizontal(|ui|{
+            ui.label("Единицы:");
+            ui.selectable_value(&mut self.dxf_options.units,
+                opencorel_export::dxf::DxfUnits::Millimeters,"мм");
+            ui.selectable_value(&mut self.dxf_options.units,
+                opencorel_export::dxf::DxfUnits::Inches,"дюймы");
+        });
+        ui.horizontal(|ui|{
+            ui.label("Ось Y:");
+            ui.selectable_value(&mut self.dxf_options.origin,
+                opencorel_export::dxf::DxfOrigin::BottomLeft,"Снизу вверх");
+            ui.selectable_value(&mut self.dxf_options.origin,
+                opencorel_export::dxf::DxfOrigin::TopLeft,"Сверху вниз");
+        });
+        ui.horizontal(|ui|{
+            ui.label("Точность кривых, мм");
+            ui.add(DragValue::new(&mut self.dxf_options.tolerance_mm)
+                .speed(0.01).range(0.01..=2.0));
+        });
+        ui.label("Состав задания:");
+        ui.selectable_value(&mut self.dxf_options.scope,
+            Scope::StrokedOnly,"Только объекты с обводкой");
+        ui.selectable_value(&mut self.dxf_options.scope,
+            Scope::AllVectorOutlines,"Все векторные контуры");
+        ui.horizontal(|ui|{
+            ui.label("Смещение X, мм");
+            ui.add(DragValue::new(&mut self.dxf_options.offset_x_mm)
+                .speed(1.).range(-100000.0..=100000.0));
+            ui.label("Y");
+            ui.add(DragValue::new(&mut self.dxf_options.offset_y_mm)
+                .speed(1.).range(-100000.0..=100000.0));
+        });
+        if ui.button("Проверить DXF-задание").clicked(){
+            self.status=match opencorel_export::dxf::analyze(
+                &self.doc,self.dxf_options){
+                Ok(r)=>format!("DXF: {} контуров, {} вершин, {} слоёв, {:.1} мм суммарной длины; {} объектов без обводки пропущено",
+                    r.path_count,r.vertex_count,r.layer_count,r.cut_length_mm,r.skipped_unstroked),
+                Err(e)=>format!("Ошибка DXF: {e}")
+            };
+            ui.close_menu();
+        }
+        if ui.button("Экспортировать .DXF...").clicked(){
+            self.export_dialog("dxf");
+            ui.close_menu();
+        }
+        ui.small("Текст преобразуйте в кривые. Растр, SVG-вставки и обтравки требуют подготовки.");
     }
 }

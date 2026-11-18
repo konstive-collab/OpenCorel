@@ -22,6 +22,10 @@ Goal: fast, legally independent vector graphics editor for advertising, posters 
 
 See **[the 20-iteration development plan](ROADMAP_20_ITERATIONS.md)** for the ordered backlog I01–I20, acceptance requirements and version targets.
 
+## Delivered in v0.15 / v0.16 source
+- **v0.15**: HP-GL/1 PLT export, curve flattening, cut/travel preflight, safe machine-coordinate checks and CLI; Windows/Linux CI passed. Physical plotter validation remains pending.
+- **v0.16**: DXF R2000 polyline export for CAD/CAM hand-off, visible-layer preservation, mm/inch units, selectable Y origin, curve tolerance, offsets and CLI preflight/export; Windows/Linux CI pending. No direct laser/CNC control or G-code generation is claimed.
+
 ## Next milestones — highest priority
 1. Real Windows 7/10 and Linux performance benchmarking (2/4/8GB RAM, 1k–100k objects)
 2. Stronger typography: font choices, shaping, line height, kerning, Cyrillic layouts, text-to-path
