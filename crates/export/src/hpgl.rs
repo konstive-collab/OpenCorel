@@ -68,7 +68,9 @@ fn dist_to_chord_sq(p:Point,a:Point,b:Point)->f32{
     let (dx,dy)=(b.x-a.x,b.y-a.y);
     let length2=dx*dx+dy*dy;
     if length2<=1e-14{return (p.x-a.x).powi(2)+(p.y-a.y).powi(2);}
-    let t=((p.x-a.x)*dx+(p.y-a.y)*dy)/length2;
+    // Distance to a finite chord, not its infinite line: collinear control
+    // handles outside the endpoints can still cause severe cubic overshoot.
+    let t=(((p.x-a.x)*dx+(p.y-a.y)*dy)/length2).clamp(0.0,1.0);
     let (qx,qy)=(a.x+t*dx,a.y+t*dy);
     (p.x-qx).powi(2)+(p.y-qy).powi(2)
 }
@@ -363,6 +365,15 @@ mod tests{
         let b=d.add(Shape::Rectangle{x:3.,y:10.,w:15.,h:10.},Style::default());
         d.set_clip(a,b).unwrap();
         assert!(hpgl_bytes(&d,PlotterOptions::default()).unwrap_err().contains("Clipping"));
+    }
+    #[test] fn collinear_but_overshooting_cubic_is_not_silently_shortcut(){
+        let mut d=doc();
+        d.add(Shape::Bezier{start:Point{x:20.,y:30.},segments:vec![
+            CubicSegment{control1:Point{x:300.,y:30.},
+                control2:Point{x:-200.,y:30.},end:Point{x:80.,y:30.}}
+        ],closed:false},Style::default());
+        let err=hpgl_bytes(&d,PlotterOptions::default()).unwrap_err();
+        assert!(err.contains("leaves"),"unexpected error: {err}");
     }
     #[test] fn invalid_settings_rejected_and_no_output_written(){
         let mut d=doc();
