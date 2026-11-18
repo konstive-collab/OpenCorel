@@ -228,12 +228,6 @@ pub fn dxf_bytes(doc:&Document,options:DxfOptions)->Result<Vec<u8>,String>{
     }
     pair(&mut out,0,"ENDSEC");pair(&mut out,0,"EOF");
     if out.len()>MAX_DXF_BYTES{return Err("DXF export exceeds 128 MiB safety limit".into());}
-        }
-        pair(&mut out,0,"SEQEND");pair(&mut out,100,"AcDbEntity");
-        pair(&mut out,8,layer);pair(&mut out,100,"AcDbSequenceEnd");
-    }
-    pair(&mut out,0,"ENDSEC");pair(&mut out,0,"EOF");
-    if out.len()>MAX_DXF_BYTES{return Err("DXF export exceeds 128 MiB safety limit".into());}
     Ok(out.into_bytes())
 }
 /// Atomically save a DXF hand-off file. No device is contacted.
