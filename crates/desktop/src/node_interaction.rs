@@ -148,6 +148,58 @@ impl Editor{
             Err(e)=>self.status=e,
         }
     }
+    /// Apply a geometry command transactionally; invalid operations must not
+    /// create an undo step or partially modify the selected object.
+    fn edit_active_shape(&mut self,
+        operation:impl FnOnce(&mut Shape)->Result<(),String>,success:&str){
+        let Some(id)=self.selected else{
+            self.status="Выберите векторный контур".into();return;
+        };
+        if !self.node_edit_allowed(id){
+            self.status="Выберите несгруппированный контур на доступном слое".into();return;
+        }
+        let Some(obj)=self.doc.objects.iter().find(|o|o.id==id) else{return;};
+        let mut updated=obj.shape.clone();
+        match operation(&mut updated){
+            Ok(())=>{
+                self.checkpoint();
+                self.doc.get_mut(id).unwrap().shape=updated;
+                self.active_node=None;
+                self.node_drag=None;
+                self.fill_cache.entries.clear();
+                self.compound_cache.clear();
+                self.status=success.into();
+            }
+            Err(error)=>self.status=error
+        }
+    }
+    pub(super) fn set_selected_anchor_mode(&mut self,mode:node_edit::AnchorMode){
+        let Some((id,address))=self.active_node else{
+            self.status="Сначала выберите опорный узел".into();return;
+        };
+        if self.selected!=Some(id){return;}
+        self.edit_active_shape(|shape|node_edit::set_anchor_mode(shape,address,mode),
+            "Тип узла изменён (Ctrl+Z — отмена)");
+    }
+    pub(super) fn straighten_selected_segment(&mut self){
+        let Some((id,address))=self.active_node else{
+            self.status="Сначала выберите конечный узел сегмента".into();return;
+        };
+        if self.selected!=Some(id){return;}
+        let segment=match address{
+            NodeAddress::BezierEnd(i)=>node_edit::SegmentAddress::Bezier(i),
+            NodeAddress::CompoundEnd(j,i)=>node_edit::SegmentAddress::Compound(j,i),
+            _=>{
+                self.status="Для выпрямления выберите конечный узел сегмента".into();return;
+            }
+        };
+        self.edit_active_shape(|shape|node_edit::straighten_segment(shape,segment),
+            "Сегмент выпрямлен (Ctrl+Z — отмена)");
+    }
+    pub(super) fn reverse_selected_path(&mut self){
+        self.edit_active_shape(node_edit::reverse_path,
+            "Направление контура изменено (Ctrl+Z — отмена)");
+    }
     pub(super) fn remove_active_node(&mut self){
         let Some((id,address))=self.active_node else{
             self.status="Выберите узел кривой перед удалением".into();return;
