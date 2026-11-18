@@ -9,6 +9,7 @@
 | **SVG** | Editable subset incl. even-odd compound paths, otherwise placed artwork | Styled text and editable cubic outlines | Outlined glyph holes and path contours survive an SVG round-trip; unknown SVG effects remain placed artwork |
 | **SVGZ** | Editable subset; otherwise placed artwork | Basic SVGZ | Gzip compressed SVG |
 | **PDF** | Placed artwork (first page) | RGB vector preview | Requires `pdftocairo`; no PDF/X, not CMYK |
+| **PLT / HPGL** | Not yet imported | **HP-GL/1 vector strokes to plotter file** | 40 units/mm default; configurable pen, origin and tolerance; no direct USB/serial printing; text must be outlined |
 | **PNG, JPEG** | Placed editable page object | RGB proof export (96 DPI default) | Photos retained inside KDR, resizable, not vectorized |
 | **WebP, GIF, BMP, TIFF** | Imported, converted to PNG | No native same-format export | Animated/multipage inputs use only the first frame/page; original metadata may be lost |
 | **CDR** | Adapter, experimental | **No** | LibreOffice Draw import to PDF, then `pdftocairo`; compatibility depends on CDR version & filters |
