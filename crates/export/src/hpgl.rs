@@ -52,11 +52,11 @@ impl PlotterOptions{
         Ok(())
     }
 }
-#[derive(Clone)]
+#[derive(Clone,Debug)]
 pub struct VectorPath{
-    points:Vec<Point>,
-    closed:bool,
-    source_id:u64,
+    pub points:Vec<Point>,
+    pub closed:bool,
+    pub source_id:u64,
 }
 fn distance(a:Point,b:Point)->f64{
     ((a.x as f64-b.x as f64).powi(2)+(a.y as f64-b.y as f64).powi(2)).sqrt()
