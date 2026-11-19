@@ -89,6 +89,8 @@ struct Editor{
     creation_start:Option<(Point,u64)>,
     curve_start:Option<Point>,
     curve_draft:Option<u64>,
+    curve_outgoing:Option<Point>,
+    curve_drag_anchor:Option<Point>,
     active_layer:u64,
     pan:Vec2,
     undo:Vec<Document>,
@@ -166,7 +168,9 @@ impl Default for Editor{
         Self{doc,selected:None,multi_selected:Vec::new(),tool:Tool::Select,file:"project.kdr".into(),
             text:"Новый текст".into(),status:"Экспериментальный прототип".into(),
             zoom:1.0,drag_start:None,creation_start:None,
-            curve_start:None,curve_draft:None,active_layer:1,pan:Vec2::ZERO,
+            curve_start:None,curve_draft:None,
+            curve_outgoing:None,curve_drag_anchor:None,
+            active_layer:1,pan:Vec2::ZERO,
             undo:Vec::new(),redo:Vec::new(),
             inspector_tab:InspectorTab::Objects,show_inspector:true,
             show_grid:false,snap_grid:false,
@@ -570,12 +574,19 @@ impl Editor{
         Some(id)
     }
     fn curve_click(&mut self,p:Point){
+        self.curve_anchor(p,None);
+    }
+    /// Click = corner node; drag during creation = smooth node with a
+    /// mirrored incoming handle. The outgoing tangent is reused by the
+    /// following segment so the stroke is continuous without F10 repair.
+    fn curve_anchor(&mut self,p:Point,outgoing:Option<Point>){
         if !self.active_layer_editable(){
             self.status="Слой скрыт или заблокирован".into();return;
         }
         let Some(start)=self.curve_start else {
             self.curve_start=Some(p);
-            self.status="Начало кривой: укажите следующую точку".into();
+            self.curve_outgoing=outgoing;
+            self.status="Начало Безье: щёлкните следующий узел или перетащите мышь для касательных".into();
             return;
         };
         let previous=match self.curve_draft.and_then(|id|self.doc.objects.iter().find(|o|o.id==id)){
@@ -583,12 +594,19 @@ impl Editor{
                 segments.last().map(|seg|seg.end).unwrap_or(start),
             _=>start,
         };
-        let seg=CubicSegment{
-            control1:Point{x:previous.x+(p.x-previous.x)/3.0,y:previous.y+(p.y-previous.y)/3.0},
-            control2:Point{x:previous.x+2.0*(p.x-previous.x)/3.0,
-                           y:previous.y+2.0*(p.y-previous.y)/3.0},
-            end:p
+        let control1=if let Some(tangent)=self.curve_outgoing{
+            Point{x:previous.x+tangent.x,y:previous.y+tangent.y}
+        }else{
+            Point{x:previous.x+(p.x-previous.x)/3.0,
+                  y:previous.y+(p.y-previous.y)/3.0}
         };
+        let control2=if let Some(tangent)=outgoing{
+            Point{x:p.x-tangent.x,y:p.y-tangent.y}
+        }else{
+            Point{x:previous.x+2.0*(p.x-previous.x)/3.0,
+                  y:previous.y+2.0*(p.y-previous.y)/3.0}
+        };
+        let seg=CubicSegment{control1,control2,end:p};
         if let Some(id)=self.curve_draft{
             self.checkpoint();
             if let Some(obj)=self.doc.get_mut(id){
@@ -598,7 +616,8 @@ impl Editor{
             let style=Style{fill:"#000000".into(),stroke:"#202020".into(),stroke_width_mm:0.8};
             self.curve_draft=self.add_shape(Shape::Bezier{start,segments:vec![seg],closed:false},style);
         }
-        self.status="Точка добавлена; двойной щелчок завершает кривую".into();
+        self.curve_outgoing=outgoing;
+        self.status="Узел добавлен: протягивание создаёт плавные касательные; двойной щелчок завершает".into();
     }
     fn import_svg(&mut self){self.open();}
     fn save(&mut self){
@@ -919,12 +938,25 @@ impl Editor{
             if self.tool==Tool::Nodes{
                 self.paint_node_handles(&page_painter,v);
             }
+            if let Some(anchor)=self.curve_drag_anchor{
+                if let Some(pos)=ctx.input(|i|i.pointer.latest_pos()){
+                    let shade=Color32::from_rgb(37,176,201);
+                    page_painter.line_segment([v.screen(anchor),pos],Stroke::new(1.5,shade));
+                    page_painter.circle_filled(v.screen(anchor),4.0,shade);
+                }
+            }
             if response.drag_started_by(egui::PointerButton::Primary){
                 if let Some(pos)=response.interact_pointer_pos(){
                     if v.rect.contains(pos){
                         let p=self.snapped(v.mm(pos));
                         match self.tool{
                             Tool::Nodes=>self.begin_node_drag(v,pos),
+                            Tool::Curve=>{
+                                let origin=ctx.input(|i|i.pointer.press_origin()).unwrap_or(pos);
+                                if v.rect.contains(origin){
+                                    self.curve_drag_anchor=Some(self.snapped(v.mm(origin)));
+                                }
+                            },
                             Tool::Select=>{
                                 if let Some((id,corner))=self.corner_at(v,pos){
                                     self.checkpoint();
@@ -963,7 +995,10 @@ impl Editor{
             if response.dragged_by(egui::PointerButton::Primary){
                 if let Some(pos)=response.interact_pointer_pos(){
                     let now=self.snapped(v.mm(pos));
-                    if self.node_drag.is_some(){
+                    if let Some(anchor)=self.curve_drag_anchor{
+                        self.status=format!("Касательная Безье: X {:.1}, Y {:.1} мм",
+                            v.mm(pos).x-anchor.x,v.mm(pos).y-anchor.y);
+                    }else if self.node_drag.is_some(){
                         self.drag_node_to(now);
                     }else if let Some((id,corner))=self.resize_drag{
                         self.resize_from_corner(id,corner,now,
@@ -1003,6 +1038,18 @@ impl Editor{
                 }
             }
             if response.drag_stopped_by(egui::PointerButton::Primary){
+                if let Some(anchor)=self.curve_drag_anchor.take(){
+                    let pointer=response.interact_pointer_pos().or_else(||
+                        ctx.input(|i|i.pointer.latest_pos()));
+                    if let Some(end)=pointer{
+                        let raw=v.mm(end);
+                        let delta=Point{x:raw.x-anchor.x,y:raw.y-anchor.y};
+                        let tangent=if delta.x.hypot(delta.y)>0.15{
+                            Some(delta)
+                        }else{None};
+                        self.curve_anchor(anchor,tangent);
+                    }
+                }
                 self.drag_start=None;self.creation_start=None;
                 self.resize_drag=None;self.node_drag=None;
             }
@@ -1014,6 +1061,7 @@ impl Editor{
                 }
                 if self.tool==Tool::Curve{
                     self.curve_start=None;self.curve_draft=None;
+                    self.curve_outgoing=None;self.curve_drag_anchor=None;
                     self.tool=Tool::Select;self.status="Кривая завершена".into();
                 }
             }
@@ -1135,7 +1183,9 @@ impl eframe::App for Editor{
             else{self.delete_selection();}
         }
         if ctx.input(|i|i.key_pressed(egui::Key::Escape)){
-            self.curve_start=None;self.curve_draft=None;self.tool=Tool::Select;
+            self.curve_start=None;self.curve_draft=None;
+            self.curve_outgoing=None;self.curve_drag_anchor=None;
+            self.tool=Tool::Select;
             self.resize_drag=None;self.node_drag=None;self.active_node=None;
         }
         if ctx.style().visuals.dark_mode==self.light_theme {
@@ -1264,6 +1314,25 @@ mod tests {
         assert_ne!(e.doc.objects[0].shape,before.objects[0].shape);
         assert_ne!(e.doc.objects.last().unwrap().shape,before.objects.last().unwrap().shape);
         e.doc.validate().unwrap();
+    }
+    #[test]
+    fn bezier_creation_drag_produces_smooth_cubic_handles(){
+        let mut e=Editor::default();
+        e.change_tool(Tool::Curve);
+        e.curve_anchor(Point{x:10.0,y:10.0},Some(Point{x:10.0,y:0.0}));
+        e.curve_anchor(Point{x:80.0,y:10.0},Some(Point{x:0.0,y:10.0}));
+        let id=e.curve_draft.unwrap();
+        let Shape::Bezier{segments,..}=&e.doc.get(id).unwrap().shape else{panic!()};
+        assert_eq!(segments[0].control1,Point{x:20.0,y:10.0});
+        assert_eq!(segments[0].control2,Point{x:80.0,y:0.0});
+        assert_eq!(segments[0].end,Point{x:80.0,y:10.0});
+        e.curve_click(Point{x:100.0,y:60.0});
+        let Shape::Bezier{segments,..}=&e.doc.get(id).unwrap().shape else{panic!()};
+        assert_eq!(segments[1].control1,Point{x:80.0,y:20.0});
+        e.doc.validate().unwrap();
+        e.undo();
+        let Shape::Bezier{segments,..}=&e.doc.get(id).unwrap().shape else{panic!()};
+        assert_eq!(segments.len(),1);
     }
     #[test]
     fn polygon_has_six_vertices(){

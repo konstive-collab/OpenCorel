@@ -19,7 +19,10 @@ const SWATCHES: [&str; 27] = [
 impl Editor {
     pub(super) fn change_tool(&mut self, next: Tool) {
         self.tool=next;
-        if next!=Tool::Curve { self.curve_start=None; self.curve_draft=None; }
+        if next!=Tool::Curve {
+            self.curve_start=None;self.curve_draft=None;
+            self.curve_outgoing=None;self.curve_drag_anchor=None;
+        }
         self.drag_start=None;
         self.creation_start=None;
         self.resize_drag=None;self.node_drag=None;
@@ -47,6 +50,8 @@ impl Editor {
         self.zoom=1.0;
         self.curve_start=None;
         self.curve_draft=None;
+        self.curve_outgoing=None;
+        self.curve_drag_anchor=None;
         self.file="untitled.kdr".into();
         self.status="Создан новый документ. Выберите инструмент слева или нажмите F1 для помощи.".into();
     }

@@ -12,6 +12,7 @@ impl Editor{
         self.node_drag=None;
         self.curve_draft=None;
         self.curve_start=None;
+        self.curve_outgoing=None;self.curve_drag_anchor=None;
         self.drag_start=None;
         self.creation_start=None;
         self.resize_drag=None;
