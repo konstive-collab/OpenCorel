@@ -99,7 +99,7 @@ impl Document{
         ->Result<Vec<TextHit>,String>{
         validate_query(query)?;
         let mut result=Vec::new();
-        let mut scan=|id:u64,objects:&[Object]|{
+        let mut scan=|id:u64,objects:&[Object]| ->bool {
             for object in objects{
                 let Shape::Text{value,..}=&object.shape else{continue;};
                 let (_,hits)=edit_string(value,query,"",case_sensitive);
@@ -110,12 +110,13 @@ impl Document{
                     if result.len()==5000{break;}
                 }
             }
+            result.len()==5000
         };
-        scan(self.active_page_id,&self.objects);
-        if all_pages&&result.len()<5000{
+        let mut finished=scan(self.active_page_id,&self.objects);
+        if all_pages&&!finished{
             for (id,page) in &self.inactive_pages{
-                scan(*id,&page.objects);
-                if result.len()==5000{break;}
+                finished=scan(*id,&page.objects);
+                if finished{break;}
             }
         }
         // Keep the same page order displayed in the Page navigator.
