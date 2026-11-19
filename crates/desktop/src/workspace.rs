@@ -278,6 +278,7 @@ impl Editor {
                         self.distribute_selection(Distribution::VerticalCenters);ui.close_menu();
                     }
                 });
+                ui.menu_button("Контуры",|ui|self.path_workflow_menu(ui));
                 ui.menu_button("Текст",|ui|{
                     if ui.button("Найти / заменить    Ctrl+F / Ctrl+H").clicked(){
                         self.show_text_search=true;ui.close_menu();
@@ -734,6 +735,12 @@ impl Editor {
                 if ui.button("Ломаная → кривая Безье").clicked(){
                     self.convert_selected_polyline_to_bezier();
                 }
+                if ui.button("Примитив → редактируемая кривая").clicked(){
+                    self.execute_path_command(crate::path_workspace::PathCommand::Convert);
+                }
+                ui.collapsing("Соединение / упрощение",|ui|{
+                    self.path_workflow_menu(ui);
+                });
                 if ui.button("Развернуть направление контура").clicked(){
                     self.reverse_selected_path();
                 }

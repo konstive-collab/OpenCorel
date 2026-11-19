@@ -23,6 +23,7 @@ mod clip_commands;
 mod masked_canvas;
 mod appearance_commands;
 mod text_workspace;
+mod path_workspace;
 use masked_canvas::MaskedCanvasCache;
 mod vector_preview;
 mod raster_preview;
@@ -173,6 +174,8 @@ struct Editor{
     batch_page_selection:Option<std::collections::HashSet<u64>>,
     property_aspect_locked:bool,
     trim_margin_mm:f32,
+    path_simplify_tolerance_mm:f32,
+    path_join_tolerance_mm:f32,
     active_node:Option<(u64,NodeAddress)>,
     node_drag:Option<(u64,NodeAddress)>,
 }
@@ -240,6 +243,7 @@ impl Default for Editor{
             batch_format:opencorel_export::batch::PageExportFormat::Svg,
             batch_page_selection:None,property_aspect_locked:true,
             trim_margin_mm:12.0,
+            path_simplify_tolerance_mm:0.30,path_join_tolerance_mm:0.15,
             active_node:None,node_drag:None}
     }
 }

@@ -11,7 +11,7 @@ pub(super) enum Command{
     CopyStyle,PasteStyle,MeasureWidth,MeasureHeight,ZoomSelection,
     SelectAll,Duplicate,Group,Ungroup,AlignCenterX,AlignCenterY,
     MoveUp,MoveDown,Objects,Properties,ZoomFit,ToggleGrid,
-    ToggleGuides,ToggleTheme,Preflight,TextFind,TextUpper,TextLower,TextTitle,TextSentence,Help,
+    ToggleGuides,ToggleTheme,Preflight,PathConvert,PathSimplify,PathJoin,TextFind,TextUpper,TextLower,TextTitle,TextSentence,Help,
 }
 const COMMANDS:&[(Command,&str,&str,&str)]=&[
     (Command::New,"Новый документ","Файл","Ctrl+N"),
@@ -58,6 +58,9 @@ const COMMANDS:&[(Command,&str,&str,&str)]=&[
     (Command::ToggleGuides,"Включить / выключить направляющие","Вид",""),
     (Command::ToggleTheme,"Светлая / тёмная тема","Вид",""),
     (Command::Preflight,"Проверить макет","Производство",""),
+    (Command::PathConvert,"Объект: в редактируемые кривые","Контуры",""),
+    (Command::PathSimplify,"Упростить ломаные","Контуры",""),
+    (Command::PathJoin,"Соединить два открытых контура","Контуры",""),
     (Command::TextFind,"Поиск и замена во всех страницах","Текст","Ctrl+F"),
     (Command::TextUpper,"Текст: ПРОПИСНЫЕ","Текст",""),
     (Command::TextLower,"Текст: строчные","Текст",""),
@@ -119,6 +122,9 @@ impl Editor{
             Command::ToggleGuides=>self.show_guides=!self.show_guides,
             Command::ToggleTheme=>self.light_theme=!self.light_theme,
             Command::Preflight=>self.run_preflight(),
+            Command::PathConvert=>self.execute_path_command(crate::path_workspace::PathCommand::Convert),
+            Command::PathSimplify=>self.execute_path_command(crate::path_workspace::PathCommand::ReduceNodes),
+            Command::PathJoin=>self.execute_path_command(crate::path_workspace::PathCommand::JoinEndpoints),
             Command::TextFind=>self.show_text_search=true,
             Command::TextUpper=>self.run_text_case(opencorel_core::text_workflow::TextCase::Upper),
             Command::TextLower=>self.run_text_case(opencorel_core::text_workflow::TextCase::Lower),
