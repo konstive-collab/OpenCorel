@@ -278,6 +278,26 @@ impl Editor {
                         self.distribute_selection(Distribution::VerticalCenters);ui.close_menu();
                     }
                 });
+                ui.menu_button("Текст",|ui|{
+                    if ui.button("Найти / заменить    Ctrl+F / Ctrl+H").clicked(){
+                        self.show_text_search=true;ui.close_menu();
+                    }
+                    ui.separator();
+                    for mode in [
+                        opencorel_core::text_workflow::TextCase::Upper,
+                        opencorel_core::text_workflow::TextCase::Lower,
+                        opencorel_core::text_workflow::TextCase::Title,
+                        opencorel_core::text_workflow::TextCase::Sentence,
+                    ]{
+                        if ui.button(mode.label()).clicked(){
+                            self.run_text_case(mode);ui.close_menu();
+                        }
+                    }
+                    ui.separator();
+                    if ui.button("Преобразовать надписи в контуры").clicked(){
+                        self.text_to_curves();ui.close_menu();
+                    }
+                });
                 ui.menu_button("Оформление",|ui|self.appearance_editor(ui));
                 ui.menu_button("Окно",|ui|{
                     if ui.button("Поиск команды     Ctrl+K").clicked(){

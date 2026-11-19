@@ -22,6 +22,7 @@ mod boolean_commands;
 mod clip_commands;
 mod masked_canvas;
 mod appearance_commands;
+mod text_workspace;
 use masked_canvas::MaskedCanvasCache;
 mod vector_preview;
 mod raster_preview;
@@ -159,6 +160,12 @@ struct Editor{
     resize_drag:Option<(u64,ResizeCorner)>,
     object_filter:String,
     show_command_palette:bool,
+    show_text_search:bool,
+    text_find_query:String,
+    text_replacement:String,
+    text_case_sensitive:bool,
+    text_all_pages:bool,
+    text_hits:Vec<opencorel_core::text_workflow::TextHit>,
     command_query:String,
     command_focus:bool,
     pro_tools:ProToolsState,
@@ -225,6 +232,9 @@ impl Default for Editor{
             internal_clipboard:Vec::new(),paste_number:0,
             show_welcome:true,toolbox_expanded:false,resize_drag:None,
             object_filter:String::new(),show_command_palette:false,
+            show_text_search:false,text_find_query:String::new(),
+            text_replacement:String::new(),text_case_sensitive:false,
+            text_all_pages:true,text_hits:Vec::new(),
             command_query:String::new(),command_focus:false,
             pro_tools:ProToolsState::default(),
             batch_format:opencorel_export::batch::PageExportFormat::Svg,
@@ -1218,6 +1228,10 @@ impl eframe::App for Editor{
                 }
             }
         }
+        if ctx.input(|i|i.modifiers.command&&
+            (i.key_pressed(egui::Key::F)||i.key_pressed(egui::Key::H))){
+            self.show_text_search=true;
+        }
         if ctx.input(|i|i.modifiers.command&&i.key_pressed(egui::Key::K)){
             self.show_command_palette=!self.show_command_palette;
             self.command_focus=self.show_command_palette;
@@ -1258,7 +1272,9 @@ impl eframe::App for Editor{
             if ctx.input(|i|i.key_pressed(egui::Key::B)){self.change_tool(Tool::Curve);}
             if ctx.input(|i|i.key_pressed(egui::Key::L)){self.change_tool(Tool::Line);}
             if ctx.input(|i|i.key_pressed(egui::Key::P)){self.change_tool(Tool::Polygon);}
-            if ctx.input(|i|i.key_pressed(egui::Key::F)){self.change_tool(Tool::Freehand);}
+            if !ctx.input(|i|i.modifiers.command)&&ctx.input(|i|i.key_pressed(egui::Key::F)){
+                self.change_tool(Tool::Freehand);
+            }
             if ctx.input(|i|i.key_pressed(egui::Key::I)){self.change_tool(Tool::Eyedropper);}
         }
         self.top_workspace(ctx);
@@ -1269,6 +1285,7 @@ impl eframe::App for Editor{
         self.canvas(ctx);
         self.welcome_window(ctx);
         self.command_palette(ctx);
+        self.text_search_dialog(ctx);
         if self.show_preflight{
             egui::Window::new("Проверка макета")
                 .open(&mut self.show_preflight)
