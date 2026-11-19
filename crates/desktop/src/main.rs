@@ -10,6 +10,7 @@ use opencorel_core::node_edit::{self,NodeAddress};
 mod node_interaction;
 mod device_tools;
 mod page_workspace;
+mod guide_tools;
 mod pro_tools;
 use pro_tools::ProToolsState;
 mod boolean_commands;
@@ -96,6 +97,13 @@ struct Editor{
     snap_grid:bool,
     grid_mm:f32,
     show_rulers:bool,
+    show_guides:bool,
+    snap_guides:bool,
+    snap_objects:bool,
+    snap_page_edges:bool,
+    snap_tolerance_mm:f32,
+    new_guide_x:f32,
+    new_guide_y:f32,
     light_theme:bool,
     cursor_mm:Option<Point>,
     fill_cache:FillCache,
@@ -158,7 +166,10 @@ impl Default for Editor{
             inspector_tab:InspectorTab::Objects,show_inspector:true,
             show_grid:false,snap_grid:false,
             grid_mm:10.0,
-            show_rulers:true,light_theme:false,cursor_mm:None,
+            show_rulers:true,show_guides:true,snap_guides:true,
+            snap_objects:true,snap_page_edges:true,snap_tolerance_mm:2.0,
+            new_guide_x:50.0,new_guide_y:50.0,
+            light_theme:false,cursor_mm:None,
             fill_cache:FillCache::default(),vector_cache:VectorCache::default(),
             raster_cache:RasterCache::default(),
             compound_cache:CompoundCache::default(),
@@ -755,10 +766,14 @@ impl Editor{
         }
     }
     fn snapped(&self,p:Point)->Point {
-        if self.snap_grid {
-            Point{x:(p.x/self.grid_mm).round()*self.grid_mm,
-                y:(p.y/self.grid_mm).round()*self.grid_mm}
-        }else{p}
+        let selected:HashSet<u64>=self.selection_ids().into_iter().collect();
+        self.doc.snap_to_targets(p,opencorel_core::SnapSettings{
+            guides:self.snap_guides,
+            page_edges:self.snap_page_edges,
+            objects:self.snap_objects,
+            grid:self.snap_grid,grid_mm:self.grid_mm,
+            tolerance_mm:self.snap_tolerance_mm,
+        },&selected)
     }
     fn draw_grid_rulers(&self,painter:&egui::Painter, page:&egui::Painter,
         v:View, area:Rect){
@@ -850,6 +865,7 @@ impl Editor{
                 // Cached SVG proof uses the same clip paths as PDF/raster output.
                 self.masked_canvas.paint(ctx,&page_painter,&self.doc,v.rect);
             }
+            self.paint_guides(&page_painter,v);
             if self.show_safe_area {
                 let margin=self.safe_margin_mm;
                 if margin>0.0 && self.doc.page.width_mm>2.0*margin &&
@@ -992,6 +1008,7 @@ impl Editor{
             }
             if response.clicked() && !response.double_clicked(){
                 if let Some(pos)=response.interact_pointer_pos(){
+                    if self.try_create_guide_from_ruler(pos,working,v){return;}
                     if v.rect.contains(pos){
                         let p=self.snapped(v.mm(pos));
                         let shape=match self.tool{

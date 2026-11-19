@@ -108,6 +108,14 @@ impl Editor {
                     ui.checkbox(&mut self.show_grid,"Сетка");
                     ui.checkbox(&mut self.snap_grid,"Привязка к сетке");
                     ui.checkbox(&mut self.show_rulers,"Линейки");
+                    ui.checkbox(&mut self.show_guides,"Направляющие");
+                    ui.checkbox(&mut self.snap_guides,"К направляющим");
+                    ui.checkbox(&mut self.snap_objects,"К объектам");
+                    ui.checkbox(&mut self.snap_page_edges,"К краям страницы");
+                    if ui.button("Управление направляющими").clicked(){
+                        self.inspector_tab=InspectorTab::Page;
+                        self.show_inspector=true;ui.close_menu();
+                    }
                     ui.checkbox(&mut self.light_theme,"Светлая тема");
                 });
                 ui.menu_button("Макет",|ui|{
@@ -1204,6 +1212,10 @@ impl Editor {
                 .speed(0.5).range(0.0..=100.0));
         });
         ui.label("Оранжевая рамка — только экранная подсказка, в файл не выводится.");
+        ui.separator();
+        ui.collapsing("Направляющие / интеллектуальные привязки",|ui|{
+            self.guide_inspector(ui);
+        });
         ui.separator();
         ui.heading("Предпечатная проверка");
         ui.horizontal(|ui|{
