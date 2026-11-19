@@ -107,7 +107,7 @@ impl Document{
         let source_name=self.pages()[self.page_index()].name.clone();
         let groups:HashSet<_>=original.objects.iter().filter_map(|o|o.group_id).collect();
         let needed=original.objects.len() as u64+groups.len() as u64;
-        if self.next_id.checked_add(needed).is_none_or(|n|n>=u64::MAX){
+        if self.next_id.checked_add(needed).is_none_or(|n|n==u64::MAX){
             return Err("Object identifier limit reached".into());
         }
         if original.objects.len()+self.all_object_count()>100_000{
@@ -192,10 +192,12 @@ impl Document{
         let state=if id==self.active_page_id{
             self.capture_page()
         }else{self.inactive_pages.get(&id).ok_or("Missing page content")?.clone()};
-        let mut doc=Document::default();
-        doc.name=self.name.clone();
-        doc.schema_version=self.schema_version;
-        doc.next_id=self.next_id;
+        let mut doc=Document{
+            name:self.name.clone(),
+            schema_version:self.schema_version,
+            next_id:self.next_id,
+            ..Document::default()
+        };
         doc.restore_page(state);
         Ok(doc)
     }
@@ -259,10 +261,10 @@ impl Document{
             }
             // Validate only the target page, never cloning every other page
             // on each call (critical for large posters and 64-page projects).
-            let mut isolated=Document::default();
-            isolated.name=self.name.clone();
-            isolated.schema_version=self.schema_version;
-            isolated.next_id=self.next_id;
+            let mut isolated=Document{
+                name:self.name.clone(),schema_version:self.schema_version,
+                next_id:self.next_id,..Document::default()
+            };
             isolated.restore_page(state.clone());
             isolated.validate().map_err(|e|format!("Invalid page #{id}: {e}"))?;
         }
