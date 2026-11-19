@@ -63,6 +63,14 @@ impl Editor{
         self.mutate_pages(|doc|doc.delete_page(doc.active_page_id),
             "Страница удалена");
     }
+    pub(super) fn move_active_page(&mut self,shift:isize){
+        let index=self.doc.page_index();
+        let destination=index as isize+shift;
+        if destination<0||destination>=self.doc.pages().len() as isize{return;}
+        let id=self.doc.active_page_id;
+        self.mutate_pages(|doc|doc.move_page(id,destination as usize),
+            "Порядок страниц изменён");
+    }
     pub(super) fn rename_active_page(&mut self,new_name:&str){
         let active=self.doc.active_page_id;
         if self.doc.pages().iter().find(|p|p.id==active)
@@ -87,6 +95,10 @@ impl Editor{
             egui::Button::new("Удалить текущую страницу")).clicked(){
             self.remove_page();ui.close_menu();
         }
+        ui.horizontal(|ui|{
+            if ui.small_button("← Раньше").clicked(){self.move_active_page(-1);}
+            if ui.small_button("Позже →").clicked(){self.move_active_page(1);}
+        });
         ui.separator();
         ui.label("Перейти к странице:");
         for (index,page) in self.doc.pages().iter().enumerate(){
@@ -234,6 +246,15 @@ mod tests{
         e.activate_page(1);
         assert_eq!(e.doc.objects[0].id,first);
         e.doc.validate().unwrap();
+    }
+    #[test] fn reordering_is_undoable(){
+        let mut e=Editor::default();
+        e.append_page(100.,100.);
+        let before=e.doc.clone();
+        e.move_active_page(-1);
+        assert_eq!(e.doc.pages()[0].id,e.doc.active_page_id);
+        e.undo();
+        assert_eq!(e.doc,before);
     }
     #[test] fn batch_selection_defaults_to_all(){
         let mut e=Editor::default();
