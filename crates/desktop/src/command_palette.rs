@@ -106,6 +106,7 @@ impl Editor{
         if !self.show_command_palette{return;}
         let mut open=true;
         let mut chosen=None;
+        let mut dismiss=false;
         egui::Window::new("Поиск команд  ·  Ctrl+K")
             .open(&mut open)
             .collapsible(false)
@@ -119,7 +120,7 @@ impl Editor{
                     edit.request_focus();
                     self.command_focus=false;
                 }
-                if ui.input(|i|i.key_pressed(Key::Escape)){open=false;}
+                if ui.input(|i|i.key_pressed(Key::Escape)){dismiss=true;}
                 ui.separator();
                 let query=self.command_query.trim().to_lowercase();
                 let entries:Vec<_>=COMMANDS.iter()
@@ -131,7 +132,8 @@ impl Editor{
                     ui.label("Совпадений нет. Попробуйте другое название инструмента.");
                 }
                 egui::ScrollArea::vertical().max_height(350.).show(ui,|ui|{
-                    for (index,(action,name,category,shortcut)) in entries.iter().enumerate(){
+                    for (index,entry) in entries.iter().enumerate(){
+                        let (action,name,category,shortcut)=**entry;
                         ui.horizontal(|ui|{
                             let trigger=ui.selectable_label(false,
                                 RichText::new(*name).strong());
@@ -142,13 +144,13 @@ impl Editor{
                             }
                             if trigger.clicked()||index==0&&ui.input(|i|
                                 i.key_pressed(Key::Enter)){
-                                chosen=Some(**action);
+                                chosen=Some(action);
                             }
                         });
                     }
                 });
             });
-        self.show_command_palette=open;
+        self.show_command_palette=open && !dismiss;
         if let Some(command)=chosen{
             self.show_command_palette=false;
             self.command_query.clear();
