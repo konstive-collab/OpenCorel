@@ -26,9 +26,11 @@ impl Editor {
         }
         self.drag_start=None;
         self.creation_start=None;
+        self.marquee_start=None;self.marquee_end=None;
+        self.freehand_points.clear();
         self.resize_drag=None;self.node_drag=None;
         if next!=Tool::Nodes{self.active_node=None;}
-        if matches!(next,Tool::Text|Tool::Nodes){
+        if matches!(next,Tool::Text|Tool::Nodes|Tool::Freehand|Tool::Eyedropper){
             self.inspector_tab=InspectorTab::Properties;
             self.show_inspector=true;
         }
@@ -53,6 +55,8 @@ impl Editor {
         self.curve_draft=None;
         self.curve_outgoing=None;
         self.curve_drag_anchor=None;
+        self.marquee_start=None;self.marquee_end=None;
+        self.freehand_points.clear();
         self.file="untitled.kdr".into();
         self.status="Создан новый документ. Выберите инструмент слева или нажмите F1 для помощи.".into();
     }
@@ -106,6 +110,14 @@ impl Editor {
                     if ui.button("Вырезать        Ctrl+X").clicked(){self.cut_selection();ui.close_menu();}
                     if ui.button("Вставить        Ctrl+V").clicked(){self.paste_selection();ui.close_menu();}
                     ui.label("Буфер работает только внутри OpenCorel");
+                    ui.separator();
+                    if ui.button("Скопировать оформление    Ctrl+Shift+C").clicked(){
+                        self.copy_style_selected();ui.close_menu();
+                    }
+                    if ui.add_enabled(self.style_clipboard.is_some(),
+                        egui::Button::new("Применить оформление    Ctrl+Shift+V")).clicked(){
+                        self.paste_style_selected();ui.close_menu();
+                    }
                     if ui.button("Выделить все    Ctrl+A").clicked(){self.select_all();ui.close_menu();}
                     if ui.button("Удалить       Del").clicked(){self.delete_selection();ui.close_menu();}
                 });
@@ -676,6 +688,9 @@ impl Editor {
     }
 
     fn inspector_properties(&mut self,ui:&mut egui::Ui){
+        if matches!(self.tool,Tool::Freehand|Tool::Eyedropper){
+            self.drawing_inspector(ui);return;
+        }
         // Context tools live here, not in the permanent left rail. A user
         // can always find the active text and node controls even with the
         // minimal panel collapsed to just icons.
