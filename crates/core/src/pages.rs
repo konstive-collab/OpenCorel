@@ -187,12 +187,16 @@ impl Document{
     /// exporters remain single-page, while callers can export every page.
     pub fn page_document(&self,id:u64)->Result<Document,String>{
         if !self.pages().iter().any(|p|p.id==id){return Err("Unknown page".into());}
-        let mut doc=self.clone();
-        doc.switch_page(id)?;
-        doc.page_tabs.clear();
-        doc.inactive_pages.clear();
-        doc.active_page_id=1;
-        doc.next_page_id=2;
+        // Important for 1000+ object projects: clone only the requested
+        // page, not all other pages in the document for each export.
+        let state=if id==self.active_page_id{
+            self.capture_page()
+        }else{self.inactive_pages.get(&id).ok_or("Missing page content")?.clone()};
+        let mut doc=Document::default();
+        doc.name=self.name.clone();
+        doc.schema_version=self.schema_version;
+        doc.next_id=self.next_id;
+        doc.restore_page(state);
         Ok(doc)
     }
     pub fn all_object_count(&self)->usize{
