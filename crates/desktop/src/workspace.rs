@@ -487,6 +487,17 @@ impl Editor {
                             }
                         });
                     }
+                    if ui.small_button("Масштаб выделения").clicked(){
+                        self.fit_selection();
+                    }
+                    if self.selection_ids().len()==1{
+                        if ui.small_button("Ш, мм").on_hover_text("Создать горизонтальную размерную линию").clicked(){
+                            self.measure_selection(opencorel_core::dimension::DimensionAxis::Width);
+                        }
+                        if ui.small_button("В, мм").on_hover_text("Создать вертикальную размерную линию").clicked(){
+                            self.measure_selection(opencorel_core::dimension::DimensionAxis::Height);
+                        }
+                    }
                     if ui.small_button("Центр листа").on_hover_text("Поместить выбранные объекты по центру страницы").clicked(){
                         self.center_selection_on_page();
                     }
