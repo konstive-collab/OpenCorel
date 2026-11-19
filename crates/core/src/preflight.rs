@@ -19,6 +19,29 @@ pub struct PreflightOptions {
 impl Default for PreflightOptions {
     fn default()->Self {Self{minimum_image_dpi:150.0,safe_margin_mm:5.0}}
 }
+/// Review the whole publication instead of silently checking only the
+/// active page. Each result carries the corresponding stable page ID.
+pub fn check_book(doc:&Document,opts:PreflightOptions)->Vec<(u64,Issue)>{
+    if let Err(error)=doc.validate(){
+        return vec![(doc.active_page_id,Issue{severity:Severity::Error,
+            code:"INVALID_DOCUMENT",object_id:None,message:error})];
+    }
+    let mut found=Vec::new();
+    for page in doc.pages(){
+        let Ok(sheet)=doc.page_document(page.id) else{continue;};
+        for issue in check(&sheet,opts){
+            found.push((page.id,issue));
+            if found.len()>=5000{
+                found.push((page.id,Issue{severity:Severity::Warning,
+                    code:"ISSUE_LIMIT",object_id:None,
+                    message:"Достигнут лимит 5000 замечаний на документ".into()}));
+                return found;
+            }
+        }
+    }
+    found
+}
+
 pub fn check(doc:&Document,opts:PreflightOptions)->Vec<Issue> {
     let mut issues=Vec::new();
     if let Err(e)=doc.validate(){
@@ -124,6 +147,17 @@ mod tests{
         let issues=check(&doc,PreflightOptions::default());
         assert!(issues.iter().any(|i|i.code=="IMAGE_DPI"));
         assert!(issues.iter().any(|i|i.code=="OUTSIDE_PAGE"));
+    }
+    #[test]
+    fn book_preflight_reports_issues_from_every_page(){
+        let mut doc=Document::default();
+        doc.page.width_mm=100.0;doc.page.height_mm=100.0;
+        doc.add(Shape::Rectangle{x:101.,y:5.,w:20.,h:10.},Style::default());
+        let second=doc.add_page(crate::Page{width_mm:100.,height_mm:100.}).unwrap();
+        doc.add(Shape::Text{x:1.,y:1.,value:String::new(),size_mm:5.},Style::default());
+        let found=check_book(&doc,PreflightOptions::default());
+        assert!(found.iter().any(|(id,issue)|*id==1&&issue.code=="OUTSIDE_PAGE"));
+        assert!(found.iter().any(|(id,issue)|*id==second&&issue.code=="EMPTY_TEXT"));
     }
     #[test]
     fn empty_document_is_not_marked_print_ready(){

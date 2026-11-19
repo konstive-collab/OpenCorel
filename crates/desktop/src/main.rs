@@ -354,20 +354,24 @@ fn trim_history(history:&mut Vec<Document>) {
 }
 impl Editor{
     fn run_preflight(&mut self){
-        let issues=opencorel_core::preflight::check(&self.doc,
+        let issues=opencorel_core::preflight::check_book(&self.doc,
             opencorel_core::preflight::PreflightOptions{
                 minimum_image_dpi:self.minimum_image_dpi,
                 safe_margin_mm:self.safe_margin_mm,
             });
-        let warning_count=issues.iter().filter(|i|
+        let warning_count=issues.iter().filter(|(_,i)|
             i.severity!=opencorel_core::preflight::Severity::Notice).count();
-        self.preflight_lines=issues.iter().map(|issue|format!(
-            "{:?} [{}] {}{}",
+        let labels:std::collections::HashMap<_,_>=self.doc.pages()
+            .into_iter().map(|p|(p.id,p.name)).collect();
+        self.preflight_lines=issues.iter().map(|(page,issue)|format!(
+            "{} · {:?} [{}] {}{}",
+            labels.get(page).map(String::as_str).unwrap_or("Страница"),
             issue.severity,issue.code,
             issue.object_id.map(|id|format!("Объект #{id}: ")).unwrap_or_default(),
             issue.message
         )).collect();
-        self.status=format!("Проверка макета: замечаний {}, информационных {}",
+        self.status=format!("Проверка {} стр.: замечаний {}, информационных {}",
+            self.doc.pages().len(),
             warning_count,issues.len()-warning_count);
         self.show_preflight=true;
     }
