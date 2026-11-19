@@ -57,12 +57,12 @@ mod tests{
     #[test] fn sample_and_apply_gradient_and_text_style(){
         let mut d=Document::default();
         let first=d.add(Shape::Text{x:1.,y:1.,value:"a".into(),size_mm:5.},
-            Style{fill:"#F00".into(),stroke:"none".into(),stroke_width_mm:0.});
+            Style{fill:"#FF0000".into(),stroke:"none".into(),stroke_width_mm:0.});
         let next=d.add(Shape::Text{x:10.,y:10.,value:"b".into(),size_mm:4.},Style::default());
         d.get_mut(first).unwrap().text_format.weight=700;
         let sample=d.sample_style(first).unwrap();
         assert_eq!(d.paste_style(&sample,&[next]).unwrap(),1);
-        assert_eq!(d.get(next).unwrap().style.fill,"#F00");
+        assert_eq!(d.get(next).unwrap().style.fill,"#FF0000");
         assert_eq!(d.get(next).unwrap().text_format.weight,700);
         d.validate().unwrap();
     }

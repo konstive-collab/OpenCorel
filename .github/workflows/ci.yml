@@ -51,6 +51,8 @@ jobs:
           cargo run --release -p opencorel-cli -- batch-svg ci-multipage-3.kdr ci-pages-svg
           cargo run --release -p opencorel-cli -- batch-pdf ci-multipage-3.kdr ci-pages-pdf
           cargo run --release -p opencorel-cli -- export-pdf-book ci-multipage-3.kdr ci-book.pdf
+          cargo run --release -p opencorel-cli -- export-trim-pdf ci-multipage-3.kdr ci-trim.pdf
+          cargo run --release -p opencorel-cli -- export-trim-svg ci-multipage-3.kdr ci-trim.svg
           python -m pip install --disable-pip-version-check --no-input pypdf
           python -c 'from pypdf import PdfReader; assert len(PdfReader("ci-book.pdf").pages) == 3'
 

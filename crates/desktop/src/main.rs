@@ -163,6 +163,7 @@ struct Editor{
     batch_format:opencorel_export::batch::PageExportFormat,
     batch_page_selection:Option<std::collections::HashSet<u64>>,
     property_aspect_locked:bool,
+    trim_margin_mm:f32,
     active_node:Option<(u64,NodeAddress)>,
     node_drag:Option<(u64,NodeAddress)>,
 }
@@ -218,6 +219,7 @@ impl Default for Editor{
             pro_tools:ProToolsState::default(),
             batch_format:opencorel_export::batch::PageExportFormat::Svg,
             batch_page_selection:None,property_aspect_locked:true,
+            trim_margin_mm:12.0,
             active_node:None,node_drag:None}
     }
 }

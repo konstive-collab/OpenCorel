@@ -52,6 +52,17 @@ fn main()->ExitCode{
                 let mut d=r.document;d.duplicate_page()?;save_document(&d,dst)
             })}
         },
+        [_,op,src,dst] if op=="export-trim-svg"||op=="export-trim-pdf" =>{
+            if src==dst{Err("Input and output must differ".into())}
+            else{open_any(src).and_then(|r|{
+                let path=std::path::Path::new(dst);
+                let ext=if op=="export-trim-svg"{"svg"}else{"pdf"};
+                if path.extension().and_then(|e|e.to_str())!=Some(ext){
+                    return Err(format!("Destination must have a .{ext} extension"));
+                }
+                opencorel_export::trim_marks::export_trim(&r.document,path,Default::default())
+            })}
+        },
         [_,op,src,path] if op=="export-pdf-book" =>{
             if src==path{Err("Choose a different PDF destination".into())}
             else{open_any(src).and_then(|r|
@@ -139,7 +150,7 @@ fn main()->ExitCode{
             .and_then(|r|save_document(&r.document,dst)),
         [_,op,src,dst] if op=="export-svg" => open_any(src)
             .and_then(|r|save_document(&r.document,dst)),
-        _=>{eprintln!("Usage:\n  opencorel-cli benchmark COUNT\n  opencorel-cli new FILE.kdr\n  opencorel-cli inspect FILE.kdr\n  opencorel-cli pages FILE.kdr\n  opencorel-cli add-page IN.kdr OUT.kdr WIDTH_MM HEIGHT_MM\n  opencorel-cli duplicate-page IN.kdr OUT.kdr\n  opencorel-cli batch-svg FILE.kdr DIRECTORY\n  opencorel-cli batch-pdf FILE.kdr DIRECTORY\n  opencorel-cli export-pdf-book FILE.kdr DOCUMENT.pdf\n  opencorel-cli preflight FILE.kdr\n  opencorel-cli convert INPUT OUTPUT\n  opencorel-cli outline-text INPUT.kdr OUTPUT.kdr\n  opencorel-cli export-bitmap FILE.kdr FILE.png DPI\n  opencorel-cli export-svg FILE.kdr FILE.svg\n  opencorel-cli export-pdf FILE.kdr FILE.pdf\n  opencorel-cli plotter-preflight FILE.kdr\n  opencorel-cli export-plt FILE.kdr FILE.plt\n  opencorel-cli dxf-preflight FILE.kdr\n  opencorel-cli export-dxf FILE.kdr FILE.dxf\n  opencorel-cli import-svg FILE.svg FILE.kdr");
+        _=>{eprintln!("Usage:\n  opencorel-cli benchmark COUNT\n  opencorel-cli new FILE.kdr\n  opencorel-cli inspect FILE.kdr\n  opencorel-cli pages FILE.kdr\n  opencorel-cli add-page IN.kdr OUT.kdr WIDTH_MM HEIGHT_MM\n  opencorel-cli duplicate-page IN.kdr OUT.kdr\n  opencorel-cli batch-svg FILE.kdr DIRECTORY\n  opencorel-cli batch-pdf FILE.kdr DIRECTORY\n  opencorel-cli export-pdf-book FILE.kdr DOCUMENT.pdf\n  opencorel-cli export-trim-pdf FILE.kdr TRIM.pdf\n  opencorel-cli export-trim-svg FILE.kdr TRIM.svg\n  opencorel-cli preflight FILE.kdr\n  opencorel-cli convert INPUT OUTPUT\n  opencorel-cli outline-text INPUT.kdr OUTPUT.kdr\n  opencorel-cli export-bitmap FILE.kdr FILE.png DPI\n  opencorel-cli export-svg FILE.kdr FILE.svg\n  opencorel-cli export-pdf FILE.kdr FILE.pdf\n  opencorel-cli plotter-preflight FILE.kdr\n  opencorel-cli export-plt FILE.kdr FILE.plt\n  opencorel-cli dxf-preflight FILE.kdr\n  opencorel-cli export-dxf FILE.kdr FILE.dxf\n  opencorel-cli import-svg FILE.svg FILE.kdr");
             return ExitCode::FAILURE;}
     };
     match outcome{
