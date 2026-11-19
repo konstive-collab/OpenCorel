@@ -28,13 +28,16 @@ impl Editor{
         let page_w=self.doc.page.width_mm;
         let page_h=self.doc.page.height_mm;
         if bounds.w<0.01||bounds.h<0.01{return;}
-        // View::new fits the entire page at zoom=1. Match its aspect ratio.
-        let ratio_x=(page_w/bounds.w).abs();
-        let ratio_y=(page_h/bounds.h).abs();
-        self.zoom=(ratio_x.min(ratio_y)*0.80).clamp(0.20,8.0);
-        // The centered page is shifted by the difference between document
-        // center and selection center converted to the active view scale.
-        self.pan=Vec2::ZERO;
+        // Same scale as View::new, based on the last real canvas viewport.
+        let usable=self.last_canvas_size-Vec2::splat(40.);
+        let base=(usable.x/page_w).min(usable.y/page_h).max(0.001);
+        self.zoom=((usable.x/(bounds.w*base)).min(usable.y/(bounds.h*base))*0.85)
+            .clamp(0.20,8.0);
+        let scale=base*self.zoom;
+        self.pan=Vec2::new(
+            (page_w/2.-bounds.x-bounds.w/2.)*scale,
+            (page_h/2.-bounds.y-bounds.h/2.)*scale
+        );
         self.status="Масштаб выделения установлен".into();
     }
 }

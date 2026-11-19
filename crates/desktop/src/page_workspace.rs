@@ -16,6 +16,8 @@ impl Editor{
         self.drag_start=None;
         self.creation_start=None;
         self.resize_drag=None;
+        self.marquee_start=None;self.marquee_end=None;
+        self.freehand_points.clear();
         self.active_layer=1;
         self.tool=Tool::Select;
         self.fill_cache.entries.clear();

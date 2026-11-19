@@ -103,6 +103,7 @@ struct Editor{
     curve_drag_anchor:Option<Point>,
     active_layer:u64,
     pan:Vec2,
+    last_canvas_size:Vec2,
     undo:Vec<Document>,
     redo:Vec<Document>,
     inspector_tab:InspectorTab,
@@ -186,6 +187,7 @@ impl Default for Editor{
             curve_start:None,curve_draft:None,
             curve_outgoing:None,curve_drag_anchor:None,
             active_layer:1,pan:Vec2::ZERO,
+            last_canvas_size:Vec2::new(900.,600.),
             undo:Vec::new(),redo:Vec::new(),
             inspector_tab:InspectorTab::Objects,show_inspector:true,
             show_grid:false,snap_grid:false,
@@ -895,6 +897,7 @@ impl Editor{
             let working=if self.show_rulers{
                 Rect::from_min_max(response.rect.min+Vec2::new(25.0,24.0),response.rect.max)
             }else{response.rect};
+            self.last_canvas_size=working.size();
             let v=View::new(working,&self.doc,self.zoom,self.pan);
             self.cursor_mm=response.hover_pos().map(|p|v.mm(p));
             painter.rect_filled(v.rect,0.0,Color32::WHITE);
