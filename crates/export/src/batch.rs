@@ -16,7 +16,7 @@ impl PageExportFormat{
 }
 fn safe_name(value:&str)->String{
     let clean:String=value.chars().filter_map(|c|
-        if c.is_ascii_alphanumeric(){Some(c)}
+        if c.is_alphanumeric(){Some(c)}
         else if c==' '||c=='_'||c=='-'{Some('_')}
         else{None}
     ).take(35).collect();

@@ -138,6 +138,7 @@ struct Editor{
     pro_tools:ProToolsState,
     batch_format:opencorel_export::batch::PageExportFormat,
     batch_page_selection:Option<std::collections::HashSet<u64>>,
+    property_aspect_locked:bool,
     active_node:Option<(u64,NodeAddress)>,
     node_drag:Option<(u64,NodeAddress)>,
 }
@@ -181,7 +182,7 @@ impl Default for Editor{
             show_welcome:true,toolbox_expanded:false,resize_drag:None,
             object_filter:String::new(),pro_tools:ProToolsState::default(),
             batch_format:opencorel_export::batch::PageExportFormat::Svg,
-            batch_page_selection:None,
+            batch_page_selection:None,property_aspect_locked:true,
             active_node:None,node_drag:None}
     }
 }

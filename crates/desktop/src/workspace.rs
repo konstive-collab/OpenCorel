@@ -376,8 +376,37 @@ impl Editor {
                 ui.separator();
                 if let Some(bounds)=self.selection_bounds(){
                     ui.label(format!("Выделено: {}",self.selection_ids().len()));
-                    ui.label(format!("X {:.1}  Y {:.1}  Ш {:.1}  В {:.1} мм",
-                        bounds.x,bounds.y,bounds.w,bounds.h));
+                    let (mut x,mut y,mut w,mut h)=(bounds.x,bounds.y,bounds.w,bounds.h);
+                    ui.label("X");
+                    let x_changed=ui.add(egui::DragValue::new(&mut x).speed(0.5)
+                        .range(-100_000.0..=100_000.0).suffix(" мм")).changed();
+                    ui.label("Y");
+                    let y_changed=ui.add(egui::DragValue::new(&mut y).speed(0.5)
+                        .range(-100_000.0..=100_000.0).suffix(" мм")).changed();
+                    if x_changed||y_changed{self.set_selection_position(x,y);}
+                    let editable_single=self.selection_ids().len()==1
+                        && self.selected.and_then(|id|self.doc.get(id))
+                        .is_some_and(|obj|opencorel_core::transform::resizable(&obj.shape));
+                    if editable_single{
+                        ui.separator();
+                        ui.label("Ш");
+                        let changed_w=ui.add(egui::DragValue::new(&mut w).speed(0.5)
+                            .range(0.1..=100_000.0).suffix(" мм")).changed();
+                        ui.label("В");
+                        let changed_h=ui.add(egui::DragValue::new(&mut h).speed(0.5)
+                            .range(0.1..=100_000.0).suffix(" мм")).changed();
+                        ui.checkbox(&mut self.property_aspect_locked,"🔒")
+                            .on_hover_text("Сохранять пропорции при изменении размера");
+                        if changed_w||changed_h{
+                            if self.property_aspect_locked && bounds.w>0.001 && bounds.h>0.001{
+                                if changed_w&&!changed_h{h=bounds.h*w/bounds.w;}
+                                if changed_h&&!changed_w{w=bounds.w*h/bounds.h;}
+                            }
+                            self.resize_single(w,h);
+                        }
+                    }else{
+                        ui.label(format!("Ш {:.1} · В {:.1} мм",bounds.w,bounds.h));
+                    }
                     ui.separator();
                     if self.selection_ids().len()==2{
                         if ui.small_button("Создать маску").on_hover_text("Первый выбранный объект — контур; второй — содержимое").clicked(){
