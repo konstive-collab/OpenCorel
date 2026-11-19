@@ -141,6 +141,7 @@ impl Editor{
                     "Цветовые точки должны быть #RRGGBB, от 0 до 100%.");
             }
             let mut remove=None;
+            let can_remove=self.appearance_gradient_stops.len()>2;
             for i in 0..self.appearance_gradient_stops.len(){
                 ui.horizontal(|ui|{
                     ui.label(format!("{:02}",i+1));
@@ -151,7 +152,7 @@ impl Editor{
                         stop.offset=percent/100.0;
                     }
                     ui.text_edit_singleline(&mut stop.color);
-                    if ui.add_enabled(self.appearance_gradient_stops.len()>2,
+                    if ui.add_enabled(can_remove,
                         egui::Button::new("×").small())
                         .on_hover_text("Удалить точку").clicked(){
                         remove=Some(i);
