@@ -4,6 +4,22 @@
 
 **Alpha development preview — NOT a fully compatible replacement for CorelDRAW.** Designed for posters, maps and large advertising sheets, currently targeting Windows 10/11 x64 and Linux x64. Windows 7 is not tested.
 
+## v0.19 alpha — Drawing & Production
+
+- Native freehand pencil (F), bounded Ramer–Douglas–Peucker stroke simplification,
+  editable open polyline with thickness/color controls and single-step Undo.
+- Two-direction selection marquee (V): containing vs crossing selection,
+  additive Shift, whole-group expansion, locked/hidden layer guards.
+- Eyedropper (I) and application style clipboard
+  (Ctrl+Shift+C / Ctrl+Shift+V): fill, outline, gradient, transparency,
+  dash/cap/join and text formatting, with atomic undo.
+- Editable measurement annotations, grouped as ordinary vector geometry
+  and millimetre labels, plus selection-centred zoom.
+- RGB SVG/PDF **crop-mark consultation proofs** using extended paper size,
+  without modifying editable KDR geometry. This does not create actual bleed,
+  ICC/CMYK separations, PDF/X or production printing capability.
+- More geometry, layer safety, format round-trip and export regression tests.
+
 ## v0.18 Studio / Production Mega Update
 
 - **Persistent per-page guides** and intelligent snapping to guides, page edges/centers, object bounds/centers, and configurable grid. Create guides by clicking rulers, adjust exact coordinates or clear them in the Page inspector. Guides are never exported.
