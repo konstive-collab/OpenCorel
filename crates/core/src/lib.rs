@@ -23,6 +23,7 @@ pub use pages::{PageTab,PageContent};
 pub mod boolean_ops;
 pub mod appearance;
 pub mod text_workflow;
+pub mod path_workflow;
 use appearance::Appearance;
 
 pub const SCHEMA_VERSION: u32 = 1;
