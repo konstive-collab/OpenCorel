@@ -1254,6 +1254,16 @@ impl Editor {
                 .speed(5.0).range(30.0..=600.0));
         });
         if ui.button("Проверить макет").clicked(){self.run_preflight();}
+        ui.separator();
+        ui.collapsing("Паспорт публикации · ресурсы и шрифты",|ui|{
+            if ui.button("Составить паспорт по всем страницам").clicked(){
+                self.refresh_inventory();
+            }
+            egui::ScrollArea::vertical().max_height(210.).show(ui,|ui|{
+                for line in &self.inventory_lines{ui.label(line);}
+            });
+            ui.small("Паспорт не проверяет установку шрифтов и CMYK-совместимость.");
+        });
         ui.label(format!("Активная страница: {} из {}. Объектов во всём документе: {}",
             self.doc.page_index()+1,self.doc.pages().len(),self.doc.all_object_count()));
     }

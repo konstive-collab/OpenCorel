@@ -24,6 +24,7 @@ mod masked_canvas;
 mod appearance_commands;
 mod text_workspace;
 mod path_workspace;
+mod inventory_tools;
 use masked_canvas::MaskedCanvasCache;
 mod vector_preview;
 mod raster_preview;
@@ -151,6 +152,7 @@ struct Editor{
     keep_bitmap_ratio:bool,
     show_preflight:bool,
     preflight_lines:Vec<String>,
+    inventory_lines:Vec<String>,
     minimum_image_dpi:f32,
     show_safe_area:bool,
     safe_margin_mm:f32,
@@ -230,6 +232,7 @@ impl Default for Editor{
             dxf_options:opencorel_export::dxf::DxfOptions::default(),
             keep_bitmap_ratio:true,
             show_preflight:false,preflight_lines:Vec::new(),
+            inventory_lines:Vec::new(),
             minimum_image_dpi:150.0,
             show_safe_area:false,safe_margin_mm:5.0,
             internal_clipboard:Vec::new(),paste_number:0,
