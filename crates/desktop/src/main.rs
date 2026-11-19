@@ -1088,6 +1088,22 @@ impl eframe::App for Editor{
             if ctrl&&ctx.input(|i|i.key_pressed(egui::Key::C)){self.copy_selection();}
             if ctrl&&ctx.input(|i|i.key_pressed(egui::Key::X)){self.cut_selection();}
             if ctrl&&ctx.input(|i|i.key_pressed(egui::Key::V)){self.paste_selection();}
+            // Familiar page and z-order navigation used by vector editors.
+            let page_up=ctx.input(|i|i.key_pressed(egui::Key::PageUp));
+            let page_down=ctx.input(|i|i.key_pressed(egui::Key::PageDown));
+            if page_up||page_down{
+                if ctrl {
+                    let pages=self.doc.pages();
+                    let index=self.doc.page_index();
+                    if page_up && index>0{self.activate_page(pages[index-1].id);}
+                    if page_down && index+1<pages.len(){
+                        self.activate_page(pages[index+1].id);
+                    }
+                }else{
+                    self.z_step(page_up);
+                }
+            }
+
             if !ctrl {
                 let step=if ctx.input(|i|i.modifiers.shift){10.0}else{1.0};
                 let left=ctx.input(|i|i.key_pressed(egui::Key::ArrowLeft));
