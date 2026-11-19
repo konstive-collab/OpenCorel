@@ -133,8 +133,8 @@ struct Editor{
     scale_y_percent:f32,
     appearance_opacity:f32,
     appearance_gradient_mode:u8,
-    appearance_gradient_start:String,
-    appearance_gradient_end:String,
+    appearance_gradient_stops:Vec<opencorel_core::appearance::GradientStop>,
+    appearance_new_stop_percent:f32,
     appearance_gradient_angle:f32,
     appearance_dash_mm:f32,
     appearance_cap:u8,
@@ -203,8 +203,15 @@ impl Default for Editor{
             rotation_degrees:30.0,skew_x_degrees:15.0,skew_y_degrees:0.0,
             scale_x_percent:100.0,scale_y_percent:100.0,
             appearance_opacity:1.0,appearance_gradient_mode:0,
-            appearance_gradient_start:"#447BD4".into(),
-            appearance_gradient_end:"#FFFFFF".into(),
+            appearance_gradient_stops:vec![
+                opencorel_core::appearance::GradientStop{
+                    offset:0.0,color:"#447BD4".into()
+                },
+                opencorel_core::appearance::GradientStop{
+                    offset:1.0,color:"#FFFFFF".into()
+                }
+            ],
+            appearance_new_stop_percent:50.0,
             appearance_gradient_angle:0.0,appearance_dash_mm:0.0,
             appearance_cap:0,appearance_join:0,
             custom_pivot:false,pivot_x:0.0,pivot_y:0.0,
