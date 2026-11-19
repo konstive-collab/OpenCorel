@@ -22,6 +22,12 @@ Goal: fast, legally independent vector graphics editor for advertising, posters 
 
 See **[the 20-iteration development plan](ROADMAP_20_ITERATIONS.md)** for the ordered backlog I01–I20, acceptance requirements and version targets.
 
+## v0.17 — Professional Workspace (pending CI)
+- Multi-page KDR up to 64 independent pages with object/layer/style/clipping preservation, page switching, duplication and deletion.
+- Page tabs, page inspector, professional batch export dock, SVG/PDF RGB/PNG/JPEG per-page staging.
+- CLI page introspection/creation/duplication and automated whole-document export.
+- Remaining: master pages, true combined multipage PDF, full CDR/CMYK, nested groups, 100k-object performance tests.
+
 ## Delivered in v0.15 / v0.16 source
 - **v0.15**: HP-GL/1 PLT export, curve flattening, cut/travel preflight, safe machine-coordinate checks and CLI; Windows/Linux CI passed. Physical plotter validation remains pending.
 - **v0.16**: DXF R2000 polyline export for CAD/CAM hand-off, visible-layer preservation, mm/inch units, selectable Y origin, curve tolerance, offsets and CLI preflight/export; Windows/Linux CI pending. No direct laser/CNC control or G-code generation is claimed.

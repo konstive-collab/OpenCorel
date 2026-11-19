@@ -1,4 +1,4 @@
-use opencorel_core::{Document,Shape,Style};
+use opencorel_core::{Document,Shape,Style,Page};
 use std::{env,process::ExitCode,time::Instant};
 use opencorel_core::Point;
 use opencorel_formats::{open_any,save_document};
@@ -25,6 +25,43 @@ fn main()->ExitCode{
                 Err("The document contains preflight errors".into())
             }else{Ok(())}
         }),
+        [_,op,path] if op=="pages" => open_any(path).map(|r|{
+            for (i,page) in r.document.pages().iter().enumerate(){
+                let isolated=r.document.page_document(page.id).expect("validated page");
+                println!("{} | id={} | {} | {:.0}x{:.0} mm | {} objects",
+                    i+1,page.id,page.name,isolated.page.width_mm,
+                    isolated.page.height_mm,isolated.objects.len());
+            }
+        }),
+        [_,op,src,dst,w,h] if op=="add-page" =>{
+            if src==dst{Err("Use a different output path".into())}
+            else{
+                let parsed=w.parse::<f32>().map_err(|_|"Invalid width".to_string())
+                    .and_then(|width|h.parse::<f32>()
+                        .map(|height|(width,height)).map_err(|_|"Invalid height".to_string()));
+                parsed.and_then(|(width,height)|open_any(src).and_then(|r|{
+                    let mut d=r.document;
+                    d.add_page(Page{width_mm:width,height_mm:height})?;
+                    save_document(&d,dst)
+                }))
+            }
+        },
+        [_,op,src,dst] if op=="duplicate-page" =>{
+            if src==dst{Err("Use a different output path".into())}
+            else{open_any(src).and_then(|r|{
+                let mut d=r.document;d.duplicate_page()?;save_document(&d,dst)
+            })}
+        },
+        [_,op,src,folder] if op=="batch-svg" || op=="batch-pdf" =>{
+            let kind=if op=="batch-svg"{
+                opencorel_export::batch::PageExportFormat::Svg
+            }else{opencorel_export::batch::PageExportFormat::Pdf};
+            open_any(src).and_then(|r|{
+                let paths=opencorel_export::batch::export_pages(
+                    &r.document,std::path::Path::new(folder),kind,&[],96)?;
+                println!("Exported {} pages",paths.len());Ok(())
+            })
+        },
         [_,op,path] if op=="inspect" => open_any(path).map(|r|{
             println!("{}: {} x {} mm; {} objects",
                 r.document.name,r.document.page.width_mm,r.document.page.height_mm,r.document.objects.len());
@@ -97,7 +134,7 @@ fn main()->ExitCode{
             .and_then(|r|save_document(&r.document,dst)),
         [_,op,src,dst] if op=="export-svg" => open_any(src)
             .and_then(|r|save_document(&r.document,dst)),
-        _=>{eprintln!("Usage:\n  opencorel-cli benchmark COUNT\n  opencorel-cli new FILE.kdr\n  opencorel-cli inspect FILE.kdr\n  opencorel-cli preflight FILE.kdr\n  opencorel-cli convert INPUT OUTPUT\n  opencorel-cli outline-text INPUT.kdr OUTPUT.kdr\n  opencorel-cli export-bitmap FILE.kdr FILE.png DPI\n  opencorel-cli export-svg FILE.kdr FILE.svg\n  opencorel-cli export-pdf FILE.kdr FILE.pdf\n  opencorel-cli plotter-preflight FILE.kdr\n  opencorel-cli export-plt FILE.kdr FILE.plt\n  opencorel-cli dxf-preflight FILE.kdr\n  opencorel-cli export-dxf FILE.kdr FILE.dxf\n  opencorel-cli import-svg FILE.svg FILE.kdr");
+        _=>{eprintln!("Usage:\n  opencorel-cli benchmark COUNT\n  opencorel-cli new FILE.kdr\n  opencorel-cli inspect FILE.kdr\n  opencorel-cli pages FILE.kdr\n  opencorel-cli add-page IN.kdr OUT.kdr WIDTH_MM HEIGHT_MM\n  opencorel-cli duplicate-page IN.kdr OUT.kdr\n  opencorel-cli batch-svg FILE.kdr DIRECTORY\n  opencorel-cli batch-pdf FILE.kdr DIRECTORY\n  opencorel-cli preflight FILE.kdr\n  opencorel-cli convert INPUT OUTPUT\n  opencorel-cli outline-text INPUT.kdr OUTPUT.kdr\n  opencorel-cli export-bitmap FILE.kdr FILE.png DPI\n  opencorel-cli export-svg FILE.kdr FILE.svg\n  opencorel-cli export-pdf FILE.kdr FILE.pdf\n  opencorel-cli plotter-preflight FILE.kdr\n  opencorel-cli export-plt FILE.kdr FILE.plt\n  opencorel-cli dxf-preflight FILE.kdr\n  opencorel-cli export-dxf FILE.kdr FILE.dxf\n  opencorel-cli import-svg FILE.svg FILE.kdr");
             return ExitCode::FAILURE;}
     };
     match outcome{
