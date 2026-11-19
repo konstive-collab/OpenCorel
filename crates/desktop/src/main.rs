@@ -13,6 +13,7 @@ mod page_workspace;
 mod guide_tools;
 mod layer_tools;
 mod command_palette;
+mod toolbar_icons;
 mod pro_tools;
 use pro_tools::ProToolsState;
 mod boolean_commands;

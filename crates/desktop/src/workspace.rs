@@ -1,6 +1,7 @@
 //! Corel-style, independently implemented workspace layout.
 //! Uses familiar panel positions and workflows but no proprietary assets.
-use super::{color, productivity, Editor, Tool};
+use super::{color, productivity, toolbar_icons, Editor, Tool};
+use toolbar_icons::Icon;
 use eframe::egui::{self, Color32, RichText, Vec2};
 use opencorel_core::{Bounds, Shape, Alignment, Distribution, TextAlign, valid_paint};
 use std::collections::HashSet;
@@ -339,7 +340,7 @@ impl Editor {
                         self.inspector_tab=InspectorTab::Objects;self.show_inspector=true;ui.close_menu();
                     }
                     if ui.selectable_label(self.inspector_tab==InspectorTab::Properties,"Свойства").clicked(){
-                        // Stay in the object manager for batch selection and layer editing.self.show_inspector=true;ui.close_menu();
+                        self.inspector_tab=InspectorTab::Properties;self.show_inspector=true;ui.close_menu();
                     }
                     if ui.selectable_label(self.inspector_tab==InspectorTab::Page,"Страница").clicked(){
                         self.inspector_tab=InspectorTab::Page;self.show_inspector=true;ui.close_menu();
@@ -362,15 +363,27 @@ impl Editor {
         });
         egui::TopBottomPanel::top("main_toolbar").exact_height(44.0).show(ctx,|ui|{
             ui.horizontal(|ui|{
-                if ui.button("Новый").on_hover_text("Новый пустой документ, Ctrl+N").clicked(){self.new_document();}
-                if ui.button("Открыть").on_hover_text("Открыть KDR, SVG, CDR и другие файлы, Ctrl+O").clicked(){self.open_picker();}
-                if ui.button("Сохранить").on_hover_text("Сохранить .kdr, Ctrl+S").clicked(){self.save();}
+                if toolbar_icons::icon_button(ui,Icon::New,"Новый документ · Ctrl+N",true){
+                    self.new_document();
+                }
+                if toolbar_icons::icon_button(ui,Icon::Open,"Открыть KDR/SVG/CDR · Ctrl+O",true){
+                    self.open_picker();
+                }
+                if toolbar_icons::icon_button(ui,Icon::Save,"Сохранить KDR · Ctrl+S",true){
+                    self.save();
+                }
                 ui.separator();
-                if ui.add_enabled(!self.undo.is_empty(),egui::Button::new("↶")).on_hover_text("Отменить Ctrl+Z").clicked(){self.undo();}
-                if ui.add_enabled(!self.redo.is_empty(),egui::Button::new("↷")).on_hover_text("Повторить Ctrl+Y").clicked(){self.redo();}
+                if toolbar_icons::icon_button(ui,Icon::Undo,"Отменить · Ctrl+Z",!self.undo.is_empty()){
+                    self.undo();
+                }
+                if toolbar_icons::icon_button(ui,Icon::Redo,"Повторить · Ctrl+Y",!self.redo.is_empty()){
+                    self.redo();
+                }
                 ui.separator();
-                if ui.button("Фото / логотип").on_hover_text("Добавить PNG, JPEG, WebP и другие изображения").clicked(){self.place_bitmap_picker();}
-                if ui.button("Пакетный экспорт").clicked(){
+                if toolbar_icons::icon_button(ui,Icon::Image,"Поместить изображение",true){
+                    self.place_bitmap_picker();
+                }
+                if toolbar_icons::icon_button(ui,Icon::Export,"Центр экспорта",true){
                     self.inspector_tab=InspectorTab::Export;self.show_inspector=true;
                 }
                 ui.menu_button("Экспорт",|ui|{
@@ -380,15 +393,23 @@ impl Editor {
                     if ui.button("JPEG — для согласования...").clicked(){self.export_dialog("jpg");ui.close_menu();}
                 });
                 ui.separator();
-                if ui.small_button("−").on_hover_text("Уменьшить масштаб").clicked(){self.zoom=(self.zoom/1.25).max(0.2);}
+                if toolbar_icons::icon_button(ui,Icon::ZoomOut,"Уменьшить масштаб",true){
+                    self.zoom=(self.zoom/1.25).max(0.2);
+                }
                 ui.label(format!("{:.0}%",self.zoom*100.0));
-                if ui.small_button("+").on_hover_text("Увеличить масштаб").clicked(){self.zoom=(self.zoom*1.25).min(8.0);}
-                if ui.button("Вписать").on_hover_text("Показать лист целиком, F4").clicked(){self.fit_page();}
+                if toolbar_icons::icon_button(ui,Icon::ZoomIn,"Увеличить масштаб",true){
+                    self.zoom=(self.zoom*1.25).min(8.0);
+                }
+                if toolbar_icons::icon_button(ui,Icon::Fit,"Показать весь лист · F4",true){
+                    self.fit_page();
+                }
                 ui.separator();
-                if ui.button("⌕ Команды").on_hover_text("Поиск инструментов и действий, Ctrl+K").clicked(){
+                if toolbar_icons::icon_button(ui,Icon::Search,"Поиск команд · Ctrl+K",true){
                     self.show_command_palette=true;self.command_focus=true;
                 }
-                if ui.button("? Помощь").on_hover_text("Обучение и сочетания клавиш, F1").clicked(){self.show_welcome=true;}
+                if toolbar_icons::icon_button(ui,Icon::Help,"Справка и горячие клавиши · F1",true){
+                    self.show_welcome=true;
+                }
             });
         });
         egui::TopBottomPanel::top("property_bar").exact_height(39.0).show(ctx,|ui|{
@@ -649,7 +670,6 @@ impl Editor {
                         let shift=ui.input(|i|i.modifiers.shift);
                         self.select_object(Some(id),shift);
                         self.active_layer=layer_id;
-                        self.inspector_tab=InspectorTab::Properties;
                     }
                 }
             });
