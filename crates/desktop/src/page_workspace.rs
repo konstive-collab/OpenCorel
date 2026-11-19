@@ -16,6 +16,8 @@ impl Editor{
         self.drag_start=None;
         self.creation_start=None;
         self.resize_drag=None;
+        self.marquee_start=None;self.marquee_end=None;
+        self.freehand_points.clear();
         self.active_layer=1;
         self.tool=Tool::Select;
         self.fill_cache.entries.clear();
@@ -215,6 +217,20 @@ impl Editor{
             };
         }
     }
+    pub(super) fn trim_proof_picker(&mut self,ext:&str){
+        if let Some(path)=rfd::FileDialog::new()
+            .add_filter("Проба с метками реза",&["svg","pdf"])
+            .set_file_name(format!("trim-proof.{ext}")).save_file(){
+            let path=path.with_extension(ext);
+            self.status=match opencorel_export::trim_marks::export_trim(
+                &self.doc,&path,opencorel_export::trim_marks::TrimOptions{
+                    margin_mm:self.trim_margin_mm,..Default::default()
+                }){
+                Ok(())=>format!("Проба с метками реза: {}",path.display()),
+                Err(e)=>format!("Ошибка пробы с метками реза: {e}"),
+            };
+        }
+    }
     pub(super) fn export_docker(&mut self,ui:&mut egui::Ui){
         ui.heading("Центр экспорта");
         ui.small("Несколько страниц за один запуск, без изменения исходного KDR.");
@@ -270,6 +286,18 @@ impl Editor{
             .clicked(){self.pdf_book_picker();}
         ui.small("Файлы: название_документа_p01_имя_страницы.ext");
         ui.small("Существующие файлы не перезаписываются. PDF — RGB, не PDF/X.");
+        ui.separator();
+        ui.collapsing("Метки реза / подготовка пробного отпечатка",|ui|{
+            ui.label("Поля за пределами формата (мм)");
+            ui.add(egui::DragValue::new(&mut self.trim_margin_mm)
+                .range(8.0..=40.0).speed(0.5));
+            ui.horizontal_wrapped(|ui|{
+                if ui.button("PDF с метками...").clicked(){self.trim_proof_picker("pdf");}
+                if ui.button("SVG с метками...").clicked(){self.trim_proof_picker("svg");}
+            });
+            ui.small("Только активный лист. Метки лежат за пределами реза.");
+            ui.small("RGB-проба: не PDF/X, не CMYK, вылеты под обрез не создаются.");
+        });
         ui.separator();
         ui.collapsing("Экспорт текущей страницы",|ui|{
             ui.horizontal_wrapped(|ui|{

@@ -6,16 +6,17 @@ use eframe::egui::{self,Align2,Color32,FontId,Pos2,Rect,Stroke,Vec2};
 
 pub(super) const COMPACT_WIDTH:f32=64.0;
 pub(super) const EXPANDED_WIDTH:f32=182.0;
-const PRIMARY:[Tool;4]=[Tool::Select,Tool::Nodes,Tool::Text,Tool::Curve];
+const PRIMARY:[Tool;6]=[Tool::Select,Tool::Nodes,Tool::Text,Tool::Curve,Tool::Freehand,Tool::Eyedropper];
 const SHAPES:[Tool;4]=[Tool::Rect,Tool::Ellipse,Tool::Line,Tool::Polygon];
 
 #[derive(Clone,Copy)]
-enum Glyph{Select,Nodes,Text,Curve,Rect,Ellipse,Line,Polygon,Shapes,Image,Check,More,Help}
+enum Glyph{Select,Nodes,Text,Curve,Freehand,Eyedropper,Rect,Ellipse,Line,Polygon,Shapes,Image,Check,More,Help}
 fn is_shape(tool:Tool)->bool{SHAPES.contains(&tool)}
 fn shortcut(tool:Tool)->&'static str{
     match tool{
         Tool::Select=>"V",Tool::Nodes=>"F10",Tool::Text=>"F8",Tool::Curve=>"B",
         Tool::Rect=>"F6",Tool::Ellipse=>"F7",Tool::Line=>"L",Tool::Polygon=>"P",
+        Tool::Freehand=>"F",Tool::Eyedropper=>"I",
     }
 }
 fn paint_icon(ui:&egui::Ui,rect:Rect,glyph:Glyph,expanded:bool,active:bool){
@@ -65,6 +66,18 @@ fn paint_icon(ui:&egui::Ui,rect:Rect,glyph:Glyph,expanded:bool,active:bool){
             p.add(egui::Shape::line(pts,Stroke::new(1.8,tint)));
             p.circle_filled(at(-10.0,7.0),2.4,secondary);
             p.circle_filled(at(10.0,7.0),2.4,secondary);
+        }
+        Glyph::Freehand=>{
+            let nodes=[(-10.0,6.0),(-6.0,-6.0),(0.0,5.0),(6.0,-8.0),(10.0,4.0)];
+            for w in nodes.windows(2){line(w[0],w[1],tint);}
+            p.circle_filled(at(10.0,4.0),2.2,secondary);
+        }
+        Glyph::Eyedropper=>{
+            line((-9.0,7.0),(5.0,-7.0),tint);
+            line((-5.0,10.0),(-9.0,7.0),tint);
+            line((5.0,-7.0),(9.0,-11.0),tint);
+            line((2.0,-10.0),(7.0,-5.0),secondary);
+            p.circle_filled(at(-9.0,8.0),2.2,secondary);
         }
         Glyph::Rect=>{
             for (a,b) in [
@@ -131,6 +144,7 @@ impl Editor{
         let glyph=match tool{
             Tool::Select=>Glyph::Select,Tool::Nodes=>Glyph::Nodes,
             Tool::Text=>Glyph::Text,Tool::Curve=>Glyph::Curve,
+            Tool::Freehand=>Glyph::Freehand,Tool::Eyedropper=>Glyph::Eyedropper,
             Tool::Rect=>Glyph::Rect,Tool::Ellipse=>Glyph::Ellipse,
             Tool::Line=>Glyph::Line,Tool::Polygon=>Glyph::Polygon,
         };
@@ -252,7 +266,7 @@ mod tests{
     use super::*;
     #[test]
     fn compact_rail_has_only_essential_top_level_tools(){
-        assert_eq!(PRIMARY.len(),4);
+        assert_eq!(PRIMARY.len(),6);
         assert_eq!(SHAPES.len(),4);
         assert!(!PRIMARY.contains(&Tool::Rect));
         assert!(!PRIMARY.contains(&Tool::Ellipse));

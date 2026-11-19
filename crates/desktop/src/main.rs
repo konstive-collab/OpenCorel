@@ -14,6 +14,8 @@ mod guide_tools;
 mod layer_tools;
 mod command_palette;
 mod toolbar_icons;
+mod drawing_tools;
+mod dimension_tools;
 mod pro_tools;
 use pro_tools::ProToolsState;
 mod boolean_commands;
@@ -31,7 +33,7 @@ use raster_preview::RasterCache;
 use workspace::InspectorTab;
 
 #[derive(Clone,Copy,PartialEq)]
-enum Tool { Select, Nodes, Rect, Ellipse, Text, Curve, Line, Polygon }
+enum Tool { Select, Nodes, Rect, Ellipse, Text, Curve, Line, Polygon, Freehand, Eyedropper }
 #[derive(Clone,Copy,Debug,PartialEq,Eq)]
 enum ResizeCorner{TopLeft,TopRight,BottomLeft,BottomRight}
 impl ResizeCorner{
@@ -88,12 +90,20 @@ struct Editor{
     // embedded artwork for every frame during drag.
     drag_start:Option<(Point,u64)>,
     creation_start:Option<(Point,u64)>,
+    marquee_start:Option<Point>,
+    marquee_end:Option<Point>,
+    freehand_points:Vec<Point>,
+    freehand_width_mm:f32,
+    freehand_smoothing_mm:f32,
+    freehand_color:String,
+    style_clipboard:Option<opencorel_core::style_tools::StyleSample>,
     curve_start:Option<Point>,
     curve_draft:Option<u64>,
     curve_outgoing:Option<Point>,
     curve_drag_anchor:Option<Point>,
     active_layer:u64,
     pan:Vec2,
+    last_canvas_size:Vec2,
     undo:Vec<Document>,
     redo:Vec<Document>,
     inspector_tab:InspectorTab,
@@ -155,6 +165,7 @@ struct Editor{
     batch_format:opencorel_export::batch::PageExportFormat,
     batch_page_selection:Option<std::collections::HashSet<u64>>,
     property_aspect_locked:bool,
+    trim_margin_mm:f32,
     active_node:Option<(u64,NodeAddress)>,
     node_drag:Option<(u64,NodeAddress)>,
 }
@@ -169,9 +180,14 @@ impl Default for Editor{
         Self{doc,selected:None,multi_selected:Vec::new(),tool:Tool::Select,file:"project.kdr".into(),
             text:"Новый текст".into(),status:"Экспериментальный прототип".into(),
             zoom:1.0,drag_start:None,creation_start:None,
+            marquee_start:None,marquee_end:None,
+            freehand_points:Vec::new(),freehand_width_mm:1.0,
+            freehand_smoothing_mm:0.2,freehand_color:"#117CC1".into(),
+            style_clipboard:None,
             curve_start:None,curve_draft:None,
             curve_outgoing:None,curve_drag_anchor:None,
             active_layer:1,pan:Vec2::ZERO,
+            last_canvas_size:Vec2::new(900.,600.),
             undo:Vec::new(),redo:Vec::new(),
             inspector_tab:InspectorTab::Objects,show_inspector:true,
             show_grid:false,snap_grid:false,
@@ -206,6 +222,7 @@ impl Default for Editor{
             pro_tools:ProToolsState::default(),
             batch_format:opencorel_export::batch::PageExportFormat::Svg,
             batch_page_selection:None,property_aspect_locked:true,
+            trim_margin_mm:12.0,
             active_node:None,node_drag:None}
     }
 }
@@ -544,6 +561,8 @@ impl Editor{
             self.selected=None;self.multi_selected.clear();
             self.curve_draft=None;self.curve_start=None;
             self.resize_drag=None;self.node_drag=None;self.active_node=None;
+            self.marquee_start=None;self.marquee_end=None;
+            self.freehand_points.clear();
             self.status="Отменено".into();
         }
     }
@@ -878,6 +897,7 @@ impl Editor{
             let working=if self.show_rulers{
                 Rect::from_min_max(response.rect.min+Vec2::new(25.0,24.0),response.rect.max)
             }else{response.rect};
+            self.last_canvas_size=working.size();
             let v=View::new(working,&self.doc,self.zoom,self.pan);
             self.cursor_mm=response.hover_pos().map(|p|v.mm(p));
             painter.rect_filled(v.rect,0.0,Color32::WHITE);
@@ -939,6 +959,7 @@ impl Editor{
             if self.tool==Tool::Nodes{
                 self.paint_node_handles(&page_painter,v);
             }
+            self.paint_drawing_overlays(&page_painter,v);
             if let Some(anchor)=self.curve_drag_anchor{
                 if let Some(pos)=ctx.input(|i|i.pointer.latest_pos()){
                     let shade=Color32::from_rgb(37,176,201);
@@ -952,6 +973,7 @@ impl Editor{
                         let p=self.snapped(v.mm(pos));
                         match self.tool{
                             Tool::Nodes=>self.begin_node_drag(v,pos),
+                            Tool::Freehand=>self.begin_freehand(v.mm(pos)),
                             Tool::Curve=>{
                                 let origin=ctx.input(|i|i.pointer.press_origin()).unwrap_or(pos);
                                 if v.rect.contains(origin){
@@ -968,7 +990,11 @@ impl Editor{
                                         if !self.is_selected(id){self.select_object(Some(id),false);}
                                         self.checkpoint();
                                         self.drag_start=Some((p,id));
-                                    }else{self.select_object(None,false);}
+                                    }else{
+                                        self.begin_marquee(v.mm(pos));
+                                    }
+                                }else{
+                                    self.begin_marquee(v.mm(pos));
                                 }
                             }
                             Tool::Rect|Tool::Ellipse|Tool::Line|Tool::Polygon=>{
@@ -996,7 +1022,11 @@ impl Editor{
             if response.dragged_by(egui::PointerButton::Primary){
                 if let Some(pos)=response.interact_pointer_pos(){
                     let now=self.snapped(v.mm(pos));
-                    if let Some(anchor)=self.curve_drag_anchor{
+                    if self.marquee_start.is_some(){
+                        self.update_marquee(v.mm(pos));
+                    }else if !self.freehand_points.is_empty(){
+                        self.extend_freehand(v.mm(pos));
+                    }else if let Some(anchor)=self.curve_drag_anchor{
                         self.status=format!("Касательная Безье: X {:.1}, Y {:.1} мм",
                             v.mm(pos).x-anchor.x,v.mm(pos).y-anchor.y);
                     }else if self.node_drag.is_some(){
@@ -1039,6 +1069,8 @@ impl Editor{
                 }
             }
             if response.drag_stopped_by(egui::PointerButton::Primary){
+                self.finish_marquee(ctx.input(|i|i.modifiers.shift));
+                self.finish_freehand();
                 if let Some(anchor)=self.curve_drag_anchor.take(){
                     let pointer=response.interact_pointer_pos().or_else(||
                         ctx.input(|i|i.pointer.latest_pos()));
@@ -1083,6 +1115,8 @@ impl Editor{
                                 return;
                             },
                             Tool::Curve=>{self.curve_click(p);return;},
+                            Tool::Freehand=>{return;},
+                            Tool::Eyedropper=>{self.eyedropper_click(v.mm(pos));return;},
                             Tool::Rect=>Shape::Rectangle{x:p.x,y:p.y,w:60.0,h:40.0},
                             Tool::Ellipse=>Shape::Ellipse{x:p.x,y:p.y,w:60.0,h:40.0},
                             Tool::Line=>Shape::Polyline{
@@ -1134,9 +1168,17 @@ impl eframe::App for Editor{
         }
         if !ctx.wants_keyboard_input(){
             let ctrl=ctx.input(|i|i.modifiers.command);
-            if ctrl&&ctx.input(|i|i.key_pressed(egui::Key::C)){self.copy_selection();}
+            if ctrl&&ctx.input(|i|i.modifiers.shift&&i.key_pressed(egui::Key::C)){
+                self.copy_style_selected();
+            }else if ctrl&&ctx.input(|i|i.key_pressed(egui::Key::C)){
+                self.copy_selection();
+            }
             if ctrl&&ctx.input(|i|i.key_pressed(egui::Key::X)){self.cut_selection();}
-            if ctrl&&ctx.input(|i|i.key_pressed(egui::Key::V)){self.paste_selection();}
+            if ctrl&&ctx.input(|i|i.modifiers.shift&&i.key_pressed(egui::Key::V)){
+                self.paste_style_selected();
+            }else if ctrl&&ctx.input(|i|i.key_pressed(egui::Key::V)){
+                self.paste_selection();
+            }
             // Familiar page and z-order navigation used by vector editors.
             let page_up=ctx.input(|i|i.key_pressed(egui::Key::PageUp));
             let page_down=ctx.input(|i|i.key_pressed(egui::Key::PageDown));
@@ -1209,6 +1251,8 @@ impl eframe::App for Editor{
             if ctx.input(|i|i.key_pressed(egui::Key::B)){self.change_tool(Tool::Curve);}
             if ctx.input(|i|i.key_pressed(egui::Key::L)){self.change_tool(Tool::Line);}
             if ctx.input(|i|i.key_pressed(egui::Key::P)){self.change_tool(Tool::Polygon);}
+            if ctx.input(|i|i.key_pressed(egui::Key::F)){self.change_tool(Tool::Freehand);}
+            if ctx.input(|i|i.key_pressed(egui::Key::I)){self.change_tool(Tool::Eyedropper);}
         }
         self.top_workspace(ctx);
         self.tool_sidebar(ctx);
