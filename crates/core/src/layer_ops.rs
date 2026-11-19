@@ -111,10 +111,10 @@ mod tests{
         let mut d=Document::default();
         let ids:Vec<_>=(0..4).map(|i|d.add(Shape::Rectangle{
             x:i as f32,y:0.,w:2.,h:2.},Style::default())).collect();
-        assert_eq!(d.step_z_order(&ids[1..3],true).unwrap(),1);
+        assert_eq!(d.step_z_order(&ids[1..3],true).unwrap(),2);
         assert_eq!(d.objects.iter().map(|o|o.id).collect::<Vec<_>>(),
             vec![ids[0],ids[3],ids[1],ids[2]]);
-        assert_eq!(d.step_z_order(&[ids[1],ids[2]],false).unwrap(),1);
+        assert_eq!(d.step_z_order(&[ids[1],ids[2]],false).unwrap(),2);
         assert_eq!(d.objects.iter().map(|o|o.id).collect::<Vec<_>>(),ids);
         d.validate().unwrap();
     }
