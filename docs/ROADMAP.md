@@ -2,6 +2,14 @@
 
 Goal: fast, legally independent vector graphics editor for advertising, posters and maps, especially on older Windows/Linux workstations.
 
+## v0.20 — Professional Appearance, Typography & Vector
+
+Source includes 7 multi-stop RGB gradients, Unicode find/replace across 64 pages,
+case transformations, cubic primitive conversion, open-path simplification/join,
+on-demand font/color/image inventory, additional CLI automation and regression
+coverage. Windows/Linux CI and manual visual acceptance gates remain mandatory.
+CDR fidelity, CMYK/ICC/PDF-X and Windows 7 runtime verification are outstanding.
+
 ## Delivered in source (automated CI; manual acceptance still pending)
 - **v0.1**: millimetre-based document engine, desktop GUI/CLI, OCD, SVG export
 - **v0.2**: Bézier paths, layers, grid/snap, rulers, palette, undo/redo, native file pickers, PDF RGB proof

@@ -4,6 +4,17 @@
 
 **Alpha development preview — NOT a fully compatible replacement for CorelDRAW.** Designed for posters, maps and large advertising sheets, currently targeting Windows 10/11 x64 and Linux x64. Windows 7 is not tested.
 
+## v0.20 — Professional Appearance, Typography & Vector Mega Update
+
+- Seven RGB gradient presets, 2–32 editable color stops, percentage and HEX controls, interpolated preview and loading an object's existing style.
+- Ctrl+F/Ctrl+H document-wide Unicode text search and atomic replacement with page navigation and single-step Undo; selection case changes.
+- Convert rectangles, ellipses and polylines to native cubic Bézier curves; simplify open polylines; join matching endpoints with style/layer/mask safeguards.
+- On-demand publication inventory of used fonts, colors, gradients, images, groups and clipping.
+- CLI commands: `inventory`, `find-text`, `replace-text`, `gradient-preset`.
+- Windows/Linux CI regression and format smoke coverage; manual UX acceptance still required.
+
+**Not supported:** full CDR editing/export, ICC/CMYK/PDF-X, Corel-equivalent OpenType shaping, Windows 7 certification or direct print-hardware integration.
+
 ## v0.19 alpha — Drawing & Production
 
 - Native freehand pencil (F), bounded Ramer–Douglas–Peucker stroke simplification,
