@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-22.04, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -29,6 +29,20 @@ jobs:
         run: cargo test --release --workspace
       - name: Static Rust analysis
         run: cargo clippy --workspace --all-targets
+      - name: Check Linux glibc portability baseline
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          ldd --version | head -1
+          python - <<'PY'
+          import subprocess, re
+          text=subprocess.check_output(["ldd","--version"],text=True).splitlines()[0]
+          m=re.search(r"(\d+)\.(\d+)\s*$",text)
+          assert m, f"Cannot determine glibc version: {text}"
+          found=tuple(map(int,m.groups()))
+          assert found <= (2,35), f"Linux binary baseline too new: {found}"
+          print("Compatibility build baseline GLIBC <= 2.35")
+          PY
       - name: Build desktop
         run: cargo build --release -p opencorel-desktop
       - name: Build CLI
