@@ -323,6 +323,11 @@ impl Editor {
                     ui.small("Цвета градиента: #RRGGBB. Ctrl+Z — отмена.");
                 });
                 ui.menu_button("Окно",|ui|{
+                    if ui.button("Поиск команды     Ctrl+K").clicked(){
+                        self.show_command_palette=true;
+                        self.command_focus=true;
+                        ui.close_menu();
+                    }
                     ui.checkbox(&mut self.show_inspector,"Показывать панель справа   F9");
                     ui.separator();
                     if ui.selectable_label(self.inspector_tab==InspectorTab::Objects,"Объекты и слои").clicked(){
@@ -375,6 +380,9 @@ impl Editor {
                 if ui.small_button("+").on_hover_text("Увеличить масштаб").clicked(){self.zoom=(self.zoom*1.25).min(8.0);}
                 if ui.button("Вписать").on_hover_text("Показать лист целиком, F4").clicked(){self.fit_page();}
                 ui.separator();
+                if ui.button("⌕ Команды").on_hover_text("Поиск инструментов и действий, Ctrl+K").clicked(){
+                    self.show_command_palette=true;self.command_focus=true;
+                }
                 if ui.button("? Помощь").on_hover_text("Обучение и сочетания клавиш, F1").clicked(){self.show_welcome=true;}
             });
         });

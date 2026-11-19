@@ -12,6 +12,7 @@ mod device_tools;
 mod page_workspace;
 mod guide_tools;
 mod layer_tools;
+mod command_palette;
 mod pro_tools;
 use pro_tools::ProToolsState;
 mod boolean_commands;
@@ -144,6 +145,9 @@ struct Editor{
     toolbox_expanded:bool,
     resize_drag:Option<(u64,ResizeCorner)>,
     object_filter:String,
+    show_command_palette:bool,
+    command_query:String,
+    command_focus:bool,
     pro_tools:ProToolsState,
     batch_format:opencorel_export::batch::PageExportFormat,
     batch_page_selection:Option<std::collections::HashSet<u64>>,
@@ -192,7 +196,9 @@ impl Default for Editor{
             show_safe_area:false,safe_margin_mm:5.0,
             internal_clipboard:Vec::new(),paste_number:0,
             show_welcome:true,toolbox_expanded:false,resize_drag:None,
-            object_filter:String::new(),pro_tools:ProToolsState::default(),
+            object_filter:String::new(),show_command_palette:false,
+            command_query:String::new(),command_focus:false,
+            pro_tools:ProToolsState::default(),
             batch_format:opencorel_export::batch::PageExportFormat::Svg,
             batch_page_selection:None,property_aspect_locked:true,
             active_node:None,node_drag:None}
@@ -1094,6 +1100,11 @@ impl eframe::App for Editor{
                 }
             }
         }
+        if ctx.input(|i|i.modifiers.command&&i.key_pressed(egui::Key::K)){
+            self.show_command_palette=!self.show_command_palette;
+            self.command_focus=self.show_command_palette;
+            if self.show_command_palette{self.command_query.clear();}
+        }
         if ctx.input(|i|i.key_pressed(egui::Key::F1)){self.show_welcome=true;}
         if !ctx.wants_keyboard_input() &&
             ctx.input(|i|i.key_pressed(egui::Key::F9)){
@@ -1135,6 +1146,7 @@ impl eframe::App for Editor{
         self.workspace_footer(ctx);
         self.canvas(ctx);
         self.welcome_window(ctx);
+        self.command_palette(ctx);
         if self.show_preflight{
             egui::Window::new("Проверка макета")
                 .open(&mut self.show_preflight)
