@@ -160,6 +160,22 @@ impl Editor{
             };
         }
     }
+    pub(super) fn pdf_book_picker(&mut self){
+        let selected=self.selected_page_ids();
+        if selected.is_empty(){self.status="Не выбраны страницы для PDF".into();return;}
+        if let Some(path)=rfd::FileDialog::new()
+            .add_filter("Многостраничный PDF (RGB)",&["pdf"])
+            .set_file_name("OpenCorel-document.pdf")
+            .save_file(){
+            let path=path.with_extension("pdf");
+            self.status=match opencorel_export::pdf_book::export_pdf_book(
+                &self.doc,&path,&selected){
+                Ok(())=>format!("Единый PDF: {} страниц → {}",
+                    selected.len(),path.display()),
+                Err(e)=>format!("Ошибка общего PDF: {e}"),
+            };
+        }
+    }
     pub(super) fn export_docker(&mut self,ui:&mut egui::Ui){
         ui.heading("Центр экспорта");
         ui.small("Несколько страниц за один запуск, без изменения исходного KDR.");
@@ -210,6 +226,9 @@ impl Editor{
         ui.label(format!("В очереди: {} из {} страниц",count,pages.len()));
         if ui.add_enabled(count>0,egui::Button::new("Экспортировать выбранные страницы..."))
             .clicked(){self.batch_export_picker();}
+        if ui.add_enabled(count>0,egui::Button::new("Единый многостраничный PDF..."))
+            .on_hover_text("Все выбранные страницы в одном PDF, RGB, не PDF/X")
+            .clicked(){self.pdf_book_picker();}
         ui.small("Файлы: название_документа_p01_имя_страницы.ext");
         ui.small("Существующие файлы не перезаписываются. PDF — RGB, не PDF/X.");
         ui.separator();

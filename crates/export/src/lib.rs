@@ -4,6 +4,7 @@ pub mod raster_export;
 pub mod hpgl;
 pub mod dxf;
 pub mod batch;
+pub mod pdf_book;
 use opencorel_core::Document;
 use std::{fs, io::Write, path::Path};
 

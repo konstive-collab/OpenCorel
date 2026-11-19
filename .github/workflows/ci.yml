@@ -50,6 +50,10 @@ jobs:
           mkdir -p ci-pages-svg ci-pages-pdf
           cargo run --release -p opencorel-cli -- batch-svg ci-multipage-3.kdr ci-pages-svg
           cargo run --release -p opencorel-cli -- batch-pdf ci-multipage-3.kdr ci-pages-pdf
+          cargo run --release -p opencorel-cli -- export-pdf-book ci-multipage-3.kdr ci-book.pdf
+          python -m pip install --disable-pip-version-check --no-input pypdf
+          python -c 'from pypdf import PdfReader; assert len(PdfReader("ci-book.pdf").pages) == 3'
+
           test "$(find ci-pages-svg -name '*.svg' | wc -l | tr -d ' ')" -eq 3
           test "$(find ci-pages-pdf -name '*.pdf' | wc -l | tr -d ' ')" -eq 3
           if cargo run --release -p opencorel-cli -- batch-svg ci-multipage-3.kdr ci-pages-svg; then
