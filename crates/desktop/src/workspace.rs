@@ -523,6 +523,8 @@ impl Editor {
                             Tool::Ellipse=>"F7",
                             Tool::Line=>"L",
                             Tool::Polygon=>"P",
+                            Tool::Freehand=>"F",
+                            Tool::Eyedropper=>"I",
                         }))
                         .on_hover_text(productivity::tool_hint(self.tool));
                 }
