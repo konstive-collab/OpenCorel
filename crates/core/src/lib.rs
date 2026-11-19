@@ -14,6 +14,7 @@ pub mod arrays;
 pub mod pages;
 pub mod guides;
 pub mod layer_ops;
+pub mod page_transfer;
 pub use guides::{Guide,GuideAxis,SnapSettings};
 pub use pages::{PageTab,PageContent};
 pub mod boolean_ops;
