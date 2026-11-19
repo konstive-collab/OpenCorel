@@ -180,6 +180,8 @@ impl Editor {
                     ui.separator();
                     if ui.button("На передний план").clicked(){self.reorder_selection(true);ui.close_menu();}
                     if ui.button("На задний план").clicked(){self.reorder_selection(false);ui.close_menu();}
+                    if ui.button("Поднять на один уровень").clicked(){self.z_step(true);ui.close_menu();}
+                    if ui.button("Опустить на один уровень").clicked(){self.z_step(false);ui.close_menu();}
                     if ui.button("Дублировать").clicked(){self.duplicate_preserving_styles();ui.close_menu();}
                     ui.separator();
                     if ui.button("Повернуть вправо на 90°").clicked(){self.rotate_selection(opencorel_core::transform::QuarterTurn::Clockwise);ui.close_menu();}
@@ -327,7 +329,7 @@ impl Editor {
                         self.inspector_tab=InspectorTab::Objects;self.show_inspector=true;ui.close_menu();
                     }
                     if ui.selectable_label(self.inspector_tab==InspectorTab::Properties,"Свойства").clicked(){
-                        self.inspector_tab=InspectorTab::Properties;self.show_inspector=true;ui.close_menu();
+                        // Stay in the object manager for batch selection and layer editing.self.show_inspector=true;ui.close_menu();
                     }
                     if ui.selectable_label(self.inspector_tab==InspectorTab::Page,"Страница").clicked(){
                         self.inspector_tab=InspectorTab::Page;self.show_inspector=true;ui.close_menu();
@@ -562,6 +564,7 @@ impl Editor {
                 }
             });
         }
+        self.layer_actions(ui);
         ui.separator();
         ui.horizontal(|ui|{
             ui.heading("ОБЪЕКТЫ");

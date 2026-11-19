@@ -11,6 +11,7 @@ mod node_interaction;
 mod device_tools;
 mod page_workspace;
 mod guide_tools;
+mod layer_tools;
 mod pro_tools;
 use pro_tools::ProToolsState;
 mod boolean_commands;
