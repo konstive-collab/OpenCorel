@@ -12,6 +12,7 @@ impl Editor{
         self.node_drag=None;
         self.curve_draft=None;
         self.curve_start=None;
+        self.curve_outgoing=None;self.curve_drag_anchor=None;
         self.drag_start=None;
         self.creation_start=None;
         self.resize_drag=None;
@@ -78,6 +79,25 @@ impl Editor{
         self.mutate_pages(|doc|doc.rename_page(active,new_name),
             "Название страницы обновлено");
     }
+    pub(super) fn transfer_selected_page(&mut self,dest:u64,remove_original:bool){
+        let ids=self.selection_ids();
+        let mut candidate=self.doc.clone();
+        let outcome=candidate.transfer_objects_to_page(&ids,dest,remove_original)
+            .and_then(|new_ids|{candidate.validate()?;Ok(new_ids)});
+        match outcome{
+            Ok(ids)=>{
+                self.checkpoint();self.doc=candidate;
+                if remove_original{
+                    self.selected=None;self.multi_selected.clear();
+                }
+                self.fill_cache.entries.clear();self.vector_cache.clear();
+                self.compound_cache.clear();
+                self.status=format!("{} {} объектов на другую страницу · Ctrl+Z — отмена",
+                    if remove_original{"Перемещено"}else{"Скопировано"},ids.len());
+            }
+            Err(e)=>self.status=format!("Перенос между страницами: {e}")
+        }
+    }
     pub(super) fn page_menu(&mut self,ui:&mut egui::Ui){
         ui.label(format!("Документ: {} страниц",self.doc.pages().len()));
         if ui.button("＋ Страница текущего размера").clicked(){
@@ -99,6 +119,25 @@ impl Editor{
             if ui.small_button("← Раньше").clicked(){self.move_active_page(-1);}
             if ui.small_button("Позже →").clicked(){self.move_active_page(1);}
         });
+        if !self.selection_ids().is_empty()&&self.doc.pages().len()>1{
+            ui.separator();
+            ui.menu_button("Копировать выделение на страницу",|ui|{
+                for (index,page) in self.doc.pages().iter().enumerate(){
+                    if page.id==self.doc.active_page_id{continue;}
+                    if ui.button(format!("{} · {}",index+1,page.name)).clicked(){
+                        self.transfer_selected_page(page.id,false);ui.close_menu();
+                    }
+                }
+            });
+            ui.menu_button("Переместить выделение на страницу",|ui|{
+                for (index,page) in self.doc.pages().iter().enumerate(){
+                    if page.id==self.doc.active_page_id{continue;}
+                    if ui.button(format!("{} · {}",index+1,page.name)).clicked(){
+                        self.transfer_selected_page(page.id,true);ui.close_menu();
+                    }
+                }
+            });
+        }
         ui.separator();
         ui.label("Перейти к странице:");
         for (index,page) in self.doc.pages().iter().enumerate(){
@@ -160,6 +199,22 @@ impl Editor{
             };
         }
     }
+    pub(super) fn pdf_book_picker(&mut self){
+        let selected=self.selected_page_ids();
+        if selected.is_empty(){self.status="Не выбраны страницы для PDF".into();return;}
+        if let Some(path)=rfd::FileDialog::new()
+            .add_filter("Многостраничный PDF (RGB)",&["pdf"])
+            .set_file_name("OpenCorel-document.pdf")
+            .save_file(){
+            let path=path.with_extension("pdf");
+            self.status=match opencorel_export::pdf_book::export_pdf_book(
+                &self.doc,&path,&selected){
+                Ok(())=>format!("Единый PDF: {} страниц → {}",
+                    selected.len(),path.display()),
+                Err(e)=>format!("Ошибка общего PDF: {e}"),
+            };
+        }
+    }
     pub(super) fn export_docker(&mut self,ui:&mut egui::Ui){
         ui.heading("Центр экспорта");
         ui.small("Несколько страниц за один запуск, без изменения исходного KDR.");
@@ -210,6 +265,9 @@ impl Editor{
         ui.label(format!("В очереди: {} из {} страниц",count,pages.len()));
         if ui.add_enabled(count>0,egui::Button::new("Экспортировать выбранные страницы..."))
             .clicked(){self.batch_export_picker();}
+        if ui.add_enabled(count>0,egui::Button::new("Единый многостраничный PDF..."))
+            .on_hover_text("Все выбранные страницы в одном PDF, RGB, не PDF/X")
+            .clicked(){self.pdf_book_picker();}
         ui.small("Файлы: название_документа_p01_имя_страницы.ext");
         ui.small("Существующие файлы не перезаписываются. PDF — RGB, не PDF/X.");
         ui.separator();
@@ -253,6 +311,18 @@ mod tests{
         let before=e.doc.clone();
         e.move_active_page(-1);
         assert_eq!(e.doc.pages()[0].id,e.doc.active_page_id);
+        e.undo();
+        assert_eq!(e.doc,before);
+    }
+    #[test] fn selected_objects_can_move_to_other_page_and_undo(){
+        let mut e=Editor::default();
+        let id=e.doc.objects[0].id;
+        let target=e.doc.add_page(Page{width_mm:210.,height_mm:297.}).unwrap();
+        e.activate_page(1);
+        e.select_object(Some(id),false);
+        let before=e.doc.clone();
+        e.transfer_selected_page(target,true);
+        assert!(e.doc.objects.iter().all(|o|o.id!=id));
         e.undo();
         assert_eq!(e.doc,before);
     }

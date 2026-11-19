@@ -22,7 +22,15 @@ Goal: fast, legally independent vector graphics editor for advertising, posters 
 
 See **[the 20-iteration development plan](ROADMAP_20_ITERATIONS.md)** for the ordered backlog I01–I20, acceptance requirements and version targets.
 
-## v0.17 — Professional Workspace (pending CI)
+## v0.18 Studio / Production (source implemented, automated QA)
+- Per-page guides, ruler creation, exact editing, smart snapping and nonprinting overlays.
+- Complete layer rename/stack/reorder/empty deletion; safe object layer and page transfers.
+- Direct vector glyphs for essential tools; Ctrl+K searchable command palette; page/z-order keyboard navigation.
+- True combined multipage PDF (RGB proof), independent pypdf verification on Win/Linux; CLI export-pdf-book.
+- Whole-publication page-attributed preflight, KDR persistence and undo/redo.
+- Production acceptance still requires manual review against real CDR projects and actual print equipment.
+
+## v0.17 — Professional Workspace (CI passed)
 - Multi-page KDR up to 64 independent pages with object/layer/style/clipping preservation, page switching, duplication and deletion.
 - Page tabs, page inspector, professional batch export dock, SVG/PDF RGB/PNG/JPEG per-page staging.
 - CLI page introspection/creation/duplication and automated whole-document export.

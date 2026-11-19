@@ -10,6 +10,10 @@ use opencorel_core::node_edit::{self,NodeAddress};
 mod node_interaction;
 mod device_tools;
 mod page_workspace;
+mod guide_tools;
+mod layer_tools;
+mod command_palette;
+mod toolbar_icons;
 mod pro_tools;
 use pro_tools::ProToolsState;
 mod boolean_commands;
@@ -86,6 +90,8 @@ struct Editor{
     creation_start:Option<(Point,u64)>,
     curve_start:Option<Point>,
     curve_draft:Option<u64>,
+    curve_outgoing:Option<Point>,
+    curve_drag_anchor:Option<Point>,
     active_layer:u64,
     pan:Vec2,
     undo:Vec<Document>,
@@ -96,6 +102,13 @@ struct Editor{
     snap_grid:bool,
     grid_mm:f32,
     show_rulers:bool,
+    show_guides:bool,
+    snap_guides:bool,
+    snap_objects:bool,
+    snap_page_edges:bool,
+    snap_tolerance_mm:f32,
+    new_guide_x:f32,
+    new_guide_y:f32,
     light_theme:bool,
     cursor_mm:Option<Point>,
     fill_cache:FillCache,
@@ -135,6 +148,9 @@ struct Editor{
     toolbox_expanded:bool,
     resize_drag:Option<(u64,ResizeCorner)>,
     object_filter:String,
+    show_command_palette:bool,
+    command_query:String,
+    command_focus:bool,
     pro_tools:ProToolsState,
     batch_format:opencorel_export::batch::PageExportFormat,
     batch_page_selection:Option<std::collections::HashSet<u64>>,
@@ -153,12 +169,17 @@ impl Default for Editor{
         Self{doc,selected:None,multi_selected:Vec::new(),tool:Tool::Select,file:"project.kdr".into(),
             text:"Новый текст".into(),status:"Экспериментальный прототип".into(),
             zoom:1.0,drag_start:None,creation_start:None,
-            curve_start:None,curve_draft:None,active_layer:1,pan:Vec2::ZERO,
+            curve_start:None,curve_draft:None,
+            curve_outgoing:None,curve_drag_anchor:None,
+            active_layer:1,pan:Vec2::ZERO,
             undo:Vec::new(),redo:Vec::new(),
             inspector_tab:InspectorTab::Objects,show_inspector:true,
             show_grid:false,snap_grid:false,
             grid_mm:10.0,
-            show_rulers:true,light_theme:false,cursor_mm:None,
+            show_rulers:true,show_guides:true,snap_guides:true,
+            snap_objects:true,snap_page_edges:true,snap_tolerance_mm:2.0,
+            new_guide_x:50.0,new_guide_y:50.0,
+            light_theme:false,cursor_mm:None,
             fill_cache:FillCache::default(),vector_cache:VectorCache::default(),
             raster_cache:RasterCache::default(),
             compound_cache:CompoundCache::default(),
@@ -180,7 +201,9 @@ impl Default for Editor{
             show_safe_area:false,safe_margin_mm:5.0,
             internal_clipboard:Vec::new(),paste_number:0,
             show_welcome:true,toolbox_expanded:false,resize_drag:None,
-            object_filter:String::new(),pro_tools:ProToolsState::default(),
+            object_filter:String::new(),show_command_palette:false,
+            command_query:String::new(),command_focus:false,
+            pro_tools:ProToolsState::default(),
             batch_format:opencorel_export::batch::PageExportFormat::Svg,
             batch_page_selection:None,property_aspect_locked:true,
             active_node:None,node_drag:None}
@@ -336,20 +359,24 @@ fn trim_history(history:&mut Vec<Document>) {
 }
 impl Editor{
     fn run_preflight(&mut self){
-        let issues=opencorel_core::preflight::check(&self.doc,
+        let issues=opencorel_core::preflight::check_book(&self.doc,
             opencorel_core::preflight::PreflightOptions{
                 minimum_image_dpi:self.minimum_image_dpi,
                 safe_margin_mm:self.safe_margin_mm,
             });
-        let warning_count=issues.iter().filter(|i|
+        let warning_count=issues.iter().filter(|(_,i)|
             i.severity!=opencorel_core::preflight::Severity::Notice).count();
-        self.preflight_lines=issues.iter().map(|issue|format!(
-            "{:?} [{}] {}{}",
+        let labels:std::collections::HashMap<_,_>=self.doc.pages()
+            .into_iter().map(|p|(p.id,p.name)).collect();
+        self.preflight_lines=issues.iter().map(|(page,issue)|format!(
+            "{} · {:?} [{}] {}{}",
+            labels.get(page).map(String::as_str).unwrap_or("Страница"),
             issue.severity,issue.code,
             issue.object_id.map(|id|format!("Объект #{id}: ")).unwrap_or_default(),
             issue.message
         )).collect();
-        self.status=format!("Проверка макета: замечаний {}, информационных {}",
+        self.status=format!("Проверка {} стр.: замечаний {}, информационных {}",
+            self.doc.pages().len(),
             warning_count,issues.len()-warning_count);
         self.show_preflight=true;
     }
@@ -548,12 +575,19 @@ impl Editor{
         Some(id)
     }
     fn curve_click(&mut self,p:Point){
+        self.curve_anchor(p,None);
+    }
+    /// Click = corner node; drag during creation = smooth node with a
+    /// mirrored incoming handle. The outgoing tangent is reused by the
+    /// following segment so the stroke is continuous without F10 repair.
+    fn curve_anchor(&mut self,p:Point,outgoing:Option<Point>){
         if !self.active_layer_editable(){
             self.status="Слой скрыт или заблокирован".into();return;
         }
         let Some(start)=self.curve_start else {
             self.curve_start=Some(p);
-            self.status="Начало кривой: укажите следующую точку".into();
+            self.curve_outgoing=outgoing;
+            self.status="Начало Безье: щёлкните следующий узел или перетащите мышь для касательных".into();
             return;
         };
         let previous=match self.curve_draft.and_then(|id|self.doc.objects.iter().find(|o|o.id==id)){
@@ -561,12 +595,19 @@ impl Editor{
                 segments.last().map(|seg|seg.end).unwrap_or(start),
             _=>start,
         };
-        let seg=CubicSegment{
-            control1:Point{x:previous.x+(p.x-previous.x)/3.0,y:previous.y+(p.y-previous.y)/3.0},
-            control2:Point{x:previous.x+2.0*(p.x-previous.x)/3.0,
-                           y:previous.y+2.0*(p.y-previous.y)/3.0},
-            end:p
+        let control1=if let Some(tangent)=self.curve_outgoing{
+            Point{x:previous.x+tangent.x,y:previous.y+tangent.y}
+        }else{
+            Point{x:previous.x+(p.x-previous.x)/3.0,
+                  y:previous.y+(p.y-previous.y)/3.0}
         };
+        let control2=if let Some(tangent)=outgoing{
+            Point{x:p.x-tangent.x,y:p.y-tangent.y}
+        }else{
+            Point{x:previous.x+2.0*(p.x-previous.x)/3.0,
+                  y:previous.y+2.0*(p.y-previous.y)/3.0}
+        };
+        let seg=CubicSegment{control1,control2,end:p};
         if let Some(id)=self.curve_draft{
             self.checkpoint();
             if let Some(obj)=self.doc.get_mut(id){
@@ -576,7 +617,8 @@ impl Editor{
             let style=Style{fill:"#000000".into(),stroke:"#202020".into(),stroke_width_mm:0.8};
             self.curve_draft=self.add_shape(Shape::Bezier{start,segments:vec![seg],closed:false},style);
         }
-        self.status="Точка добавлена; двойной щелчок завершает кривую".into();
+        self.curve_outgoing=outgoing;
+        self.status="Узел добавлен: протягивание создаёт плавные касательные; двойной щелчок завершает".into();
     }
     fn import_svg(&mut self){self.open();}
     fn save(&mut self){
@@ -755,10 +797,14 @@ impl Editor{
         }
     }
     fn snapped(&self,p:Point)->Point {
-        if self.snap_grid {
-            Point{x:(p.x/self.grid_mm).round()*self.grid_mm,
-                y:(p.y/self.grid_mm).round()*self.grid_mm}
-        }else{p}
+        let selected:HashSet<u64>=self.selection_ids().into_iter().collect();
+        self.doc.snap_to_targets(p,opencorel_core::SnapSettings{
+            guides:self.snap_guides,
+            page_edges:self.snap_page_edges,
+            objects:self.snap_objects,
+            grid:self.snap_grid,grid_mm:self.grid_mm,
+            tolerance_mm:self.snap_tolerance_mm,
+        },&selected)
     }
     fn draw_grid_rulers(&self,painter:&egui::Painter, page:&egui::Painter,
         v:View, area:Rect){
@@ -850,6 +896,7 @@ impl Editor{
                 // Cached SVG proof uses the same clip paths as PDF/raster output.
                 self.masked_canvas.paint(ctx,&page_painter,&self.doc,v.rect);
             }
+            self.paint_guides(&page_painter,v);
             if self.show_safe_area {
                 let margin=self.safe_margin_mm;
                 if margin>0.0 && self.doc.page.width_mm>2.0*margin &&
@@ -892,12 +939,25 @@ impl Editor{
             if self.tool==Tool::Nodes{
                 self.paint_node_handles(&page_painter,v);
             }
+            if let Some(anchor)=self.curve_drag_anchor{
+                if let Some(pos)=ctx.input(|i|i.pointer.latest_pos()){
+                    let shade=Color32::from_rgb(37,176,201);
+                    page_painter.line_segment([v.screen(anchor),pos],Stroke::new(1.5,shade));
+                    page_painter.circle_filled(v.screen(anchor),4.0,shade);
+                }
+            }
             if response.drag_started_by(egui::PointerButton::Primary){
                 if let Some(pos)=response.interact_pointer_pos(){
                     if v.rect.contains(pos){
                         let p=self.snapped(v.mm(pos));
                         match self.tool{
                             Tool::Nodes=>self.begin_node_drag(v,pos),
+                            Tool::Curve=>{
+                                let origin=ctx.input(|i|i.pointer.press_origin()).unwrap_or(pos);
+                                if v.rect.contains(origin){
+                                    self.curve_drag_anchor=Some(self.snapped(v.mm(origin)));
+                                }
+                            },
                             Tool::Select=>{
                                 if let Some((id,corner))=self.corner_at(v,pos){
                                     self.checkpoint();
@@ -936,7 +996,10 @@ impl Editor{
             if response.dragged_by(egui::PointerButton::Primary){
                 if let Some(pos)=response.interact_pointer_pos(){
                     let now=self.snapped(v.mm(pos));
-                    if self.node_drag.is_some(){
+                    if let Some(anchor)=self.curve_drag_anchor{
+                        self.status=format!("Касательная Безье: X {:.1}, Y {:.1} мм",
+                            v.mm(pos).x-anchor.x,v.mm(pos).y-anchor.y);
+                    }else if self.node_drag.is_some(){
                         self.drag_node_to(now);
                     }else if let Some((id,corner))=self.resize_drag{
                         self.resize_from_corner(id,corner,now,
@@ -976,6 +1039,18 @@ impl Editor{
                 }
             }
             if response.drag_stopped_by(egui::PointerButton::Primary){
+                if let Some(anchor)=self.curve_drag_anchor.take(){
+                    let pointer=response.interact_pointer_pos().or_else(||
+                        ctx.input(|i|i.pointer.latest_pos()));
+                    if let Some(end)=pointer{
+                        let raw=v.mm(end);
+                        let delta=Point{x:raw.x-anchor.x,y:raw.y-anchor.y};
+                        let tangent=if delta.x.hypot(delta.y)>0.15{
+                            Some(delta)
+                        }else{None};
+                        self.curve_anchor(anchor,tangent);
+                    }
+                }
                 self.drag_start=None;self.creation_start=None;
                 self.resize_drag=None;self.node_drag=None;
             }
@@ -987,11 +1062,13 @@ impl Editor{
                 }
                 if self.tool==Tool::Curve{
                     self.curve_start=None;self.curve_draft=None;
+                    self.curve_outgoing=None;self.curve_drag_anchor=None;
                     self.tool=Tool::Select;self.status="Кривая завершена".into();
                 }
             }
             if response.clicked() && !response.double_clicked(){
                 if let Some(pos)=response.interact_pointer_pos(){
+                    if self.try_create_guide_from_ruler(pos,working,v){return;}
                     if v.rect.contains(pos){
                         let p=self.snapped(v.mm(pos));
                         let shape=match self.tool{
@@ -1060,6 +1137,22 @@ impl eframe::App for Editor{
             if ctrl&&ctx.input(|i|i.key_pressed(egui::Key::C)){self.copy_selection();}
             if ctrl&&ctx.input(|i|i.key_pressed(egui::Key::X)){self.cut_selection();}
             if ctrl&&ctx.input(|i|i.key_pressed(egui::Key::V)){self.paste_selection();}
+            // Familiar page and z-order navigation used by vector editors.
+            let page_up=ctx.input(|i|i.key_pressed(egui::Key::PageUp));
+            let page_down=ctx.input(|i|i.key_pressed(egui::Key::PageDown));
+            if page_up||page_down{
+                if ctrl {
+                    let pages=self.doc.pages();
+                    let index=self.doc.page_index();
+                    if page_up && index>0{self.activate_page(pages[index-1].id);}
+                    if page_down && index+1<pages.len(){
+                        self.activate_page(pages[index+1].id);
+                    }
+                }else{
+                    self.z_step(page_up);
+                }
+            }
+
             if !ctrl {
                 let step=if ctx.input(|i|i.modifiers.shift){10.0}else{1.0};
                 let left=ctx.input(|i|i.key_pressed(egui::Key::ArrowLeft));
@@ -1076,6 +1169,11 @@ impl eframe::App for Editor{
                 }
             }
         }
+        if ctx.input(|i|i.modifiers.command&&i.key_pressed(egui::Key::K)){
+            self.show_command_palette=!self.show_command_palette;
+            self.command_focus=self.show_command_palette;
+            if self.show_command_palette{self.command_query.clear();}
+        }
         if ctx.input(|i|i.key_pressed(egui::Key::F1)){self.show_welcome=true;}
         if !ctx.wants_keyboard_input() &&
             ctx.input(|i|i.key_pressed(egui::Key::F9)){
@@ -1086,7 +1184,9 @@ impl eframe::App for Editor{
             else{self.delete_selection();}
         }
         if ctx.input(|i|i.key_pressed(egui::Key::Escape)){
-            self.curve_start=None;self.curve_draft=None;self.tool=Tool::Select;
+            self.curve_start=None;self.curve_draft=None;
+            self.curve_outgoing=None;self.curve_drag_anchor=None;
+            self.tool=Tool::Select;
             self.resize_drag=None;self.node_drag=None;self.active_node=None;
         }
         if ctx.style().visuals.dark_mode==self.light_theme {
@@ -1117,6 +1217,7 @@ impl eframe::App for Editor{
         self.workspace_footer(ctx);
         self.canvas(ctx);
         self.welcome_window(ctx);
+        self.command_palette(ctx);
         if self.show_preflight{
             egui::Window::new("Проверка макета")
                 .open(&mut self.show_preflight)
@@ -1214,6 +1315,25 @@ mod tests {
         assert_ne!(e.doc.objects[0].shape,before.objects[0].shape);
         assert_ne!(e.doc.objects.last().unwrap().shape,before.objects.last().unwrap().shape);
         e.doc.validate().unwrap();
+    }
+    #[test]
+    fn bezier_creation_drag_produces_smooth_cubic_handles(){
+        let mut e=Editor::default();
+        e.change_tool(Tool::Curve);
+        e.curve_anchor(Point{x:10.0,y:10.0},Some(Point{x:10.0,y:0.0}));
+        e.curve_anchor(Point{x:80.0,y:10.0},Some(Point{x:0.0,y:10.0}));
+        let id=e.curve_draft.unwrap();
+        let Shape::Bezier{segments,..}=&e.doc.get(id).unwrap().shape else{panic!()};
+        assert_eq!(segments[0].control1,Point{x:20.0,y:10.0});
+        assert_eq!(segments[0].control2,Point{x:80.0,y:0.0});
+        assert_eq!(segments[0].end,Point{x:80.0,y:10.0});
+        e.curve_click(Point{x:100.0,y:60.0});
+        let Shape::Bezier{segments,..}=&e.doc.get(id).unwrap().shape else{panic!()};
+        assert_eq!(segments[1].control1,Point{x:80.0,y:20.0});
+        e.doc.validate().unwrap();
+        e.undo();
+        let Shape::Bezier{segments,..}=&e.doc.get(id).unwrap().shape else{panic!()};
+        assert_eq!(segments.len(),1);
     }
     #[test]
     fn polygon_has_six_vertices(){

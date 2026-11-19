@@ -10,7 +10,7 @@ const PRIMARY:[Tool;4]=[Tool::Select,Tool::Nodes,Tool::Text,Tool::Curve];
 const SHAPES:[Tool;4]=[Tool::Rect,Tool::Ellipse,Tool::Line,Tool::Polygon];
 
 #[derive(Clone,Copy)]
-enum Glyph{Select,Nodes,Text,Curve,Shapes,Image,Check,More,Help}
+enum Glyph{Select,Nodes,Text,Curve,Rect,Ellipse,Line,Polygon,Shapes,Image,Check,More,Help}
 fn is_shape(tool:Tool)->bool{SHAPES.contains(&tool)}
 fn shortcut(tool:Tool)->&'static str{
     match tool{
@@ -66,6 +66,28 @@ fn paint_icon(ui:&egui::Ui,rect:Rect,glyph:Glyph,expanded:bool,active:bool){
             p.circle_filled(at(-10.0,7.0),2.4,secondary);
             p.circle_filled(at(10.0,7.0),2.4,secondary);
         }
+        Glyph::Rect=>{
+            for (a,b) in [
+                ((-9.0,-7.0),(9.0,-7.0)),((9.0,-7.0),(9.0,7.0)),
+                ((9.0,7.0),(-9.0,7.0)),((-9.0,7.0),(-9.0,-7.0))
+            ]{line(a,b,tint);}
+        }
+        Glyph::Ellipse=>{
+            p.circle_stroke(center,9.0,Stroke::new(1.8,tint));
+        }
+        Glyph::Line=>{
+            line((-10.0,8.0),(10.0,-8.0),tint);
+            p.circle_filled(at(-10.0,8.0),2.6,secondary);
+            p.circle_filled(at(10.0,-8.0),2.6,secondary);
+        }
+        Glyph::Polygon=>{
+            let vertices:[(f32,f32);6]=[
+                (0.0,-10.0),(8.7,-5.0),(8.7,5.0),
+                (0.0,10.0),(-8.7,5.0),(-8.7,-5.0)];
+            for i in 0..6{
+                line(vertices[i],vertices[(i+1)%6],tint);
+            }
+        }
         Glyph::Shapes=>{
             for (a,b) in [
                 ((-10.0,-9.0),(1.0,-9.0)),((1.0,-9.0),(1.0,2.0)),
@@ -109,7 +131,8 @@ impl Editor{
         let glyph=match tool{
             Tool::Select=>Glyph::Select,Tool::Nodes=>Glyph::Nodes,
             Tool::Text=>Glyph::Text,Tool::Curve=>Glyph::Curve,
-            _=>Glyph::Shapes,
+            Tool::Rect=>Glyph::Rect,Tool::Ellipse=>Glyph::Ellipse,
+            Tool::Line=>Glyph::Line,Tool::Polygon=>Glyph::Polygon,
         };
         if is_active{
             ui.painter().rect_filled(
@@ -171,36 +194,21 @@ impl Editor{
                                 self.rail_button(ui,tool,w,expanded);
                             }
                             ui.separator();
-                            // Less-used primitives are deliberately hidden in
-                            // one flyout; the current shape remains discoverable.
-                            let shape_label=if expanded{"         Фигуры ▾"}else{"           "};
-                            let shapes=ui.menu_button(shape_label,|ui|{
-                                ui.label(egui::RichText::new("БАЗОВЫЕ ФИГУРЫ").strong().small());
-                                for tool in SHAPES{
-                                    let selected=self.tool==tool;
-                                    if ui.selectable_label(selected,
-                                        format!("{}   {}",productivity::tool_label(tool),shortcut(tool)))
-                                        .on_hover_text(productivity::tool_hint(tool)).clicked(){
-                                        self.change_tool(tool);
-                                        ui.close_menu();
-                                    }
-                                }
-                                ui.separator();
-                                ui.label("Протяните мышью по листу.");
-                            }).response.on_hover_text(
-                                "Фигуры: прямоугольник F6, эллипс F7, линия L, шестиугольник P"
-                            );
-                            paint_icon(ui,shapes.rect,Glyph::Shapes,expanded,is_shape(self.tool));
-                            if is_shape(self.tool){
-                                // A narrow turquoise marker makes the active
-                                // flyout visible without a permanent button row.
-                                let mark=Rect::from_min_size(
-                                    shapes.rect.left_top()+Vec2::new(-2.0,1.0),
-                                    Vec2::new(2.0,(shapes.rect.height()-2.0).max(0.0))
-                                );
-                                ui.painter().rect_filled(mark,1.0,
-                                    Color32::from_rgb(32,201,170));
+                            ui.label(egui::RichText::new(
+                                if expanded{"ФИГУРЫ"}else{"—"}
+                            ).small());
+                            // Corel-style direct access: each fundamental
+                            // drawing tool has a visible icon and shortcut.
+                            for tool in SHAPES{
+                                self.rail_button(ui,tool,w,expanded);
                             }
+                            let shape_menu=ui.menu_button(
+                                if expanded{"       19 ФИГУР ▾"}else{"          "},
+                                |ui|self.procedural_menu(ui)
+                            ).response.on_hover_text(
+                                "19 редактируемых фигур: звезда, спираль, шестерня, сердце, кольцо..."
+                            );
+                            paint_icon(ui,shape_menu.rect,Glyph::Shapes,expanded,is_shape(self.tool));
                             if self.rail_action(ui,Glyph::Image,"Изображение",
                                 "Импорт фотографии или логотипа (PNG/JPEG/WebP и другие)",
                                 w,expanded){

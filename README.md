@@ -4,6 +4,15 @@
 
 **Alpha development preview — NOT a fully compatible replacement for CorelDRAW.** Designed for posters, maps and large advertising sheets, currently targeting Windows 10/11 x64 and Linux x64. Windows 7 is not tested.
 
+## v0.18 Studio / Production Mega Update
+
+- **Persistent per-page guides** and intelligent snapping to guides, page edges/centers, object bounds/centers, and configurable grid. Create guides by clicking rulers, adjust exact coordinates or clear them in the Page inspector. Guides are never exported.
+- **Professional layer/object editing:** rename, reorder, remove empty layers; move complete grouped selections between layers or pages with validation and undo; step z-order by one position; select layer contents.
+- **Export an entire multi-page publication as one real PDF**, preserving per-page resources and vector content. Independent pypdf validation runs in Windows/Linux CI. This remains RGB proofing (not CMYK/PDF/X).
+- **Visible direct icon tools**, an expanded procedural shape flyout, searchable Ctrl+K command palette with 35+ live actions, and Ctrl+PageUp/PageDown navigation.
+- **Publication-wide preflight** with page-specific issue labels. CLI command: `export-pdf-book`.
+- All supported workspace operations retain KDR persistence and undo. No guarantee of full CDR edit/export, Windows 7 support, ICC/CMYK/PDF/X or connected device certification.
+
 - v0.10: **Boolean operations** for two selected, editable closed filled figures: union, A minus B, intersection, and XOR. Results remain native compound KDR contours, including disconnected shapes and holes. Uses bounded 0.1mm curve flattening, refuses unsupported/empty/error cases without changing the source, and offers Undo.
 - v0.9: interactive **F10 node-editing tool** for polylines, Bézier curves and individual contours: mouse dragging of anchors and handles, double-click to insert nodes, Del to remove anchors, arrow-key nudging; undo and native KDR persistence.
 - [20-iteration engineering plan](docs/ROADMAP_20_ITERATIONS.md) defines ordered work, quality gates and transparent progress.

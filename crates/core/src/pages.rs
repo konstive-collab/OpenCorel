@@ -4,6 +4,7 @@
 use crate::{Document,Page,Object,Layer,ClipLink,Shape,Point,CubicSegment,Contour,
     default_layers,default_next_layer_id,valid_xml_text};
 use crate::appearance::Appearance;
+use crate::guides::Guide;
 use serde::{Serialize,Deserialize};
 use std::collections::{BTreeMap,HashSet};
 pub fn initial_page_id()->u64{1}
@@ -21,12 +22,15 @@ pub struct PageContent{
     pub next_layer_id:u64,
     pub clip_links:Vec<ClipLink>,
     pub appearances:BTreeMap<u64,Appearance>,
+    #[serde(default,skip_serializing_if="Vec::is_empty")]
+    pub guides:Vec<Guide>,
 }
 impl Document{
     fn capture_page(&self)->PageContent{
         PageContent{page:self.page.clone(),objects:self.objects.clone(),
             layers:self.layers.clone(),next_layer_id:self.next_layer_id,
-            clip_links:self.clip_links.clone(),appearances:self.appearances.clone()}
+            clip_links:self.clip_links.clone(),appearances:self.appearances.clone(),
+            guides:self.guides.clone()}
     }
     fn restore_page(&mut self,state:PageContent){
         self.page=state.page;
@@ -35,6 +39,7 @@ impl Document{
         self.next_layer_id=state.next_layer_id;
         self.clip_links=state.clip_links;
         self.appearances=state.appearances;
+        self.guides=state.guides;
     }
     fn initialize_page_tabs(&mut self){
         if self.page_tabs.is_empty(){
@@ -72,6 +77,7 @@ impl Document{
             next_layer_id:std::mem::replace(&mut self.next_layer_id,target.next_layer_id),
             clip_links:std::mem::replace(&mut self.clip_links,target.clip_links),
             appearances:std::mem::replace(&mut self.appearances,target.appearances),
+            guides:std::mem::replace(&mut self.guides,target.guides),
         };
         self.inactive_pages.insert(self.active_page_id,previous);
         self.active_page_id=id;
@@ -94,6 +100,7 @@ impl Document{
             next_layer_id:std::mem::replace(&mut self.next_layer_id,default_next_layer_id()),
             clip_links:std::mem::take(&mut self.clip_links),
             appearances:std::mem::take(&mut self.appearances),
+            guides:std::mem::take(&mut self.guides),
         };
         self.inactive_pages.insert(self.active_page_id,previous);
         self.page_tabs.push(PageTab{id,name:format!("Страница {}",self.page_tabs.len()+1)});
@@ -140,6 +147,7 @@ impl Document{
         }).collect();
         self.appearances=original.appearances.into_iter().map(|(key,value)|
             (ids[&key],value)).collect();
+        self.guides=original.guides;
         if let Some(tab)=self.page_tabs.iter_mut().find(|p|p.id==id){
             tab.name=format!("{source_name} — копия");
         }
@@ -222,6 +230,8 @@ impl Document{
                     +o.text_format.family.len()+geometry
             }).sum::<usize>();
         objects+self.page_tabs.iter().map(|p|p.name.len()).sum::<usize>()
+            +self.guides.len()*std::mem::size_of::<Guide>()
+            +self.inactive_pages.values().map(|p|p.guides.len()*std::mem::size_of::<Guide>()).sum::<usize>()
     }
     pub(crate) fn validate_all_pages(&self)->Result<(),String>{
         if self.next_page_id<=self.active_page_id||self.next_page_id==u64::MAX{

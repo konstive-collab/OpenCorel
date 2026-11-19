@@ -1,6 +1,7 @@
 //! Corel-style, independently implemented workspace layout.
 //! Uses familiar panel positions and workflows but no proprietary assets.
-use super::{color, productivity, Editor, Tool};
+use super::{color, productivity, toolbar_icons, Editor, Tool};
+use toolbar_icons::Icon;
 use eframe::egui::{self, Color32, RichText, Vec2};
 use opencorel_core::{Bounds, Shape, Alignment, Distribution, TextAlign, valid_paint};
 use std::collections::HashSet;
@@ -19,7 +20,10 @@ const SWATCHES: [&str; 27] = [
 impl Editor {
     pub(super) fn change_tool(&mut self, next: Tool) {
         self.tool=next;
-        if next!=Tool::Curve { self.curve_start=None; self.curve_draft=None; }
+        if next!=Tool::Curve {
+            self.curve_start=None;self.curve_draft=None;
+            self.curve_outgoing=None;self.curve_drag_anchor=None;
+        }
         self.drag_start=None;
         self.creation_start=None;
         self.resize_drag=None;self.node_drag=None;
@@ -47,6 +51,8 @@ impl Editor {
         self.zoom=1.0;
         self.curve_start=None;
         self.curve_draft=None;
+        self.curve_outgoing=None;
+        self.curve_drag_anchor=None;
         self.file="untitled.kdr".into();
         self.status="Создан новый документ. Выберите инструмент слева или нажмите F1 для помощи.".into();
     }
@@ -108,6 +114,14 @@ impl Editor {
                     ui.checkbox(&mut self.show_grid,"Сетка");
                     ui.checkbox(&mut self.snap_grid,"Привязка к сетке");
                     ui.checkbox(&mut self.show_rulers,"Линейки");
+                    ui.checkbox(&mut self.show_guides,"Направляющие");
+                    ui.checkbox(&mut self.snap_guides,"К направляющим");
+                    ui.checkbox(&mut self.snap_objects,"К объектам");
+                    ui.checkbox(&mut self.snap_page_edges,"К краям страницы");
+                    if ui.button("Управление направляющими").clicked(){
+                        self.inspector_tab=InspectorTab::Page;
+                        self.show_inspector=true;ui.close_menu();
+                    }
                     ui.checkbox(&mut self.light_theme,"Светлая тема");
                 });
                 ui.menu_button("Макет",|ui|{
@@ -172,6 +186,8 @@ impl Editor {
                     ui.separator();
                     if ui.button("На передний план").clicked(){self.reorder_selection(true);ui.close_menu();}
                     if ui.button("На задний план").clicked(){self.reorder_selection(false);ui.close_menu();}
+                    if ui.button("Поднять на один уровень").clicked(){self.z_step(true);ui.close_menu();}
+                    if ui.button("Опустить на один уровень").clicked(){self.z_step(false);ui.close_menu();}
                     if ui.button("Дублировать").clicked(){self.duplicate_preserving_styles();ui.close_menu();}
                     ui.separator();
                     if ui.button("Повернуть вправо на 90°").clicked(){self.rotate_selection(opencorel_core::transform::QuarterTurn::Clockwise);ui.close_menu();}
@@ -313,6 +329,11 @@ impl Editor {
                     ui.small("Цвета градиента: #RRGGBB. Ctrl+Z — отмена.");
                 });
                 ui.menu_button("Окно",|ui|{
+                    if ui.button("Поиск команды     Ctrl+K").clicked(){
+                        self.show_command_palette=true;
+                        self.command_focus=true;
+                        ui.close_menu();
+                    }
                     ui.checkbox(&mut self.show_inspector,"Показывать панель справа   F9");
                     ui.separator();
                     if ui.selectable_label(self.inspector_tab==InspectorTab::Objects,"Объекты и слои").clicked(){
@@ -342,15 +363,27 @@ impl Editor {
         });
         egui::TopBottomPanel::top("main_toolbar").exact_height(44.0).show(ctx,|ui|{
             ui.horizontal(|ui|{
-                if ui.button("Новый").on_hover_text("Новый пустой документ, Ctrl+N").clicked(){self.new_document();}
-                if ui.button("Открыть").on_hover_text("Открыть KDR, SVG, CDR и другие файлы, Ctrl+O").clicked(){self.open_picker();}
-                if ui.button("Сохранить").on_hover_text("Сохранить .kdr, Ctrl+S").clicked(){self.save();}
+                if toolbar_icons::icon_button(ui,Icon::New,"Новый документ · Ctrl+N",true){
+                    self.new_document();
+                }
+                if toolbar_icons::icon_button(ui,Icon::Open,"Открыть KDR/SVG/CDR · Ctrl+O",true){
+                    self.open_picker();
+                }
+                if toolbar_icons::icon_button(ui,Icon::Save,"Сохранить KDR · Ctrl+S",true){
+                    self.save();
+                }
                 ui.separator();
-                if ui.add_enabled(!self.undo.is_empty(),egui::Button::new("↶")).on_hover_text("Отменить Ctrl+Z").clicked(){self.undo();}
-                if ui.add_enabled(!self.redo.is_empty(),egui::Button::new("↷")).on_hover_text("Повторить Ctrl+Y").clicked(){self.redo();}
+                if toolbar_icons::icon_button(ui,Icon::Undo,"Отменить · Ctrl+Z",!self.undo.is_empty()){
+                    self.undo();
+                }
+                if toolbar_icons::icon_button(ui,Icon::Redo,"Повторить · Ctrl+Y",!self.redo.is_empty()){
+                    self.redo();
+                }
                 ui.separator();
-                if ui.button("Фото / логотип").on_hover_text("Добавить PNG, JPEG, WebP и другие изображения").clicked(){self.place_bitmap_picker();}
-                if ui.button("Пакетный экспорт").clicked(){
+                if toolbar_icons::icon_button(ui,Icon::Image,"Поместить изображение",true){
+                    self.place_bitmap_picker();
+                }
+                if toolbar_icons::icon_button(ui,Icon::Export,"Центр экспорта",true){
                     self.inspector_tab=InspectorTab::Export;self.show_inspector=true;
                 }
                 ui.menu_button("Экспорт",|ui|{
@@ -360,12 +393,23 @@ impl Editor {
                     if ui.button("JPEG — для согласования...").clicked(){self.export_dialog("jpg");ui.close_menu();}
                 });
                 ui.separator();
-                if ui.small_button("−").on_hover_text("Уменьшить масштаб").clicked(){self.zoom=(self.zoom/1.25).max(0.2);}
+                if toolbar_icons::icon_button(ui,Icon::ZoomOut,"Уменьшить масштаб",true){
+                    self.zoom=(self.zoom/1.25).max(0.2);
+                }
                 ui.label(format!("{:.0}%",self.zoom*100.0));
-                if ui.small_button("+").on_hover_text("Увеличить масштаб").clicked(){self.zoom=(self.zoom*1.25).min(8.0);}
-                if ui.button("Вписать").on_hover_text("Показать лист целиком, F4").clicked(){self.fit_page();}
+                if toolbar_icons::icon_button(ui,Icon::ZoomIn,"Увеличить масштаб",true){
+                    self.zoom=(self.zoom*1.25).min(8.0);
+                }
+                if toolbar_icons::icon_button(ui,Icon::Fit,"Показать весь лист · F4",true){
+                    self.fit_page();
+                }
                 ui.separator();
-                if ui.button("? Помощь").on_hover_text("Обучение и сочетания клавиш, F1").clicked(){self.show_welcome=true;}
+                if toolbar_icons::icon_button(ui,Icon::Search,"Поиск команд · Ctrl+K",true){
+                    self.show_command_palette=true;self.command_focus=true;
+                }
+                if toolbar_icons::icon_button(ui,Icon::Help,"Справка и горячие клавиши · F1",true){
+                    self.show_welcome=true;
+                }
             });
         });
         egui::TopBottomPanel::top("property_bar").exact_height(39.0).show(ctx,|ui|{
@@ -554,6 +598,7 @@ impl Editor {
                 }
             });
         }
+        self.layer_actions(ui);
         ui.separator();
         ui.horizontal(|ui|{
             ui.heading("ОБЪЕКТЫ");
@@ -625,7 +670,6 @@ impl Editor {
                         let shift=ui.input(|i|i.modifiers.shift);
                         self.select_object(Some(id),shift);
                         self.active_layer=layer_id;
-                        self.inspector_tab=InspectorTab::Properties;
                     }
                 }
             });
@@ -1204,6 +1248,10 @@ impl Editor {
                 .speed(0.5).range(0.0..=100.0));
         });
         ui.label("Оранжевая рамка — только экранная подсказка, в файл не выводится.");
+        ui.separator();
+        ui.collapsing("Направляющие / интеллектуальные привязки",|ui|{
+            self.guide_inspector(ui);
+        });
         ui.separator();
         ui.heading("Предпечатная проверка");
         ui.horizontal(|ui|{
