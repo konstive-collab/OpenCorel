@@ -65,8 +65,15 @@ impl Document{
         }
         let target=self.inactive_pages.remove(&id)
             .ok_or("Missing page content")?;
-        self.inactive_pages.insert(self.active_page_id,self.capture_page());
-        self.restore_page(target);
+        let previous=PageContent{
+            page:std::mem::replace(&mut self.page,target.page),
+            objects:std::mem::replace(&mut self.objects,target.objects),
+            layers:std::mem::replace(&mut self.layers,target.layers),
+            next_layer_id:std::mem::replace(&mut self.next_layer_id,target.next_layer_id),
+            clip_links:std::mem::replace(&mut self.clip_links,target.clip_links),
+            appearances:std::mem::replace(&mut self.appearances,target.appearances),
+        };
+        self.inactive_pages.insert(self.active_page_id,previous);
         self.active_page_id=id;
         Ok(())
     }
@@ -80,12 +87,17 @@ impl Document{
         if self.next_page_id==u64::MAX{return Err("Page identifier limit reached".into());}
         let id=self.next_page_id;
         self.next_page_id+=1;
-        self.inactive_pages.insert(self.active_page_id,self.capture_page());
+        let previous=PageContent{
+            page:std::mem::replace(&mut self.page,size),
+            objects:std::mem::take(&mut self.objects),
+            layers:std::mem::replace(&mut self.layers,default_layers()),
+            next_layer_id:std::mem::replace(&mut self.next_layer_id,default_next_layer_id()),
+            clip_links:std::mem::take(&mut self.clip_links),
+            appearances:std::mem::take(&mut self.appearances),
+        };
+        self.inactive_pages.insert(self.active_page_id,previous);
         self.page_tabs.push(PageTab{id,name:format!("Страница {}",self.page_tabs.len()+1)});
         self.active_page_id=id;
-        self.restore_page(PageContent{page:size,objects:Vec::new(),layers:default_layers(),
-            next_layer_id:default_next_layer_id(),clip_links:Vec::new(),
-            appearances:BTreeMap::new()});
         Ok(id)
     }
     /// Duplicate the current page with fresh object/group IDs and valid
@@ -132,6 +144,17 @@ impl Document{
             tab.name=format!("{source_name} — копия");
         }
         Ok(id)
+    }
+    /// Reorder pages while keeping the active sheet and every layer intact.
+    pub fn move_page(&mut self,id:u64,to_index:usize)->Result<(),String>{
+        self.initialize_page_tabs();
+        if to_index>=self.page_tabs.len(){return Err("Invalid target page position".into());}
+        let from=self.page_tabs.iter().position(|tab|tab.id==id)
+            .ok_or("Unknown page")?;
+        if from==to_index{return Ok(());}
+        let tab=self.page_tabs.remove(from);
+        self.page_tabs.insert(to_index,tab);
+        Ok(())
     }
     pub fn rename_page(&mut self,id:u64,name:&str)->Result<(),String>{
         if name.is_empty()||name.len()>120||!valid_xml_text(name){
@@ -230,12 +253,13 @@ impl Document{
                     return Err("Duplicate object identifier across pages".into());
                 }
             }
-            let mut isolated=self.clone();
+            // Validate only the target page, never cloning every other page
+            // on each call (critical for large posters and 64-page projects).
+            let mut isolated=Document::default();
+            isolated.name=self.name.clone();
+            isolated.schema_version=self.schema_version;
+            isolated.next_id=self.next_id;
             isolated.restore_page(state.clone());
-            isolated.page_tabs.clear();
-            isolated.inactive_pages.clear();
-            isolated.active_page_id=1;
-            isolated.next_page_id=2;
             isolated.validate().map_err(|e|format!("Invalid page #{id}: {e}"))?;
         }
         Ok(())
@@ -283,6 +307,19 @@ mod tests{
         d.validate().unwrap();
         d.switch_page(1).unwrap();
         assert_eq!(d.get(a).unwrap().id,a);
+    }
+    #[test] fn page_order_is_persistent_and_does_not_change_geometry(){
+        let mut d=Document::default();
+        let first=d.add(Shape::Rectangle{x:1.,y:1.,w:10.,h:10.},Style::default());
+        let second=d.add_page(Page{width_mm:300.,height_mm:200.}).unwrap();
+        let other=d.add(Shape::Ellipse{x:5.,y:5.,w:20.,h:20.},Style::default());
+        d.move_page(second,0).unwrap();
+        assert_eq!(d.pages()[0].id,second);
+        d.switch_page(1).unwrap();
+        assert_eq!(d.objects[0].id,first);
+        d.switch_page(second).unwrap();
+        assert_eq!(d.objects[0].id,other);
+        d.validate().unwrap();
     }
     #[test] fn deleting_page_preserves_last_page(){
         let mut d=Document::default();
