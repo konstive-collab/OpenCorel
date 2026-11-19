@@ -6,7 +6,7 @@ use opencorel_core::{Bounds, Shape, Alignment, Distribution, TextAlign, valid_pa
 use std::collections::HashSet;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum InspectorTab { Objects, Properties, Page }
+pub(super) enum InspectorTab { Objects, Properties, Page, Export }
 
 const SWATCHES: [&str; 27] = [
     "#FFFFFF", "#E8E8E8", "#C0C0C0", "#808080", "#333333", "#000000",
@@ -33,6 +33,7 @@ impl Editor {
     pub(super) fn new_document(&mut self) {
         self.checkpoint();
         self.doc=Default::default();
+        self.batch_page_selection=None;
         self.active_node=None;self.node_drag=None;
         self.fill_cache.entries.clear();
         self.vector_cache.clear();
@@ -81,9 +82,14 @@ impl Editor {
                     });
                     if ui.button("Экспорт PNG...").clicked(){self.export_dialog("png");ui.close_menu();}
                     if ui.button("Экспорт JPEG...").clicked(){self.export_dialog("jpg");ui.close_menu();}
+                    if ui.button("Пакетный экспорт всех страниц...").clicked(){
+                        self.inspector_tab=InspectorTab::Export;
+                        self.show_inspector=true;ui.close_menu();
+                    }
                     ui.separator();
                     if ui.button("Проверка макета...").clicked(){self.run_preflight();ui.close_menu();}
                 });
+                ui.menu_button("Страницы",|ui|self.page_menu(ui));
                 ui.menu_button("Оборудование",|ui|self.device_menu(ui));
                 ui.menu_button("Правка",|ui|{
                     if ui.add_enabled(!self.undo.is_empty(),egui::Button::new("Отменить      Ctrl+Z")).clicked(){self.undo();ui.close_menu();}
@@ -318,6 +324,9 @@ impl Editor {
                     if ui.selectable_label(self.inspector_tab==InspectorTab::Page,"Страница").clicked(){
                         self.inspector_tab=InspectorTab::Page;self.show_inspector=true;ui.close_menu();
                     }
+                    if ui.selectable_label(self.inspector_tab==InspectorTab::Export,"Центр экспорта").clicked(){
+                        self.inspector_tab=InspectorTab::Export;self.show_inspector=true;ui.close_menu();
+                    }
                 });
                 ui.menu_button("Справка",|ui|{
                     if ui.button("Начало работы и горячие клавиши — F1").clicked(){
@@ -341,6 +350,9 @@ impl Editor {
                 if ui.add_enabled(!self.redo.is_empty(),egui::Button::new("↷")).on_hover_text("Повторить Ctrl+Y").clicked(){self.redo();}
                 ui.separator();
                 if ui.button("Фото / логотип").on_hover_text("Добавить PNG, JPEG, WebP и другие изображения").clicked(){self.place_bitmap_picker();}
+                if ui.button("Пакетный экспорт").clicked(){
+                    self.inspector_tab=InspectorTab::Export;self.show_inspector=true;
+                }
                 ui.menu_button("Экспорт",|ui|{
                     if ui.button("SVG — редактируемый обмен...").clicked(){self.export_dialog("svg");ui.close_menu();}
                     if ui.button("PDF — проверочный RGB...").clicked(){self.export_dialog("pdf");ui.close_menu();}
@@ -364,8 +376,37 @@ impl Editor {
                 ui.separator();
                 if let Some(bounds)=self.selection_bounds(){
                     ui.label(format!("Выделено: {}",self.selection_ids().len()));
-                    ui.label(format!("X {:.1}  Y {:.1}  Ш {:.1}  В {:.1} мм",
-                        bounds.x,bounds.y,bounds.w,bounds.h));
+                    let (mut x,mut y,mut w,mut h)=(bounds.x,bounds.y,bounds.w,bounds.h);
+                    ui.label("X");
+                    let x_changed=ui.add(egui::DragValue::new(&mut x).speed(0.5)
+                        .range(-100_000.0..=100_000.0).suffix(" мм")).changed();
+                    ui.label("Y");
+                    let y_changed=ui.add(egui::DragValue::new(&mut y).speed(0.5)
+                        .range(-100_000.0..=100_000.0).suffix(" мм")).changed();
+                    if x_changed||y_changed{self.set_selection_position(x,y);}
+                    let editable_single=self.selection_ids().len()==1
+                        && self.selected.and_then(|id|self.doc.get(id))
+                        .is_some_and(|obj|opencorel_core::transform::resizable(&obj.shape));
+                    if editable_single{
+                        ui.separator();
+                        ui.label("Ш");
+                        let changed_w=ui.add(egui::DragValue::new(&mut w).speed(0.5)
+                            .range(0.1..=100_000.0).suffix(" мм")).changed();
+                        ui.label("В");
+                        let changed_h=ui.add(egui::DragValue::new(&mut h).speed(0.5)
+                            .range(0.1..=100_000.0).suffix(" мм")).changed();
+                        ui.checkbox(&mut self.property_aspect_locked,"🔒")
+                            .on_hover_text("Сохранять пропорции при изменении размера");
+                        if changed_w||changed_h{
+                            if self.property_aspect_locked && bounds.w>0.001 && bounds.h>0.001{
+                                if changed_w&&!changed_h{h=bounds.h*w/bounds.w;}
+                                if changed_h&&!changed_w{w=bounds.w*h/bounds.h;}
+                            }
+                            self.resize_single(w,h);
+                        }
+                    }else{
+                        ui.label(format!("Ш {:.1} · В {:.1} мм",bounds.w,bounds.h));
+                    }
                     ui.separator();
                     if self.selection_ids().len()==2{
                         if ui.small_button("Создать маску").on_hover_text("Первый выбранный объект — контур; второй — содержимое").clicked(){
@@ -400,7 +441,8 @@ impl Editor {
                         self.delete_selection();
                     }
                 }else{
-                    ui.label(format!("Лист {:.0} × {:.0} мм",
+                    ui.label(format!("Лист {}/{} · {:.0} × {:.0} мм",
+                    self.doc.page_index()+1,self.doc.pages().len(),
                         self.doc.page.width_mm,self.doc.page.height_mm));
                     ui.separator();
                     ui.label(format!("{}  ·  {}",
@@ -457,6 +499,7 @@ impl Editor {
                 ui.selectable_value(&mut self.inspector_tab,InspectorTab::Objects,"Объекты");
                 ui.selectable_value(&mut self.inspector_tab,InspectorTab::Properties,"Свойства");
                 ui.selectable_value(&mut self.inspector_tab,InspectorTab::Page,"Лист");
+                ui.selectable_value(&mut self.inspector_tab,InspectorTab::Export,"Экспорт");
             });
             ui.separator();
             if self.inspector_tab==InspectorTab::Objects{
@@ -472,6 +515,7 @@ impl Editor {
                         match self.inspector_tab{
                             InspectorTab::Properties=>self.inspector_properties(ui),
                             InspectorTab::Page=>self.inspector_page(ui),
+                            InspectorTab::Export=>self.export_docker(ui),
                             InspectorTab::Objects=>{},
                         }
                     });
@@ -1109,6 +1153,23 @@ impl Editor {
 
     fn inspector_page(&mut self,ui:&mut egui::Ui){
         ui.heading("Параметры листа");
+        ui.horizontal_wrapped(|ui|{
+            if ui.small_button("＋ Новая").clicked(){
+                self.append_page(self.doc.page.width_mm,self.doc.page.height_mm);
+            }
+            if ui.small_button("⧉ Дубликат").clicked(){self.copy_page();}
+            if ui.add_enabled(self.doc.pages().len()>1,
+                egui::Button::new("Удалить")).clicked(){self.remove_page();}
+        });
+        ui.separator();
+        let active=self.doc.active_page_id;
+        let mut label=self.doc.pages().iter().find(|p|p.id==active)
+            .map(|p|p.name.clone()).unwrap_or_default();
+        ui.label("Название страницы:");
+        if ui.text_edit_singleline(&mut label).changed(){
+            self.rename_active_page(&label);
+        }
+        ui.separator();
         ui.label("Наименование документа");
         let mut name=self.doc.name.clone();
         if ui.text_edit_singleline(&mut name).changed(){
@@ -1151,7 +1212,8 @@ impl Editor {
                 .speed(5.0).range(30.0..=600.0));
         });
         if ui.button("Проверить макет").clicked(){self.run_preflight();}
-        ui.label("Один редактируемый лист. Многостраничность — следующий этап.");
+        ui.label(format!("Активная страница: {} из {}. Объектов во всём документе: {}",
+            self.doc.page_index()+1,self.doc.pages().len(),self.doc.all_object_count()));
     }
 
     pub(super) fn workspace_footer(&mut self,ctx:&egui::Context){
@@ -1173,18 +1235,8 @@ impl Editor {
                 }
             });
         });
-        egui::TopBottomPanel::bottom("page_navigator").exact_height(29.0).show(ctx,|ui|{
-            ui.horizontal(|ui|{
-                ui.label(RichText::new("Страница 1 из 1").strong())
-                    .on_hover_text("Многостраничные проекты пока не реализованы.");
-                ui.separator();
-                ui.label(RichText::new("ЦВЕТА").strong().small());
-                for swatch in SWATCHES.iter().take(14){
-                    let res=ui.add_sized([16.0,16.0],egui::Button::new("").fill(color(swatch)))
-                        .on_hover_text(format!("{swatch} — заливка"));
-                    if res.clicked(){self.apply_color(swatch,false);}
-                }
-            });
+        egui::TopBottomPanel::bottom("page_navigator").exact_height(34.0).show(ctx,|ui|{
+            self.page_tabs(ui);
         });
     }
 

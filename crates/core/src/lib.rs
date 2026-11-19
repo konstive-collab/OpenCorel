@@ -11,6 +11,8 @@ pub mod transform;
 pub mod node_edit;
 pub mod procedural;
 pub mod arrays;
+pub mod pages;
+pub use pages::{PageTab,PageContent};
 pub mod boolean_ops;
 pub mod appearance;
 use appearance::Appearance;
@@ -252,12 +254,24 @@ pub struct Document {
     pub clip_links: Vec<ClipLink>,
     #[serde(default,skip_serializing_if="BTreeMap::is_empty")]
     pub appearances:BTreeMap<u64,Appearance>,
+    #[serde(default="pages::initial_page_id")]
+    pub active_page_id:u64,
+    #[serde(default="pages::initial_next_page_id")]
+    pub next_page_id:u64,
+    #[serde(default,skip_serializing_if="Vec::is_empty")]
+    pub page_tabs:Vec<PageTab>,
+    #[serde(default,skip_serializing_if="BTreeMap::is_empty")]
+    pub inactive_pages:BTreeMap<u64,PageContent>,
 }
 impl Default for Document {
     fn default() -> Self {
         Self { schema_version:SCHEMA_VERSION, name:"Новый макет".into(),
             page:Page {width_mm:841.0,height_mm:594.0},objects:Vec::new(),next_id:1,
-            layers:default_layers(),next_layer_id:default_next_layer_id(),clip_links:Vec::new(),appearances:BTreeMap::new() }
+            layers:default_layers(),next_layer_id:default_next_layer_id(),
+            clip_links:Vec::new(),appearances:BTreeMap::new(),
+            active_page_id:1,next_page_id:2,
+            page_tabs:vec![PageTab{id:1,name:"Страница 1".into()}],
+            inactive_pages:BTreeMap::new() }
     }
 }
 
@@ -285,6 +299,7 @@ impl Document {
             total=total.saturating_add(std::mem::size_of::<Object>()
                 +obj.style.fill.len()+obj.style.stroke.len()+obj.name.len()+shape_bytes);
         }
+        total=total.saturating_add(self.inactive_pages_memory_bytes());
         total.saturating_add(self.clip_links.len()*std::mem::size_of::<ClipLink>())
             .saturating_add(self.appearances.iter().map(|(_,a)|
                 std::mem::size_of::<Appearance>()+
@@ -512,6 +527,7 @@ impl Document {
     }
     pub fn validate(&self)->Result<(),String>{
         if self.schema_version!=SCHEMA_VERSION {return Err("Unknown document schema".into());}
+        self.validate_all_pages()?;
         if ![self.page.width_mm,self.page.height_mm].iter().all(|v|v.is_finite() && (1.0..=100_000.0).contains(v)) {
             return Err("Invalid page dimensions".into());
         }

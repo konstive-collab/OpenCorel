@@ -41,6 +41,21 @@ jobs:
           cargo run --release -p opencorel-cli -- inspect ci-smoke.kdr
           cargo run --release -p opencorel-cli -- export-svg ci-smoke.kdr ci-smoke.svg
           grep -q '<svg' ci-smoke.svg
+          cargo run --release -p opencorel-cli -- add-page ci-smoke.kdr ci-multipage.kdr 210 297
+          cargo run --release -p opencorel-cli -- pages ci-multipage.kdr > ci-pages.txt
+          grep -q '^2 | id=2' ci-pages.txt
+          cargo run --release -p opencorel-cli -- duplicate-page ci-multipage.kdr ci-multipage-3.kdr
+          cargo run --release -p opencorel-cli -- pages ci-multipage-3.kdr > ci-pages3.txt
+          grep -q '^3 | id=3' ci-pages3.txt
+          mkdir -p ci-pages-svg ci-pages-pdf
+          cargo run --release -p opencorel-cli -- batch-svg ci-multipage-3.kdr ci-pages-svg
+          cargo run --release -p opencorel-cli -- batch-pdf ci-multipage-3.kdr ci-pages-pdf
+          test "$(find ci-pages-svg -name '*.svg' | wc -l | tr -d ' ')" -eq 3
+          test "$(find ci-pages-pdf -name '*.pdf' | wc -l | tr -d ' ')" -eq 3
+          if cargo run --release -p opencorel-cli -- batch-svg ci-multipage-3.kdr ci-pages-svg; then
+            echo 'Batch export should refuse to overwrite existing files' >&2
+            exit 1
+          fi
           cargo run --release -p opencorel-cli -- import-svg ci-smoke.svg ci-smoke-import.kdr
           cargo run --release -p opencorel-cli -- inspect ci-smoke-import.kdr
           printf '%s\n' '<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="100mm" viewBox="0 0 100 100"><rect x="10" y="10" width="40" height="40" stroke="#000000" stroke-width="1" fill="none"/></svg>' > ci-plot.svg

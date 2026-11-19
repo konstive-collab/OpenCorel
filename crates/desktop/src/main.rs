@@ -9,6 +9,7 @@ use opencorel_core::transform;
 use opencorel_core::node_edit::{self,NodeAddress};
 mod node_interaction;
 mod device_tools;
+mod page_workspace;
 mod pro_tools;
 use pro_tools::ProToolsState;
 mod boolean_commands;
@@ -135,6 +136,9 @@ struct Editor{
     resize_drag:Option<(u64,ResizeCorner)>,
     object_filter:String,
     pro_tools:ProToolsState,
+    batch_format:opencorel_export::batch::PageExportFormat,
+    batch_page_selection:Option<std::collections::HashSet<u64>>,
+    property_aspect_locked:bool,
     active_node:Option<(u64,NodeAddress)>,
     node_drag:Option<(u64,NodeAddress)>,
 }
@@ -177,6 +181,8 @@ impl Default for Editor{
             internal_clipboard:Vec::new(),paste_number:0,
             show_welcome:true,toolbox_expanded:false,resize_drag:None,
             object_filter:String::new(),pro_tools:ProToolsState::default(),
+            batch_format:opencorel_export::batch::PageExportFormat::Svg,
+            batch_page_selection:None,property_aspect_locked:true,
             active_node:None,node_drag:None}
     }
 }
@@ -692,6 +698,7 @@ impl Editor{
             Ok(result)=>{
                 self.checkpoint();
                 self.doc=result.document;
+                self.batch_page_selection=None;
                 self.selected=None;self.multi_selected.clear();self.active_layer=1;
                 self.resize_drag=None;self.node_drag=None;self.active_node=None;
                 self.fill_cache.entries.clear();self.vector_cache.clear();
@@ -1130,6 +1137,15 @@ impl eframe::App for Editor{
 mod tests {
     use super::*;
     #[test]
+    fn production_workspace_opens_empty_a4_and_keeps_document_valid(){
+        let e=Editor::fresh_workspace();
+        assert_eq!(e.doc.objects.len(),0);
+        assert_eq!(e.doc.pages().len(),1);
+        assert_eq!(e.doc.page.width_mm,210.);
+        assert_eq!(e.doc.page.height_mm,297.);
+        e.doc.validate().unwrap();
+    }
+    #[test]
     fn align_does_not_corrupt_group_or_add_undo_entry(){
         let mut editor=Editor::default();
         editor.select_all();
@@ -1324,6 +1340,21 @@ mod tests {
         assert!((area-250.0).abs()<0.001);
     }
 }
+impl Editor{
+    /// Production startup: a neutral blank A4 document, not the two-shape
+    /// fixture used by regression tests. Sample design stays one click away.
+    fn fresh_workspace()->Self{
+        let mut editor=Self::default();
+        let mut doc=Document::default();
+        doc.name="Безымянный документ".into();
+        doc.page=opencorel_core::Page{width_mm:210.,height_mm:297.};
+        editor.doc=doc;
+        editor.file="Безымянный.kdr".into();
+        editor.show_welcome=true;
+        editor.status="Готово к работе · A4 · 210 × 297 мм".into();
+        editor
+    }
+}
 fn main()->eframe::Result<()>{
     let options=eframe::NativeOptions{
         viewport:egui::ViewportBuilder::default().with_inner_size([1280.0,780.0])
@@ -1333,6 +1364,6 @@ fn main()->eframe::Result<()>{
     eframe::run_native(concat!("OpenCorel v",env!("CARGO_PKG_VERSION"),
         " — Редактор макетов"),options,Box::new(|cc|{
         ui_theme::apply(&cc.egui_ctx,false);
-        Ok(Box::new(Editor::default()))
+        Ok(Box::new(Editor::fresh_workspace()))
     }))
 }
