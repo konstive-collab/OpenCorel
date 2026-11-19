@@ -1137,6 +1137,15 @@ impl eframe::App for Editor{
 mod tests {
     use super::*;
     #[test]
+    fn production_workspace_opens_empty_a4_and_keeps_document_valid(){
+        let e=Editor::fresh_workspace();
+        assert_eq!(e.doc.objects.len(),0);
+        assert_eq!(e.doc.pages().len(),1);
+        assert_eq!(e.doc.page.width_mm,210.);
+        assert_eq!(e.doc.page.height_mm,297.);
+        e.doc.validate().unwrap();
+    }
+    #[test]
     fn align_does_not_corrupt_group_or_add_undo_entry(){
         let mut editor=Editor::default();
         editor.select_all();
@@ -1331,6 +1340,21 @@ mod tests {
         assert!((area-250.0).abs()<0.001);
     }
 }
+impl Editor{
+    /// Production startup: a neutral blank A4 document, not the two-shape
+    /// fixture used by regression tests. Sample design stays one click away.
+    fn fresh_workspace()->Self{
+        let mut editor=Self::default();
+        let mut doc=Document::default();
+        doc.name="Безымянный документ".into();
+        doc.page=opencorel_core::Page{width_mm:210.,height_mm:297.};
+        editor.doc=doc;
+        editor.file="Безымянный.kdr".into();
+        editor.show_welcome=true;
+        editor.status="Готово к работе · A4 · 210 × 297 мм".into();
+        editor
+    }
+}
 fn main()->eframe::Result<()>{
     let options=eframe::NativeOptions{
         viewport:egui::ViewportBuilder::default().with_inner_size([1280.0,780.0])
@@ -1340,6 +1364,6 @@ fn main()->eframe::Result<()>{
     eframe::run_native(concat!("OpenCorel v",env!("CARGO_PKG_VERSION"),
         " — Редактор макетов"),options,Box::new(|cc|{
         ui_theme::apply(&cc.egui_ctx,false);
-        Ok(Box::new(Editor::default()))
+        Ok(Box::new(Editor::fresh_workspace()))
     }))
 }
