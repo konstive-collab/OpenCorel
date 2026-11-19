@@ -9,6 +9,7 @@ use opencorel_core::transform;
 use opencorel_core::node_edit::{self,NodeAddress};
 mod node_interaction;
 mod device_tools;
+mod page_workspace;
 mod pro_tools;
 use pro_tools::ProToolsState;
 mod boolean_commands;
@@ -135,6 +136,8 @@ struct Editor{
     resize_drag:Option<(u64,ResizeCorner)>,
     object_filter:String,
     pro_tools:ProToolsState,
+    batch_format:opencorel_export::batch::PageExportFormat,
+    batch_page_selection:Option<std::collections::HashSet<u64>>,
     active_node:Option<(u64,NodeAddress)>,
     node_drag:Option<(u64,NodeAddress)>,
 }
@@ -177,6 +180,8 @@ impl Default for Editor{
             internal_clipboard:Vec::new(),paste_number:0,
             show_welcome:true,toolbox_expanded:false,resize_drag:None,
             object_filter:String::new(),pro_tools:ProToolsState::default(),
+            batch_format:opencorel_export::batch::PageExportFormat::Svg,
+            batch_page_selection:None,
             active_node:None,node_drag:None}
     }
 }
@@ -692,6 +697,7 @@ impl Editor{
             Ok(result)=>{
                 self.checkpoint();
                 self.doc=result.document;
+                self.batch_page_selection=None;
                 self.selected=None;self.multi_selected.clear();self.active_layer=1;
                 self.resize_drag=None;self.node_drag=None;self.active_node=None;
                 self.fill_cache.entries.clear();self.vector_cache.clear();
