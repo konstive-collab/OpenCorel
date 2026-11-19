@@ -24,7 +24,7 @@ pub struct PageContent{
 }
 impl Document{
     fn capture_page(&self)->PageContent{
-        PageContent{page:self.page,objects:self.objects.clone(),
+        PageContent{page:self.page.clone(),objects:self.objects.clone(),
             layers:self.layers.clone(),next_layer_id:self.next_layer_id,
             clip_links:self.clip_links.clone(),appearances:self.appearances.clone()}
     }
@@ -101,7 +101,7 @@ impl Document{
         if original.objects.len()+self.all_object_count()>100_000{
             return Err("Whole document object limit exceeded".into());
         }
-        let id=self.add_page(original.page)?;
+        let id=self.add_page(original.page.clone())?;
         self.layers=original.layers;
         self.next_layer_id=original.next_layer_id;
         let mut ids=BTreeMap::new();
