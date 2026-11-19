@@ -136,10 +136,10 @@ impl Editor{
                         let (action,name,category,shortcut)=**entry;
                         ui.horizontal(|ui|{
                             let trigger=ui.selectable_label(false,
-                                RichText::new(*name).strong());
-                            ui.label(RichText::new(*category).small().color(Color32::GRAY));
+                                RichText::new(name).strong());
+                            ui.label(RichText::new(category).small().color(Color32::GRAY));
                             if !shortcut.is_empty(){
-                                ui.label(RichText::new(*shortcut).small()
+                                ui.label(RichText::new(shortcut).small()
                                     .color(Color32::from_rgb(29,174,155)));
                             }
                             if trigger.clicked()||index==0&&ui.input(|i|
@@ -164,7 +164,7 @@ mod tests{
     #[test] fn palette_executes_real_tool_and_page_actions(){
         let mut editor=Editor::default();
         editor.execute_command(Command::Curve);
-        assert_eq!(editor.tool,Tool::Curve);
+        assert!(editor.tool==Tool::Curve);
         editor.execute_command(Command::NewPage);
         assert_eq!(editor.doc.pages().len(),2);
         editor.execute_command(Command::DuplicatePage);
