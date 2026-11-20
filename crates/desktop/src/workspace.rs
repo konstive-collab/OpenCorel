@@ -299,6 +299,24 @@ impl Editor {
                         self.text_to_curves();ui.close_menu();
                     }
                 });
+                ui.menu_button("Производство+",|ui|{
+                    if ui.button("Векторный QR-код...").clicked(){
+                        self.show_qr_dialog=true;ui.close_menu();
+                    }
+                    if ui.button("Массово заменить RGB...").clicked(){
+                        self.show_recolor_dialog=true;ui.close_menu();
+                    }
+                    if ui.button("Найти объекты по всему макету...").clicked(){
+                        self.show_object_finder=true;ui.close_menu();
+                    }
+                    ui.separator();
+                    if ui.button("Паспорт публикации").clicked(){
+                        self.inspector_tab=InspectorTab::Page;
+                        self.show_inspector=true;
+                        self.refresh_inventory();
+                        ui.close_menu();
+                    }
+                });
                 ui.menu_button("Оформление",|ui|self.appearance_editor(ui));
                 ui.menu_button("Окно",|ui|{
                     if ui.button("Поиск команды     Ctrl+K").clicked(){
