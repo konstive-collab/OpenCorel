@@ -20,3 +20,5 @@ base64 = "0.22"
 
 # Robust topological operations on validated 2-D planar polygons.
 geo = "0.33.1"
+# Pure-Rust QR Code Model 2 encoder; artwork remains native editable vectors.
+qrcodegen = "1.8.0"
