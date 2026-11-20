@@ -25,6 +25,7 @@ mod appearance_commands;
 mod text_workspace;
 mod path_workspace;
 mod inventory_tools;
+mod production_tools;
 use masked_canvas::MaskedCanvasCache;
 mod vector_preview;
 mod raster_preview;
@@ -163,6 +164,18 @@ struct Editor{
     resize_drag:Option<(u64,ResizeCorner)>,
     object_filter:String,
     show_command_palette:bool,
+    show_qr_dialog:bool,
+    qr_text:String,qr_size_mm:f32,qr_foreground:String,qr_background:String,
+    qr_ecc:u8,qr_status:String,
+    show_recolor_dialog:bool,
+    recolor_from:String,recolor_to:String,
+    recolor_fills:bool,recolor_strokes:bool,recolor_stops:bool,
+    recolor_all_pages:bool,recolor_summary:String,
+    show_object_finder:bool,
+    find_object_text:String,find_object_layer:String,find_object_color:String,
+    find_object_kind:usize,find_object_all_pages:bool,
+    find_object_include_hidden:bool,
+    object_search_results:Vec<opencorel_core::object_search::ObjectHit>,
     show_text_search:bool,
     text_find_query:String,
     text_replacement:String,
@@ -238,6 +251,17 @@ impl Default for Editor{
             internal_clipboard:Vec::new(),paste_number:0,
             show_welcome:true,toolbox_expanded:false,resize_drag:None,
             object_filter:String::new(),show_command_palette:false,
+            show_qr_dialog:false,qr_text:"https://example.org".into(),
+            qr_size_mm:65.0,qr_foreground:"#000000".into(),
+            qr_background:"#FFFFFF".into(),qr_ecc:1,qr_status:String::new(),
+            show_recolor_dialog:false,recolor_from:"#447BD4".into(),
+            recolor_to:"#058C7D".into(),recolor_fills:true,
+            recolor_strokes:true,recolor_stops:true,recolor_all_pages:true,
+            recolor_summary:String::new(),
+            show_object_finder:false,find_object_text:String::new(),
+            find_object_layer:String::new(),find_object_color:String::new(),
+            find_object_kind:0,find_object_all_pages:true,
+            find_object_include_hidden:false,object_search_results:Vec::new(),
             show_text_search:false,text_find_query:String::new(),
             text_replacement:String::new(),text_case_sensitive:false,
             text_all_pages:true,text_hits:Vec::new(),
@@ -1293,6 +1317,9 @@ impl eframe::App for Editor{
         self.welcome_window(ctx);
         self.command_palette(ctx);
         self.text_search_dialog(ctx);
+        self.qr_dialog(ctx);
+        self.recolor_dialog(ctx);
+        self.object_finder_dialog(ctx);
         if self.show_preflight{
             egui::Window::new("Проверка макета")
                 .open(&mut self.show_preflight)

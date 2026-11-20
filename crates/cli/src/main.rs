@@ -7,6 +7,51 @@ use opencorel_typography::TextOutliner;
 fn main()->ExitCode{
     let args:Vec<_>=env::args().collect();
     let outcome=match args.as_slice(){
+        [_,op,path,phrase] if op=="find-objects" =>open_any(path).and_then(|r|{
+            let hits=r.document.find_objects(&opencorel_core::object_search::ObjectQuery{
+                phrase:phrase.to_string(),..Default::default()
+            })?;
+            for hit in &hits{
+                println!("PAGE {} OBJECT {} {} [{}] {}",
+                    hit.page_id,hit.object_id,hit.kind,hit.layer_name,hit.name);
+            }
+            println!("Found {} objects across pages",hits.len());
+            Ok(())
+        }),
+        [_,op,src,dst,from,to] if op=="recolor-rgb" =>{
+            if src==dst{Err("Input and output files must differ".into())}
+            else{open_any(src).and_then(|r|{
+                let mut doc=r.document;
+                let report=doc.recolor_rgb(from,to,
+                    opencorel_core::recolor::ColorChannels::default(),true)?;
+                if report.total()==0{return Err("No matching RGB slots".into());}
+                save_document(&doc,dst)?;
+                println!("Recolored {} RGB slots on {} pages",
+                    report.total(),report.pages);
+                Ok(())
+            })}
+        },
+        [_,op,src,dst,payload,size] if op=="qr-code" =>{
+            if src==dst{Err("Input and output files must differ".into())}
+            else{size.parse::<f32>()
+                .map_err(|_|"Invalid QR size in millimetres".to_string())
+                .and_then(|size_mm|open_any(src).and_then(|r|{
+                    let mut doc=r.document;
+                    let spec=opencorel_core::qr_vector::QrSpec{
+                        payload:payload.to_string(),size_mm,
+                        origin:Point{
+                            x:(doc.page.width_mm-size_mm)*0.5,
+                            y:(doc.page.height_mm-size_mm)*0.5
+                        },
+                        ..Default::default()
+                    };
+                    let ids=doc.create_qr(&spec,1)?;
+                    save_document(&doc,dst)?;
+                    println!("Created native QR compound contours #{}, background #{}",
+                        ids[1],ids[0]);
+                    Ok(())
+                }))}
+        },
         [_,op,path] if op=="inventory" =>open_any(path).map(|r|{
             let inv=r.document.inventory();
             println!("PAGES {}",inv.pages);
@@ -215,7 +260,7 @@ fn main()->ExitCode{
             .and_then(|r|save_document(&r.document,dst)),
         [_,op,src,dst] if op=="export-svg" => open_any(src)
             .and_then(|r|save_document(&r.document,dst)),
-        _=>{eprintln!("Usage:\n  opencorel-cli benchmark COUNT\n  opencorel-cli new FILE.kdr\n  opencorel-cli inventory FILE.kdr\n  opencorel-cli find-text FILE.kdr QUERY\n  opencorel-cli replace-text IN.kdr OUT.kdr QUERY REPLACEMENT\n  opencorel-cli gradient-preset IN.kdr OUT.kdr OBJECT_ID sunrise|ocean|forest|sunset|steel|candy|monochrome\n  opencorel-cli inspect FILE.kdr\n  opencorel-cli pages FILE.kdr\n  opencorel-cli add-page IN.kdr OUT.kdr WIDTH_MM HEIGHT_MM\n  opencorel-cli duplicate-page IN.kdr OUT.kdr\n  opencorel-cli batch-svg FILE.kdr DIRECTORY\n  opencorel-cli batch-pdf FILE.kdr DIRECTORY\n  opencorel-cli export-pdf-book FILE.kdr DOCUMENT.pdf\n  opencorel-cli export-trim-pdf FILE.kdr TRIM.pdf\n  opencorel-cli export-trim-svg FILE.kdr TRIM.svg\n  opencorel-cli preflight FILE.kdr\n  opencorel-cli convert INPUT OUTPUT\n  opencorel-cli outline-text INPUT.kdr OUTPUT.kdr\n  opencorel-cli export-bitmap FILE.kdr FILE.png DPI\n  opencorel-cli export-svg FILE.kdr FILE.svg\n  opencorel-cli export-pdf FILE.kdr FILE.pdf\n  opencorel-cli plotter-preflight FILE.kdr\n  opencorel-cli export-plt FILE.kdr FILE.plt\n  opencorel-cli dxf-preflight FILE.kdr\n  opencorel-cli export-dxf FILE.kdr FILE.dxf\n  opencorel-cli import-svg FILE.svg FILE.kdr");
+        _=>{eprintln!("Usage:\n  opencorel-cli benchmark COUNT\n  opencorel-cli new FILE.kdr\n  opencorel-cli inventory FILE.kdr\n  opencorel-cli qr-code IN.kdr OUT.kdr URL_OR_TEXT SIZE_MM\n  opencorel-cli recolor-rgb IN.kdr OUT.kdr #RRGGBB #RRGGBB\n  opencorel-cli find-objects FILE.kdr QUERY\n  opencorel-cli find-text FILE.kdr QUERY\n  opencorel-cli replace-text IN.kdr OUT.kdr QUERY REPLACEMENT\n  opencorel-cli gradient-preset IN.kdr OUT.kdr OBJECT_ID sunrise|ocean|forest|sunset|steel|candy|monochrome\n  opencorel-cli inspect FILE.kdr\n  opencorel-cli pages FILE.kdr\n  opencorel-cli add-page IN.kdr OUT.kdr WIDTH_MM HEIGHT_MM\n  opencorel-cli duplicate-page IN.kdr OUT.kdr\n  opencorel-cli batch-svg FILE.kdr DIRECTORY\n  opencorel-cli batch-pdf FILE.kdr DIRECTORY\n  opencorel-cli export-pdf-book FILE.kdr DOCUMENT.pdf\n  opencorel-cli export-trim-pdf FILE.kdr TRIM.pdf\n  opencorel-cli export-trim-svg FILE.kdr TRIM.svg\n  opencorel-cli preflight FILE.kdr\n  opencorel-cli convert INPUT OUTPUT\n  opencorel-cli outline-text INPUT.kdr OUTPUT.kdr\n  opencorel-cli export-bitmap FILE.kdr FILE.png DPI\n  opencorel-cli export-svg FILE.kdr FILE.svg\n  opencorel-cli export-pdf FILE.kdr FILE.pdf\n  opencorel-cli plotter-preflight FILE.kdr\n  opencorel-cli export-plt FILE.kdr FILE.plt\n  opencorel-cli dxf-preflight FILE.kdr\n  opencorel-cli export-dxf FILE.kdr FILE.dxf\n  opencorel-cli import-svg FILE.svg FILE.kdr");
             return ExitCode::FAILURE;}
     };
     match outcome{

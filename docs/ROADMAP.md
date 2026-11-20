@@ -2,7 +2,15 @@
 
 Goal: fast, legally independent vector graphics editor for advertising, posters and maps, especially on older Windows/Linux workstations.
 
-## v0.20 — Professional Appearance, Typography & Vector
+## v0.21 — QR, Palette Management and Cross-page Object Explorer
+
+- Real editable QR Module 2 path geometry, four error correction levels, protected quiet zone, print-sized validation.
+- Atomic all-page RGB replacement for fills/strokes/gradient stops, read-only impact preview, locked-layer guards.
+- Indexed object search by type, name, text, layer and color with result navigation.
+- CLI commands, Win/Linux smoke and KDR/SVG/PDF round-trip regression.
+- Not equivalent to production-wide CDR/CMYK/PDF/X or certified QR print scanning.
+
+ Professional Appearance, Typography & Vector
 
 Source includes 7 multi-stop RGB gradients, Unicode find/replace across 64 pages,
 case transformations, cubic primitive conversion, open-path simplification/join,

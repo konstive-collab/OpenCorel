@@ -11,7 +11,7 @@ pub(super) enum Command{
     CopyStyle,PasteStyle,MeasureWidth,MeasureHeight,ZoomSelection,
     SelectAll,Duplicate,Group,Ungroup,AlignCenterX,AlignCenterY,
     MoveUp,MoveDown,Objects,Properties,ZoomFit,ToggleGrid,
-    ToggleGuides,ToggleTheme,Preflight,PathConvert,PathSimplify,PathJoin,TextFind,TextUpper,TextLower,TextTitle,TextSentence,Help,
+    ToggleGuides,ToggleTheme,Preflight,GenerateQR,Recolor,FindObjects,PathConvert,PathSimplify,PathJoin,TextFind,TextUpper,TextLower,TextTitle,TextSentence,Help,
 }
 const COMMANDS:&[(Command,&str,&str,&str)]=&[
     (Command::New,"Новый документ","Файл","Ctrl+N"),
@@ -58,6 +58,9 @@ const COMMANDS:&[(Command,&str,&str,&str)]=&[
     (Command::ToggleGuides,"Включить / выключить направляющие","Вид",""),
     (Command::ToggleTheme,"Светлая / тёмная тема","Вид",""),
     (Command::Preflight,"Проверить макет","Производство",""),
+    (Command::GenerateQR,"Генератор векторного QR-кода","Производство",""),
+    (Command::Recolor,"Массовая замена RGB во всей публикации","Оформление",""),
+    (Command::FindObjects,"Поиск объектов по всем страницам","Объекты",""),
     (Command::PathConvert,"Объект: в редактируемые кривые","Контуры",""),
     (Command::PathSimplify,"Упростить ломаные","Контуры",""),
     (Command::PathJoin,"Соединить два открытых контура","Контуры",""),
@@ -122,6 +125,9 @@ impl Editor{
             Command::ToggleGuides=>self.show_guides=!self.show_guides,
             Command::ToggleTheme=>self.light_theme=!self.light_theme,
             Command::Preflight=>self.run_preflight(),
+            Command::GenerateQR=>self.show_qr_dialog=true,
+            Command::Recolor=>self.show_recolor_dialog=true,
+            Command::FindObjects=>self.show_object_finder=true,
             Command::PathConvert=>self.execute_path_command(crate::path_workspace::PathCommand::Convert),
             Command::PathSimplify=>self.execute_path_command(crate::path_workspace::PathCommand::ReduceNodes),
             Command::PathJoin=>self.execute_path_command(crate::path_workspace::PathCommand::JoinEndpoints),

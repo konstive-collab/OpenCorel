@@ -53,6 +53,15 @@ jobs:
           set -euo pipefail
           cargo run --release -p opencorel-cli -- new ci-smoke.kdr
           cargo run --release -p opencorel-cli -- inspect ci-smoke.kdr
+          cargo run --release -p opencorel-cli -- qr-code ci-smoke.kdr ci-qr.kdr 'https://example.org/promo' 65
+          cargo run --release -p opencorel-cli -- inspect ci-qr.kdr
+          cargo run --release -p opencorel-cli -- export-svg ci-qr.kdr ci-qr.svg
+          grep -q 'fill-rule="evenodd"' ci-qr.svg
+          cargo run --release -p opencorel-cli -- find-objects ci-qr.kdr QR > ci-qr-objects.txt
+          grep -q 'OBJECT' ci-qr-objects.txt
+          cargo run --release -p opencorel-cli -- recolor-rgb ci-smoke.kdr ci-recolor.kdr '#447BD4' '#169B88'
+          cargo run --release -p opencorel-cli -- export-svg ci-recolor.kdr ci-recolor.svg
+          grep -q '#169B88' ci-recolor.svg
           cargo run --release -p opencorel-cli -- inventory ci-smoke.kdr > ci-inventory.txt
           grep -q '^TEXT 1' ci-inventory.txt || grep -q ' TEXT 1 ' ci-inventory.txt
           cargo run --release -p opencorel-cli -- find-text ci-smoke.kdr OpenCorel > ci-found.txt
