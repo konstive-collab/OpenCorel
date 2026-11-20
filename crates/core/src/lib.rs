@@ -26,6 +26,7 @@ pub mod text_workflow;
 pub mod path_workflow;
 pub mod inventory;
 pub mod qr_vector;
+pub mod recolor;
 use appearance::Appearance;
 
 pub const SCHEMA_VERSION: u32 = 1;
