@@ -68,6 +68,140 @@ impl Gradient{
         out
     }
 }
+/// Production-friendly editable presets. Colors remain normal RGB hex; they
+/// are not device-profile CMYK or ICC-managed spot colors.
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+pub enum GradientPreset{
+    Sunrise, Ocean, Forest, Sunset, Steel, Candy, Monochrome
+}
+impl GradientPreset{
+    pub const ALL:[Self;7]=[
+        Self::Sunrise,Self::Ocean,Self::Forest,Self::Sunset,
+        Self::Steel,Self::Candy,Self::Monochrome
+    ];
+    pub fn label(self)->&'static str{
+        match self{
+            Self::Sunrise=>"Рассвет", Self::Ocean=>"Океан",
+            Self::Forest=>"Лес",Self::Sunset=>"Закат",
+            Self::Steel=>"Сталь",Self::Candy=>"Неон",
+            Self::Monochrome=>"Ч/Б"
+        }
+    }
+    pub fn create(self)->Gradient{
+        let (kind,angle,colors):(GradientKind,f32,&[&str])=match self{
+            Self::Sunrise=>(GradientKind::Linear,25.,&["#FEF6A8","#FC8A43","#D22A7B"]),
+            Self::Ocean=>(GradientKind::Linear,-30.,&["#061D54","#1678B8","#8CE4DA"]),
+            Self::Forest=>(GradientKind::Linear,75.,&["#0A3529","#35A36F","#C6E9A4"]),
+            Self::Sunset=>(GradientKind::Radial,0.,&["#FFE78E","#EA7358","#572D91"]),
+            Self::Steel=>(GradientKind::Linear,90.,&["#1B263B","#ADB9C9","#536378"]),
+            Self::Candy=>(GradientKind::Linear,-55.,&["#732BEA","#FA4EAD","#65E4F9"]),
+            Self::Monochrome=>(GradientKind::Linear,0.,&["#111111","#EEEEEE"])
+        };
+        let max=(colors.len()-1) as f32;
+        Gradient{kind,angle_degrees:angle,
+            stops:colors.iter().enumerate().map(|(i,color)|
+                GradientStop{offset:i as f32/max,color:(*color).to_owned()}
+            ).collect()}
+    }
+}
+fn rgb_hex(color:&str)->Result<[u8;3],String>{
+    if !crate::valid_color(color){return Err("Gradient requires #RRGGBB color".into());}
+    let parse=|offset|u8::from_str_radix(&color[offset..offset+2],16)
+        .map_err(|e|e.to_string());
+    Ok([parse(1)?,parse(3)?,parse(5)?])
+}
+impl Gradient{
+    /// Sample linear RGB channel interpolation at a normalized position.
+    /// This matches the SVG stop colors used for screen export previews.
+    pub fn color_at(&self,position:f32)->Result<String,String>{
+        self.validate()?;
+        if !position.is_finite(){return Err("Non-finite gradient sample".into());}
+        let t=position.clamp(0.,1.);
+        let first=&self.stops[0];
+        if t<=first.offset{return Ok(first.color.clone());}
+        for pair in self.stops.windows(2){
+            let (a,b)=(&pair[0],&pair[1]);
+            if t<=b.offset{
+                if (b.offset-a.offset).abs()<f32::EPSILON{return Ok(b.color.clone());}
+                let ratio=((t-a.offset)/(b.offset-a.offset)).clamp(0.,1.);
+                let rgb1=rgb_hex(&a.color)?;
+                let rgb2=rgb_hex(&b.color)?;
+                let color=|index:usize|{
+                    (rgb1[index] as f32+(rgb2[index] as f32-rgb1[index] as f32)*ratio)
+                        .round().clamp(0.,255.) as u8
+                };
+                return Ok(format!("#{:02X}{:02X}{:02X}",
+                    color(0),color(1),color(2)));
+            }
+        }
+        Ok(self.stops.last().expect("Validated gradient has 2 stops").color.clone())
+    }
+    pub fn insert_stop(&mut self,position:f32)->Result<usize,String>{
+        self.validate()?;
+        if self.stops.len()>=32{return Err("Maximum 32 gradient stops".into());}
+        if !position.is_finite()||!(0.0..=1.0).contains(&position){
+            return Err("Stop position must be 0–100%".into());
+        }
+        let color=self.color_at(position)?;
+        let index=self.stops.partition_point(|s|s.offset<=position);
+        self.stops.insert(index,GradientStop{offset:position,color});
+        Ok(index)
+    }
+    pub fn remove_stop(&mut self,index:usize)->Result<(),String>{
+        if self.stops.len()<=2{return Err("Gradient needs at least 2 stops".into());}
+        if index>=self.stops.len(){return Err("Unknown gradient stop".into());}
+        self.stops.remove(index);
+        Ok(())
+    }
+    pub fn set_stop(&mut self,index:usize,position:f32,color:&str)->Result<usize,String>{
+        self.validate()?;
+        if index>=self.stops.len(){return Err("Unknown gradient stop".into());}
+        if !position.is_finite()||!(0.0..=1.0).contains(&position)
+            ||!crate::valid_color(color){
+            return Err("Invalid gradient stop position or hex color".into());
+        }
+        let mut edited=self.clone();
+        edited.stops.remove(index);
+        let destination=edited.stops.partition_point(|s|s.offset<=position);
+        edited.stops.insert(destination,GradientStop{
+            offset:position,color:color.into()
+        });
+        edited.validate()?;
+        *self=edited;
+        Ok(destination)
+    }
+}
+#[cfg(test)]
+mod extended_tests{
+    use super::*;
+    #[test] fn seven_presets_are_valid_three_stop_gradients(){
+        for preset in GradientPreset::ALL{
+            let gradient=preset.create();
+            gradient.validate().unwrap();
+            assert!(gradient.svg_definition(99).contains("appearance-99"));
+        }
+    }
+    #[test] fn insert_and_reorder_gradient_stops_preserve_interpolation(){
+        let mut gradient=GradientPreset::Monochrome.create();
+        let index=gradient.insert_stop(0.5).unwrap();
+        assert_eq!(index,1);
+        assert_eq!(gradient.stops[1].color,"#808080");
+        let new_index=gradient.set_stop(1,0.8,"#FFFFFF").unwrap();
+        assert_eq!(new_index,1);
+        gradient.validate().unwrap();
+        gradient.remove_stop(1).unwrap();
+        assert_eq!(gradient.stops.len(),2);
+        assert!(gradient.remove_stop(0).is_err());
+    }
+    #[test] fn invalid_color_does_not_mutate_existing_stops(){
+        let mut gradient=GradientPreset::Sunrise.create();
+        let before=gradient.clone();
+        assert!(gradient.set_stop(1,0.6,"red").is_err());
+        assert_eq!(gradient,before);
+        assert!(gradient.insert_stop(f32::NAN).is_err());
+    }
+}
+
 #[derive(Clone,Debug,PartialEq,Serialize,Deserialize)]
 #[serde(default)]
 pub struct Appearance{

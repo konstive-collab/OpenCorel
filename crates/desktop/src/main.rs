@@ -22,6 +22,9 @@ mod boolean_commands;
 mod clip_commands;
 mod masked_canvas;
 mod appearance_commands;
+mod text_workspace;
+mod path_workspace;
+mod inventory_tools;
 use masked_canvas::MaskedCanvasCache;
 mod vector_preview;
 mod raster_preview;
@@ -133,8 +136,8 @@ struct Editor{
     scale_y_percent:f32,
     appearance_opacity:f32,
     appearance_gradient_mode:u8,
-    appearance_gradient_start:String,
-    appearance_gradient_end:String,
+    appearance_gradient_stops:Vec<opencorel_core::appearance::GradientStop>,
+    appearance_new_stop_percent:f32,
     appearance_gradient_angle:f32,
     appearance_dash_mm:f32,
     appearance_cap:u8,
@@ -149,6 +152,7 @@ struct Editor{
     keep_bitmap_ratio:bool,
     show_preflight:bool,
     preflight_lines:Vec<String>,
+    inventory_lines:Vec<String>,
     minimum_image_dpi:f32,
     show_safe_area:bool,
     safe_margin_mm:f32,
@@ -159,6 +163,12 @@ struct Editor{
     resize_drag:Option<(u64,ResizeCorner)>,
     object_filter:String,
     show_command_palette:bool,
+    show_text_search:bool,
+    text_find_query:String,
+    text_replacement:String,
+    text_case_sensitive:bool,
+    text_all_pages:bool,
+    text_hits:Vec<opencorel_core::text_workflow::TextHit>,
     command_query:String,
     command_focus:bool,
     pro_tools:ProToolsState,
@@ -166,6 +176,8 @@ struct Editor{
     batch_page_selection:Option<std::collections::HashSet<u64>>,
     property_aspect_locked:bool,
     trim_margin_mm:f32,
+    path_simplify_tolerance_mm:f32,
+    path_join_tolerance_mm:f32,
     active_node:Option<(u64,NodeAddress)>,
     node_drag:Option<(u64,NodeAddress)>,
 }
@@ -203,8 +215,15 @@ impl Default for Editor{
             rotation_degrees:30.0,skew_x_degrees:15.0,skew_y_degrees:0.0,
             scale_x_percent:100.0,scale_y_percent:100.0,
             appearance_opacity:1.0,appearance_gradient_mode:0,
-            appearance_gradient_start:"#447BD4".into(),
-            appearance_gradient_end:"#FFFFFF".into(),
+            appearance_gradient_stops:vec![
+                opencorel_core::appearance::GradientStop{
+                    offset:0.0,color:"#447BD4".into()
+                },
+                opencorel_core::appearance::GradientStop{
+                    offset:1.0,color:"#FFFFFF".into()
+                }
+            ],
+            appearance_new_stop_percent:50.0,
             appearance_gradient_angle:0.0,appearance_dash_mm:0.0,
             appearance_cap:0,appearance_join:0,
             custom_pivot:false,pivot_x:0.0,pivot_y:0.0,
@@ -213,16 +232,21 @@ impl Default for Editor{
             dxf_options:opencorel_export::dxf::DxfOptions::default(),
             keep_bitmap_ratio:true,
             show_preflight:false,preflight_lines:Vec::new(),
+            inventory_lines:Vec::new(),
             minimum_image_dpi:150.0,
             show_safe_area:false,safe_margin_mm:5.0,
             internal_clipboard:Vec::new(),paste_number:0,
             show_welcome:true,toolbox_expanded:false,resize_drag:None,
             object_filter:String::new(),show_command_palette:false,
+            show_text_search:false,text_find_query:String::new(),
+            text_replacement:String::new(),text_case_sensitive:false,
+            text_all_pages:true,text_hits:Vec::new(),
             command_query:String::new(),command_focus:false,
             pro_tools:ProToolsState::default(),
             batch_format:opencorel_export::batch::PageExportFormat::Svg,
             batch_page_selection:None,property_aspect_locked:true,
             trim_margin_mm:12.0,
+            path_simplify_tolerance_mm:0.30,path_join_tolerance_mm:0.15,
             active_node:None,node_drag:None}
     }
 }
@@ -1211,6 +1235,10 @@ impl eframe::App for Editor{
                 }
             }
         }
+        if ctx.input(|i|i.modifiers.command&&
+            (i.key_pressed(egui::Key::F)||i.key_pressed(egui::Key::H))){
+            self.show_text_search=true;
+        }
         if ctx.input(|i|i.modifiers.command&&i.key_pressed(egui::Key::K)){
             self.show_command_palette=!self.show_command_palette;
             self.command_focus=self.show_command_palette;
@@ -1251,7 +1279,9 @@ impl eframe::App for Editor{
             if ctx.input(|i|i.key_pressed(egui::Key::B)){self.change_tool(Tool::Curve);}
             if ctx.input(|i|i.key_pressed(egui::Key::L)){self.change_tool(Tool::Line);}
             if ctx.input(|i|i.key_pressed(egui::Key::P)){self.change_tool(Tool::Polygon);}
-            if ctx.input(|i|i.key_pressed(egui::Key::F)){self.change_tool(Tool::Freehand);}
+            if !ctx.input(|i|i.modifiers.command)&&ctx.input(|i|i.key_pressed(egui::Key::F)){
+                self.change_tool(Tool::Freehand);
+            }
             if ctx.input(|i|i.key_pressed(egui::Key::I)){self.change_tool(Tool::Eyedropper);}
         }
         self.top_workspace(ctx);
@@ -1262,6 +1292,7 @@ impl eframe::App for Editor{
         self.canvas(ctx);
         self.welcome_window(ctx);
         self.command_palette(ctx);
+        self.text_search_dialog(ctx);
         if self.show_preflight{
             egui::Window::new("Проверка макета")
                 .open(&mut self.show_preflight)

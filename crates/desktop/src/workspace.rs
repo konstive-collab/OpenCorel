@@ -278,68 +278,28 @@ impl Editor {
                         self.distribute_selection(Distribution::VerticalCenters);ui.close_menu();
                     }
                 });
-                ui.menu_button("Оформление",|ui|{
-                    ui.label(RichText::new("ЗАЛИВКА И ОБВОДКА").strong());
-                    ui.horizontal(|ui|{
-                        ui.label("Непрозрачность");
-                        ui.add(egui::Slider::new(&mut self.appearance_opacity,0.0..=1.0)
-                            .step_by(0.01).show_value(true));
-                    });
+                ui.menu_button("Контуры",|ui|self.path_workflow_menu(ui));
+                ui.menu_button("Текст",|ui|{
+                    if ui.button("Найти / заменить    Ctrl+F / Ctrl+H").clicked(){
+                        self.show_text_search=true;ui.close_menu();
+                    }
                     ui.separator();
-                    ui.label("Градиент:");
-                    ui.horizontal(|ui|{
-                        ui.selectable_value(&mut self.appearance_gradient_mode,0,"Нет");
-                        ui.selectable_value(&mut self.appearance_gradient_mode,1,"Линейный");
-                        ui.selectable_value(&mut self.appearance_gradient_mode,2,"Радиальный");
-                    });
-                    if self.appearance_gradient_mode!=0{
-                        ui.horizontal(|ui|{
-                            ui.label("Начальный #RGB");
-                            ui.text_edit_singleline(&mut self.appearance_gradient_start);
-                        });
-                        ui.horizontal(|ui|{
-                            ui.label("Конечный #RGB");
-                            ui.text_edit_singleline(&mut self.appearance_gradient_end);
-                        });
-                        if self.appearance_gradient_mode==1{
-                            ui.horizontal(|ui|{
-                                ui.label("Угол:");
-                                ui.add(egui::DragValue::new(&mut self.appearance_gradient_angle)
-                                    .speed(1.0).range(-360.0..=360.0).suffix("°"));
-                            });
+                    for mode in [
+                        opencorel_core::text_workflow::TextCase::Upper,
+                        opencorel_core::text_workflow::TextCase::Lower,
+                        opencorel_core::text_workflow::TextCase::Title,
+                        opencorel_core::text_workflow::TextCase::Sentence,
+                    ]{
+                        if ui.button(mode.label()).clicked(){
+                            self.run_text_case(mode);ui.close_menu();
                         }
                     }
                     ui.separator();
-                    ui.horizontal(|ui|{
-                        ui.label("Пунктир, мм (0 — без пунктира)");
-                        ui.add(egui::DragValue::new(&mut self.appearance_dash_mm)
-                            .speed(0.2).range(0.0..=100.0));
-                    });
-                    ui.label("Окончание линии:");
-                    ui.horizontal(|ui|{
-                        ui.selectable_value(&mut self.appearance_cap,0,"Прямое");
-                        ui.selectable_value(&mut self.appearance_cap,1,"Круглое");
-                        ui.selectable_value(&mut self.appearance_cap,2,"Квадратное");
-                    });
-                    ui.label("Соединение линии:");
-                    ui.horizontal(|ui|{
-                        ui.selectable_value(&mut self.appearance_join,0,"Острое");
-                        ui.selectable_value(&mut self.appearance_join,1,"Круглое");
-                        ui.selectable_value(&mut self.appearance_join,2,"Срез");
-                    });
-                    ui.separator();
-                    if ui.button("Применить к выделению").clicked(){
-                        self.apply_appearance_selection();ui.close_menu();
+                    if ui.button("Преобразовать надписи в контуры").clicked(){
+                        self.text_to_curves();ui.close_menu();
                     }
-                    if ui.button("Сбросить оформление").clicked(){
-                        self.clear_appearance_selection();ui.close_menu();
-                    }
-                    if ui.add_enabled(self.selection_ids().len()==2,
-                        egui::Button::new("Пипетка: первый → второй")).clicked(){
-                        self.copy_appearance_between_selected();ui.close_menu();
-                    }
-                    ui.small("Цвета градиента: #RRGGBB. Ctrl+Z — отмена.");
                 });
+                ui.menu_button("Оформление",|ui|self.appearance_editor(ui));
                 ui.menu_button("Окно",|ui|{
                     if ui.button("Поиск команды     Ctrl+K").clicked(){
                         self.show_command_palette=true;
@@ -775,6 +735,12 @@ impl Editor {
                 if ui.button("Ломаная → кривая Безье").clicked(){
                     self.convert_selected_polyline_to_bezier();
                 }
+                if ui.button("Примитив → редактируемая кривая").clicked(){
+                    self.execute_path_command(crate::path_workspace::PathCommand::Convert);
+                }
+                ui.collapsing("Соединение / упрощение",|ui|{
+                    self.path_workflow_menu(ui);
+                });
                 if ui.button("Развернуть направление контура").clicked(){
                     self.reverse_selected_path();
                 }
@@ -1288,6 +1254,16 @@ impl Editor {
                 .speed(5.0).range(30.0..=600.0));
         });
         if ui.button("Проверить макет").clicked(){self.run_preflight();}
+        ui.separator();
+        ui.collapsing("Паспорт публикации · ресурсы и шрифты",|ui|{
+            if ui.button("Составить паспорт по всем страницам").clicked(){
+                self.refresh_inventory();
+            }
+            egui::ScrollArea::vertical().max_height(210.).show(ui,|ui|{
+                for line in &self.inventory_lines{ui.label(line);}
+            });
+            ui.small("Паспорт не проверяет установку шрифтов и CMYK-совместимость.");
+        });
         ui.label(format!("Активная страница: {} из {}. Объектов во всём документе: {}",
             self.doc.page_index()+1,self.doc.pages().len(),self.doc.all_object_count()));
     }

@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-22.04, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -29,6 +29,20 @@ jobs:
         run: cargo test --release --workspace
       - name: Static Rust analysis
         run: cargo clippy --workspace --all-targets
+      - name: Check Linux glibc portability baseline
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          ldd --version | head -1
+          python - <<'PY'
+          import subprocess, re
+          text=subprocess.check_output(["ldd","--version"],text=True).splitlines()[0]
+          m=re.search(r"(\d+)\.(\d+)\s*$",text)
+          assert m, f"Cannot determine glibc version: {text}"
+          found=tuple(map(int,m.groups()))
+          assert found <= (2,35), f"Linux binary baseline too new: {found}"
+          print("Compatibility build baseline GLIBC <= 2.35")
+          PY
       - name: Build desktop
         run: cargo build --release -p opencorel-desktop
       - name: Build CLI
@@ -39,6 +53,13 @@ jobs:
           set -euo pipefail
           cargo run --release -p opencorel-cli -- new ci-smoke.kdr
           cargo run --release -p opencorel-cli -- inspect ci-smoke.kdr
+          cargo run --release -p opencorel-cli -- inventory ci-smoke.kdr > ci-inventory.txt
+          grep -q '^TEXT 1' ci-inventory.txt || grep -q ' TEXT 1 ' ci-inventory.txt
+          cargo run --release -p opencorel-cli -- find-text ci-smoke.kdr OpenCorel > ci-found.txt
+          grep -q 'HITS 1' ci-found.txt
+          cargo run --release -p opencorel-cli -- replace-text ci-smoke.kdr ci-replaced.kdr OpenCorel Design
+          cargo run --release -p opencorel-cli -- find-text ci-replaced.kdr Design > ci-replaced-found.txt
+          grep -q 'HITS 1' ci-replaced-found.txt
           cargo run --release -p opencorel-cli -- export-svg ci-smoke.kdr ci-smoke.svg
           grep -q '<svg' ci-smoke.svg
           cargo run --release -p opencorel-cli -- add-page ci-smoke.kdr ci-multipage.kdr 210 297
@@ -66,6 +87,9 @@ jobs:
           cargo run --release -p opencorel-cli -- inspect ci-smoke-import.kdr
           printf '%s\n' '<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="100mm" viewBox="0 0 100 100"><rect x="10" y="10" width="40" height="40" stroke="#000000" stroke-width="1" fill="none"/></svg>' > ci-plot.svg
           cargo run --release -p opencorel-cli -- import-svg ci-plot.svg ci-plot.kdr
+          cargo run --release -p opencorel-cli -- gradient-preset ci-plot.kdr ci-gradient.kdr 1 ocean
+          cargo run --release -p opencorel-cli -- export-svg ci-gradient.kdr ci-gradient.svg
+          grep -q '<linearGradient' ci-gradient.svg
           cargo run --release -p opencorel-cli -- plotter-preflight ci-plot.kdr
           cargo run --release -p opencorel-cli -- export-plt ci-plot.kdr ci-plot.plt
           grep -q '^IN;SP1;PA;' ci-plot.plt

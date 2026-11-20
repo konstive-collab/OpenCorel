@@ -7,6 +7,71 @@ use opencorel_typography::TextOutliner;
 fn main()->ExitCode{
     let args:Vec<_>=env::args().collect();
     let outcome=match args.as_slice(){
+        [_,op,path] if op=="inventory" =>open_any(path).map(|r|{
+            let inv=r.document.inventory();
+            println!("PAGES {}",inv.pages);
+            println!("OBJECTS {} VECTORS {} TEXT {} RASTER {} EMBEDDED {}",
+                inv.objects,inv.editable_vectors,inv.editable_text,
+                inv.raster_images,inv.embedded_svg);
+            println!("GRADIENTS {} GROUP MEMBERS {} CLIP TARGETS {}",
+                inv.gradients,inv.grouped_members,inv.clipped_targets);
+            println!("ESTIMATED IMAGE BYTES {}",inv.estimated_image_bytes);
+            for (font,count) in inv.font_families{
+                println!("FONT {} {}",font,count);
+            }
+            for (color,count) in inv.solid_colors{
+                println!("COLOR {} {}",color,count);
+            }
+        }),
+        [_,op,path,needle] if op=="find-text" =>open_any(path).and_then(|r|{
+            let results=r.document.find_text(needle,false,true)?;
+            for hit in &results{
+                println!("PAGE {} OBJECT {} HITS {} {}",
+                    hit.page_id,hit.object_id,hit.occurrences,
+                    hit.preview.replace('\n'," ↵ "));
+            }
+            println!("Total: {} hits in {} objects",
+                results.iter().map(|hit|hit.occurrences).sum::<usize>(),
+                results.len());
+            Ok(())
+        }),
+        [_,op,src,dst,needle,replacement] if op=="replace-text" =>{
+            if src==dst{Err("Source and destination must differ".into())}
+            else{open_any(src).and_then(|r|{
+                let mut doc=r.document;
+                let count=doc.replace_text(needle,replacement,false,true)?;
+                if count==0{return Err("No matching text to replace".into());}
+                save_document(&doc,dst)?;
+                println!("Replaced {count} Unicode-insensitive matches across all pages");
+                Ok(())
+            })}
+        },
+        [_,op,src,dst,object_id,preset] if op=="gradient-preset" =>{
+            if src==dst{Err("Source and destination must differ".into())}
+            else{open_any(src).and_then(|r|{
+                use opencorel_core::appearance::GradientPreset;
+                let id=object_id.parse::<u64>()
+                    .map_err(|_|"Invalid object ID".to_string())?;
+                let gradient=match preset.to_ascii_lowercase().as_str(){
+                    "sunrise"=>Some(GradientPreset::Sunrise),
+                    "ocean"=>Some(GradientPreset::Ocean),
+                    "forest"=>Some(GradientPreset::Forest),
+                    "sunset"=>Some(GradientPreset::Sunset),
+                    "steel"=>Some(GradientPreset::Steel),
+                    "candy"=>Some(GradientPreset::Candy),
+                    "monochrome"=>Some(GradientPreset::Monochrome),
+                    _=>None,
+                }.ok_or("Unknown RGB gradient preset")?;
+                let mut doc=r.document;
+                let mut appearance=doc.appearances.get(&id)
+                    .cloned().unwrap_or_default();
+                appearance.gradient=Some(gradient.create());
+                doc.set_appearance(id,appearance)?;
+                save_document(&doc,dst)?;
+                println!("Applied RGB preset {preset} to object #{id}");
+                Ok(())
+            })}
+        },
         [_,op,n] if op=="benchmark" => benchmark(n),
         [_,op,path] if op=="new" => {
             let mut d=Document::default();
@@ -150,7 +215,7 @@ fn main()->ExitCode{
             .and_then(|r|save_document(&r.document,dst)),
         [_,op,src,dst] if op=="export-svg" => open_any(src)
             .and_then(|r|save_document(&r.document,dst)),
-        _=>{eprintln!("Usage:\n  opencorel-cli benchmark COUNT\n  opencorel-cli new FILE.kdr\n  opencorel-cli inspect FILE.kdr\n  opencorel-cli pages FILE.kdr\n  opencorel-cli add-page IN.kdr OUT.kdr WIDTH_MM HEIGHT_MM\n  opencorel-cli duplicate-page IN.kdr OUT.kdr\n  opencorel-cli batch-svg FILE.kdr DIRECTORY\n  opencorel-cli batch-pdf FILE.kdr DIRECTORY\n  opencorel-cli export-pdf-book FILE.kdr DOCUMENT.pdf\n  opencorel-cli export-trim-pdf FILE.kdr TRIM.pdf\n  opencorel-cli export-trim-svg FILE.kdr TRIM.svg\n  opencorel-cli preflight FILE.kdr\n  opencorel-cli convert INPUT OUTPUT\n  opencorel-cli outline-text INPUT.kdr OUTPUT.kdr\n  opencorel-cli export-bitmap FILE.kdr FILE.png DPI\n  opencorel-cli export-svg FILE.kdr FILE.svg\n  opencorel-cli export-pdf FILE.kdr FILE.pdf\n  opencorel-cli plotter-preflight FILE.kdr\n  opencorel-cli export-plt FILE.kdr FILE.plt\n  opencorel-cli dxf-preflight FILE.kdr\n  opencorel-cli export-dxf FILE.kdr FILE.dxf\n  opencorel-cli import-svg FILE.svg FILE.kdr");
+        _=>{eprintln!("Usage:\n  opencorel-cli benchmark COUNT\n  opencorel-cli new FILE.kdr\n  opencorel-cli inventory FILE.kdr\n  opencorel-cli find-text FILE.kdr QUERY\n  opencorel-cli replace-text IN.kdr OUT.kdr QUERY REPLACEMENT\n  opencorel-cli gradient-preset IN.kdr OUT.kdr OBJECT_ID sunrise|ocean|forest|sunset|steel|candy|monochrome\n  opencorel-cli inspect FILE.kdr\n  opencorel-cli pages FILE.kdr\n  opencorel-cli add-page IN.kdr OUT.kdr WIDTH_MM HEIGHT_MM\n  opencorel-cli duplicate-page IN.kdr OUT.kdr\n  opencorel-cli batch-svg FILE.kdr DIRECTORY\n  opencorel-cli batch-pdf FILE.kdr DIRECTORY\n  opencorel-cli export-pdf-book FILE.kdr DOCUMENT.pdf\n  opencorel-cli export-trim-pdf FILE.kdr TRIM.pdf\n  opencorel-cli export-trim-svg FILE.kdr TRIM.svg\n  opencorel-cli preflight FILE.kdr\n  opencorel-cli convert INPUT OUTPUT\n  opencorel-cli outline-text INPUT.kdr OUTPUT.kdr\n  opencorel-cli export-bitmap FILE.kdr FILE.png DPI\n  opencorel-cli export-svg FILE.kdr FILE.svg\n  opencorel-cli export-pdf FILE.kdr FILE.pdf\n  opencorel-cli plotter-preflight FILE.kdr\n  opencorel-cli export-plt FILE.kdr FILE.plt\n  opencorel-cli dxf-preflight FILE.kdr\n  opencorel-cli export-dxf FILE.kdr FILE.dxf\n  opencorel-cli import-svg FILE.svg FILE.kdr");
             return ExitCode::FAILURE;}
     };
     match outcome{
