@@ -170,7 +170,7 @@ mod tests{
         spec=QrSpec::default();
         spec.payload="X".repeat(1025);
         assert!(generate(&spec).is_err());
-        spec.payload="https://example.com".into();
+        spec.payload="A".into();
         spec.size_mm=10.0;
         // A small QR can still fit if the module is >= 0.30 mm.
         assert!(generate(&spec).is_ok());

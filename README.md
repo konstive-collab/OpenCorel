@@ -4,6 +4,14 @@
 
 **Alpha development preview — NOT a fully compatible replacement for CorelDRAW.** Designed for posters, maps and large advertising sheets, currently targeting Windows 10/11 x64 and Linux x64. Windows 7 is not tested.
 
+## v0.21 — Offline QR, document-wide RGB palette and Object Explorer
+
+- Offline ISO/IEC 18004 Model 2 QR generation through pure-Rust qrcodegen. Real editable grouped vector contours and light quiet-zone background (4 modules), four error-correction levels, preview, print-module and contrast checks, KDR/SVG/PDF support.
+- Atomic RGB replacement across all or one page: fill, outline and gradient-stop channels, per-page effect preview, locked/hidden-layer preflight and one-step Undo; select matching active-page objects by color.
+- Object Explorer: search across all page states by name, text content, type, layer and RGB color; jump to a result to select its native object.
+- New CLI commands `qr-code`, `recolor-rgb`, `find-objects`; regression tests and Windows/Linux integration smoke.
+- Remaining limitations: complete CDR fidelity, ICC/CMYK/PDF-X, automatic QR scan validation and Windows 7 runtime certification.
+
 ## v0.20 — Professional Appearance, Typography & Vector Mega Update
 
 - Seven RGB gradient presets, 2–32 editable color stops, percentage and HEX controls, interpolated preview and loading an object's existing style.
