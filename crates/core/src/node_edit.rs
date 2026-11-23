@@ -38,28 +38,42 @@ pub fn handles(shape:&Shape,limit:usize)->Vec<(NodeAddress,Point)>{
     let mut nodes=Vec::new();
     if limit==0{return nodes;}
 
+    // Always expose anchors before control points. Previously every cubic
+    // consumed three of the visible slots, so a long path stopped exposing
+    // anchors after only limit / 3 segments.
     match shape{
         Shape::Polyline{points,..}=>{
-            for (i,p) in points.iter().enumerate().take(limit){push_handle(&mut nodes,limit,NodeAddress::Polyline(i),*p);}
+            for (i,p) in points.iter().enumerate().take(limit){
+                push_handle(&mut nodes,limit,NodeAddress::Polyline(i),*p);
+            }
         }
         Shape::Bezier{start,segments,..}=>{
             push_handle(&mut nodes,limit,NodeAddress::BezierStart,*start);
-            for (i,s) in segments.iter().enumerate().take(limit){
+            for (i,s) in segments.iter().enumerate(){
+                if nodes.len()>=limit{break;}
                 push_handle(&mut nodes,limit,NodeAddress::BezierEnd(i),s.end);
+            }
+            for (i,s) in segments.iter().enumerate(){
+                if nodes.len()>=limit{break;}
                 push_handle(&mut nodes,limit,NodeAddress::BezierControl1(i),s.control1);
                 push_handle(&mut nodes,limit,NodeAddress::BezierControl2(i),s.control2);
             }
         }
         Shape::CompoundPath{contours}=>{
-            for (j,c) in contours.iter().enumerate(){
+            'anchors:for (j,c) in contours.iter().enumerate(){
+                if nodes.len()>=limit{break;}
                 push_handle(&mut nodes,limit,NodeAddress::CompoundStart(j),c.start);
                 for (i,s) in c.segments.iter().enumerate(){
+                    if nodes.len()>=limit{break 'anchors;}
                     push_handle(&mut nodes,limit,NodeAddress::CompoundEnd(j,i),s.end);
+                }
+            }
+            'controls:for (j,c) in contours.iter().enumerate(){
+                for (i,s) in c.segments.iter().enumerate(){
+                    if nodes.len()>=limit{break 'controls;}
                     push_handle(&mut nodes,limit,NodeAddress::CompoundControl1(j,i),s.control1);
                     push_handle(&mut nodes,limit,NodeAddress::CompoundControl2(j,i),s.control2);
-                    if nodes.len()>=limit{break;}
                 }
-                if nodes.len()>=limit{break;}
             }
         }
         _=>{}
@@ -494,6 +508,41 @@ mod tests{
             CubicSegment{control1:Point{x:0.,y:10.},control2:Point{x:10.,y:10.},
                 end:Point{x:10.,y:0.}}
         ],closed:false}
+    }
+    #[test] fn visible_handles_prioritize_anchors_on_long_bezier(){
+        let segment=CubicSegment{
+            control1:Point{x:1.,y:1.},control2:Point{x:2.,y:2.},
+            end:Point{x:3.,y:3.},
+        };
+        let shape=Shape::Bezier{
+            start:Point{x:0.,y:0.},segments:vec![segment;1000],closed:false,
+        };
+        let picked=handles(&shape,750);
+        assert_eq!(picked.len(),750);
+        assert!(picked.iter().all(|(addr,_)|!addr.is_handle()));
+        assert_eq!(picked[0].0,NodeAddress::BezierStart);
+        assert_eq!(picked[749].0,NodeAddress::BezierEnd(748));
+    }
+    #[test] fn visible_handles_keep_controls_on_small_paths(){
+        let picked=handles(&path(),4);
+        assert_eq!(picked.len(),4);
+        assert_eq!(picked[0].0,NodeAddress::BezierStart);
+        assert_eq!(picked[1].0,NodeAddress::BezierEnd(0));
+        assert_eq!(picked[2].0,NodeAddress::BezierControl1(0));
+        assert_eq!(picked[3].0,NodeAddress::BezierControl2(0));
+    }
+    #[test] fn compound_visible_handles_prioritize_contour_anchors(){
+        let segment=CubicSegment{
+            control1:Point{x:1.,y:1.},control2:Point{x:2.,y:2.},
+            end:Point{x:3.,y:3.},
+        };
+        let shape=Shape::CompoundPath{contours:vec![
+            Contour{start:Point{x:0.,y:0.},segments:vec![segment;10],closed:true},
+            Contour{start:Point{x:5.,y:5.},segments:vec![segment;10],closed:true},
+        ]};
+        let picked=handles(&shape,15);
+        assert!(picked.iter().all(|(addr,_)|!addr.is_handle()));
+        assert!(picked.iter().any(|(addr,_)|*addr==NodeAddress::CompoundStart(1)));
     }
     #[test] fn insert_bezier_preserves_entire_curve(){
         let mut shape=path();
