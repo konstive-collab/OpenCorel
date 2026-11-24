@@ -722,7 +722,20 @@ impl Editor {
                 ui.label("Выберите опорную точку для точного позиционирования.");
             }
             ui.collapsing("Геометрия и касательные",|ui|{
-                use opencorel_core::node_edit::AnchorMode;
+                use opencorel_core::node_edit::{AnchorMode,HandleMode};
+                ui.label("Связь касательных при перетаскивании:");
+                ui.horizontal_wrapped(|ui|{
+                    ui.selectable_value(&mut self.node_handle_mode,
+                        HandleMode::Independent,"Свободно").on_hover_text(
+                            "Двигать только выбранный управляющий маркер");
+                    ui.selectable_value(&mut self.node_handle_mode,
+                        HandleMode::Smooth,"Гладко").on_hover_text(
+                            "Сохранять направление общей касательной и длину противоположного маркера");
+                    ui.selectable_value(&mut self.node_handle_mode,
+                        HandleMode::Symmetric,"Симметрично").on_hover_text(
+                            "Отражать противоположный маркер с той же длиной");
+                });
+                ui.separator();
                 ui.label("Тип выбранного опорного узла:");
                 ui.horizontal_wrapped(|ui|{
                     if ui.button("Острый").on_hover_text(
@@ -750,6 +763,10 @@ impl Editor {
                         self.set_selected_path_closed(false);
                     }
                 });
+                if ui.button("Разорвать контур в выбранном узле").on_hover_text(
+                    "Открыть замкнутую кривую в указанном узле, не теряя геометрию").clicked(){
+                    self.break_selected_closed_path();
+                }
                 if ui.button("Ломаная → кривая Безье").clicked(){
                     self.convert_selected_polyline_to_bezier();
                 }
