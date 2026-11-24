@@ -209,6 +209,45 @@ impl Editor{
         self.edit_active_shape(node_edit::reverse_path,
             "Направление контура изменено (Ctrl+Z — отмена)");
     }
+    /// Split an open path into two real independent objects. Clone the
+    /// document to validate the complete operation before creating an undo
+    /// checkpoint; preserve original layer, styling and vector appearance.
+    pub(super) fn split_selected_open_path(&mut self){
+        let Some((id,address))=self.active_node else{
+            self.status="Выберите внутренний узел открытого контура".into();return;
+        };
+        if self.selected!=Some(id)||!self.node_edit_allowed(id){
+            self.status="Нельзя разделить заблокированный или сгруппированный контур".into();return;
+        }
+        if self.doc.clip_links.iter().any(|link|
+            link.source_id==id||link.target_id==id){
+            self.status="Сначала снимите обтравочную маску с контура".into();return;
+        }
+        let Some(source)=self.doc.get(id).cloned() else{return;};
+        let (left,right)=match node_edit::split_open_at_node(&source.shape,address){
+            Ok(parts)=>parts,
+            Err(error)=>{self.status=error;return;}
+        };
+        let mut proposed=self.doc.clone();
+        proposed.get_mut(id).expect("selected").shape=left;
+        let other_id=proposed.copy_object(&source,source.layer_id,0.,0.);
+        proposed.get_mut(other_id).expect("copied").shape=right;
+        if let Err(error)=proposed.validate(){
+            self.status=format!("Разделение отменено: {error}");
+            return;
+        }
+        self.checkpoint();
+        self.doc=proposed;
+        self.selected=Some(other_id);
+        self.multi_selected.clear();
+        self.active_node=None;self.node_drag=None;
+        self.fill_cache.entries.clear();
+        self.vector_cache.clear();
+        self.raster_cache.clear();
+        self.compound_cache.clear();
+        self.masked_canvas=Default::default();
+        self.status="Контур разделён на два независимых объекта (Ctrl+Z — отмена)".into();
+    }
     pub(super) fn break_selected_closed_path(&mut self){
         let Some((id,address))=self.active_node else{
             self.status="Сначала выберите узел замкнутого контура".into();return;
@@ -260,6 +299,29 @@ mod tests{
         let restored=node_edit::point_at(&editor.doc.objects.last().unwrap().shape,
             NodeAddress::BezierStart).unwrap();
         assert_eq!(restored,Point{x:10.,y:20.});
+    }
+    #[test] fn split_open_bezier_creates_two_objects_with_single_undo(){
+        let mut editor=Editor::default();
+        editor.doc=Default::default();
+        let id=editor.doc.add(Shape::Bezier{
+            start:Point{x:0.,y:0.},segments:vec![
+                CubicSegment{control1:Point{x:2.,y:2.},
+                    control2:Point{x:8.,y:2.},end:Point{x:10.,y:0.}},
+                CubicSegment{control1:Point{x:12.,y:2.},
+                    control2:Point{x:18.,y:2.},end:Point{x:20.,y:0.}},
+            ],closed:false
+        },Style::default());
+        let original=editor.doc.clone();
+        editor.select_object(Some(id),false);
+        editor.tool=Tool::Nodes;
+        editor.active_node=Some((id,NodeAddress::BezierEnd(0)));
+        editor.split_selected_open_path();
+        assert_eq!(editor.doc.objects.len(),2);
+        assert!(editor.doc.get(id).is_some());
+        assert_ne!(editor.selected,Some(id));
+        editor.doc.validate().unwrap();
+        editor.undo();
+        assert_eq!(editor.doc,original);
     }
     #[test] fn node_editor_break_closed_path_is_undoable(){
         let mut editor=Editor::default();
