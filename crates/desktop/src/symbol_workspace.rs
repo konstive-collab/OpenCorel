@@ -66,8 +66,10 @@ impl Editor{
             self.status="Выберите символ в библиотеке".into();return;
         };
         let Some(asset)=self.symbol_library.symbols.iter()
-            .find(|symbol|symbol.library_key==key).cloned() else{
-            self.status="Символ больше не найден в библиотеке".into();return;
+            .find(|symbol|symbol.library_key==key).cloned()
+            .or_else(||self.doc.symbols.iter()
+                .find(|symbol|symbol.library_key==key).cloned()) else{
+            self.status="Символ больше не найден в проекте или библиотеке".into();return;
         };
         let mut document=self.doc.clone();
         let id=match document.import_symbol_definition(&asset){
@@ -191,6 +193,23 @@ impl Editor{
             }
         }
     }
+    fn save_selected_document_symbol_to_library(&mut self){
+        let Some(key)=self.selected_symbol_key.clone() else{return;};
+        let Some(definition)=self.doc.symbols.iter()
+            .find(|symbol|symbol.library_key==key).cloned() else{
+            self.status="Определение символа не найдено в текущем проекте".into();return;
+        };
+        let mut library=self.symbol_library.clone();
+        if let Err(error)=library.upsert(definition.clone()){
+            self.status=format!("Не удалось добавить символ в библиотеку: {error}");return;
+        }
+        if let Err(error)=self.persist_symbol_library(&library){
+            self.symbol_library_error=Some(error.clone());
+            self.status=format!("Не удалось сохранить библиотеку: {error}");return;
+        }
+        self.symbol_library=library;
+        self.status=format!("«{}» добавлен в локальную библиотеку",definition.name);
+    }
     fn remove_selected_library_symbol(&mut self){
         let Some(key)=self.selected_symbol_key.clone() else{return;};
         let mut library=self.symbol_library.clone();
@@ -277,9 +296,37 @@ impl Editor{
                     }
                 }
             });
-        let selected_asset=self.selected_symbol_key.as_ref().and_then(|key|
+        let local_keys:HashSet<String>=self.symbol_library.symbols.iter()
+            .map(|symbol|symbol.library_key.clone()).collect();
+        let document_symbols:Vec<_>=self.doc.symbols.iter().filter(|symbol|
+            !local_keys.contains(&symbol.library_key)&&
+            (category.is_empty()||symbol.category==category)&&
+            (query.is_empty()||symbol.name.to_lowercase().contains(&query)||
+                symbol.category.to_lowercase().contains(&query)))
+            .map(|symbol|(symbol.library_key.clone(),symbol.name.clone(),
+                symbol.category.clone(),symbol.objects.len())).collect();
+        if !document_symbols.is_empty(){
+            ui.separator();
+            ui.label(RichText::new("СИМВОЛЫ ТЕКУЩЕГО ДОКУМЕНТА")
+                .small().color(Color32::from_rgb(35,183,159)));
+            for (key,name,category,count) in document_symbols{
+                let selected=self.selected_symbol_key.as_deref()==Some(key.as_str());
+                let label=if category.is_empty(){
+                    format!("◇ {name} · {count} объектов · в проекте")
+                }else{format!("◇ {name} · {category} · в проекте")};
+                if ui.selectable_label(selected,label).clicked(){
+                    self.selected_symbol_key=Some(key);
+                }
+            }
+        }
+        let selected_key=self.selected_symbol_key.as_ref();
+        let selected_asset=selected_key.and_then(|key|
             self.symbol_library.symbols.iter()
-                .find(|item|&item.library_key==key)).cloned();
+                .find(|item|&item.library_key==key)).cloned()
+            .or_else(||selected_key.and_then(|key|self.doc.symbols.iter()
+                .find(|item|&item.library_key==key)).cloned());
+        let selected_is_local=selected_key.is_some_and(|key|
+            self.symbol_library.symbols.iter().any(|item|&item.library_key==key));
         if let Some(asset)=selected_asset{
             ui.separator();
             ui.label(RichText::new(asset.name.as_str()).strong());
@@ -287,8 +334,12 @@ impl Editor{
             ui.small(format!("Объектов: {}",asset.objects.len()));
             ui.horizontal_wrapped(|ui|{
                 if ui.button("Вставить в центр").clicked(){self.insert_selected_symbol();}
-                if ui.button("Удалить из библиотеки").clicked(){
-                    self.remove_selected_library_symbol();
+                if selected_is_local{
+                    if ui.button("Удалить из библиотеки").clicked(){
+                        self.remove_selected_library_symbol();
+                    }
+                }else if ui.button("Сохранить в библиотеку").clicked(){
+                    self.save_selected_document_symbol_to_library();
                 }
             });
         }
