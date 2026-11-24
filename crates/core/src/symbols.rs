@@ -856,7 +856,8 @@ mod tests{
         let id=doc.add(rect(10.,10.),Style::default());
         let symbol=doc.create_symbol(&[id],"Single","Test").unwrap();
         let instance=doc.symbol_instances[0].clone();
-        let copy=doc.copy_object(doc.get(id).unwrap(),1,30.,0.);
+        let original=doc.get(id).unwrap().clone();
+        let copy=doc.copy_object(&original,1,30.,0.);
         let map=BTreeMap::from([(id,copy)]);
         assert_eq!(doc.clone_symbol_instances(&[instance],&map).unwrap(),1);
         assert_eq!(doc.symbol_instances.len(),2);
