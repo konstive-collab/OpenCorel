@@ -1,5 +1,5 @@
 //! Discoverable editing workflows and undoable productivity operations.
-use super::{Editor,Tool};
+use super::{Editor,Tool,PendingAction};
 use eframe::egui::{self,RichText};
 use opencorel_core::{Bounds,Document,Object,Point,Shape,Style};
 use opencorel_core::transform::{self,QuarterTurn};
@@ -350,16 +350,23 @@ impl Editor{
         self.status=format!("Сдвиг: X {dx:+.1} мм, Y {dy:+.1} мм");
     }
     pub(super) fn blank_page(&mut self,width:f32,height:f32){
-        self.new_document();
+        self.request_action(PendingAction::BlankPage{width,height});
+    }
+    pub(super) fn blank_page_now(&mut self,width:f32,height:f32){
+        self.reset_document();
         self.doc.name="Новый дизайн".into();
         self.doc.page.width_mm=width;
         self.doc.page.height_mm=height;
         self.file="Новый дизайн.kdr".into();
         self.show_welcome=false;
+        self.is_dirty=true;self.last_edit=std::time::Instant::now();
         self.status=format!("Пустой документ: {width:.0} × {height:.0} мм. Выберите инструмент слева.");
     }
     pub(super) fn sample_design(&mut self){
-        self.new_document();
+        self.request_action(PendingAction::SampleDesign);
+    }
+    pub(super) fn sample_design_now(&mut self){
+        self.reset_document();
         self.doc.name="Учебный рекламный макет".into();
         self.doc.page.width_mm=420.0;
         self.doc.page.height_mm=297.0;
@@ -401,6 +408,7 @@ impl Editor{
         self.active_layer=front;
         self.inspector_tab=super::workspace::InspectorTab::Objects;
         self.show_welcome=false;
+        self.is_dirty=true;self.last_edit=std::time::Instant::now();
         self.status="Учебный макет открыт. Выделяйте объекты, меняйте текст, цвет и размер. F1 — инструкция.".into();
     }
     pub(super) fn welcome_window(&mut self,ctx:&egui::Context){
