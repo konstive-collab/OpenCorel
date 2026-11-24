@@ -1326,6 +1326,9 @@ impl Editor {
                 ui.label(pos);
                 ui.separator();
                 ui.label(format!("Объектов: {}",self.doc.objects.len()));
+                ui.separator();
+                ui.label(if self.is_dirty{"● Не сохранено"}else{"✓ Сохранено"});
+                ui.label("Автосохранение · 45 с");
                 if !self.multi_selected.is_empty(){
                     ui.separator();
                     ui.label(format!("Выделено: {}",self.selection_ids().len()));
