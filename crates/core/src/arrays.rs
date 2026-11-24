@@ -162,6 +162,19 @@ mod tests{
         assert_eq!(doc.group_members(ids[0]).len(),2);
         doc.validate().unwrap();
     }
+    #[test] fn repeated_symbol_instances_keep_their_link(){
+        let mut doc=Document::default();
+        let a=doc.add(Shape::Rectangle{x:1.,y:2.,w:10.,h:10.},Style::default());
+        let b=doc.add(Shape::Ellipse{x:12.,y:2.,w:8.,h:8.},Style::default());
+        let symbol=doc.create_symbol(&[a,b],"Array mark","Test").unwrap();
+        let copies=doc.duplicate_pattern(&[a,b],RepeatPattern::Linear{
+            count:3,dx_mm:40.,dy_mm:0.
+        }).unwrap();
+        assert_eq!(copies.len(),4);
+        assert_eq!(doc.symbol_instances.len(),3);
+        assert!(doc.symbol_instances.iter().all(|item|item.symbol_id==symbol.id));
+        doc.validate().unwrap();
+    }
     #[test] fn repeat_rejects_partial_group_atomically(){
         let mut doc=Document::default();
         let a=doc.add(Shape::Rectangle{x:1.,y:1.,w:2.,h:2.},Style::default());
