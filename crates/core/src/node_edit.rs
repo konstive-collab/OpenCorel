@@ -892,7 +892,8 @@ mod tests{
         assert!(!closed);
         assert_eq!(segments.len(),2);
         assert_eq!(segments[1].end,start);
-        assert_eq!(segments[1].control1,Point{x:10.0/1.0-10.0/3.0,y:0.});
+        assert!((segments[1].control1.x-10.0*2.0/3.0).abs()<1e-4);
+        assert_eq!(segments[1].control1.y,0.);
     }
     #[test] fn break_closed_polyline_duplicates_seam_without_losing_edges(){
         let mut shape=Shape::Polyline{points:vec![
