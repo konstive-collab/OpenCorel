@@ -2,7 +2,7 @@
 
 **Версия исходников: альфа-прототип (текущая версия указывается в `Cargo.toml`).** Разрабатываем независимый инструмент для рекламных макетов, больших плакатов, карт и вывесок на Windows 10/11 и Linux.
 
-[Руководство по работе](docs/USER_GUIDE_RU.md) · [Компактная панель инструментов](docs/UX_COMPACT_TOOL_DOCK.md) · [Актуальная таблица форматов](docs/FORMAT_SUPPORT.md) · [Формат KDR](docs/KDR_SPEC.md) · [Матрица приёмки](docs/QA_MATRIX.md) · [Правила участия](CONTRIBUTING.md) · [План](docs/ROADMAP.md)
+[Руководство по работе](docs/USER_GUIDE_RU.md) · [Компактная панель инструментов](docs/UX_COMPACT_TOOL_DOCK.md) · [Актуальная таблица форматов](docs/FORMAT_SUPPORT.md) · [Формат KDR](docs/KDR_SPEC.md) · [Формат библиотеки OCLIB](docs/OCLIB_SPEC.md) · [Матрица приёмки](docs/QA_MATRIX.md) · [Правила участия](CONTRIBUTING.md) · [План](docs/ROADMAP.md)
 
 ## v0.23 alpha — Связанные символы и локальная библиотека компонентов
 
