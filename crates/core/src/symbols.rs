@@ -451,7 +451,7 @@ impl Document{
         }
         let source=definition.bounds();
         let needed=definition.objects.len() as u64+1;
-        if self.next_id.checked_add(needed).is_none_or(|next|next>=u64::MAX){
+        if self.next_id.checked_add(needed).is_none_or(|next|next==u64::MAX){
             return Err("Object identifier limit reached".into());
         }
         let mut draft=self.clone();
