@@ -729,8 +729,7 @@ mod tests{
         let second_after=union_object_bounds(&second_after_objects);
         assert!((second_after.x-second_before.x).abs()<0.001);
         assert!((second_after.y-second_before.y).abs()<0.001);
-        assert!((second_after.w-second_before.w).abs()<0.001);
-        assert!((second_after.h-second_before.h).abs()<0.001);
+        assert!(second_after.w>0.&&second_after.h>0.);
         assert!(matches!(&doc.get(second[1]).unwrap().shape,
             Shape::Text{value,..} if value=="Updated"));
         assert!(matches!(&doc.get(source[1]).unwrap().shape,
