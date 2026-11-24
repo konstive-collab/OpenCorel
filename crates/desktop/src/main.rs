@@ -855,17 +855,23 @@ impl Editor{
         self.curve_outgoing=outgoing;
         self.status="Узел добавлен: протягивание создаёт плавные касательные; двойной щелчок завершает".into();
     }
-    fn import_svg(&mut self){self.open();}
+    fn import_svg(&mut self){
+        self.request_open(PathBuf::from(self.file.clone()));
+    }
     fn save(&mut self){
         // New documents have only a suggested filename. Ask where to save
         // instead of silently writing into an unpredictable working directory.
         if !std::path::Path::new(&self.file).is_absolute(){
             self.save_as_picker();return;
         }
-        self.status=match opencorel_formats::save_document(&self.doc,&self.file){
-            Ok(())=>format!("Сохранено: {}",self.file),
-            Err(e)=>format!("Ошибка сохранения: {e}"),
-        };
+        match opencorel_formats::save_document(&self.doc,&self.file){
+            Ok(())=>{
+                self.is_dirty=false;self.last_autosave=Instant::now();
+                self.cleanup_recovery();
+                self.status=format!("Сохранено: {}",self.file);
+            }
+            Err(e)=>self.status=format!("Ошибка сохранения: {e}"),
+        }
     }
     fn place_bitmap_picker(&mut self){
         if let Some(path)=rfd::FileDialog::new().add_filter(
@@ -902,10 +908,7 @@ impl Editor{
                 "odg","fodg","dxf","wmf","emf","wpg","vsd","vsdx","sxd",
                 "png","jpg","jpeg","webp","gif","bmp","tif","tiff"
             ]).pick_file(){
-            let previous=self.file.clone();
-            self.file=path.to_string_lossy().into_owned();
-            self.open();
-            if self.status.starts_with("Ошибка"){self.file=previous;}
+            self.request_open(path);
         }
     }
     fn save_as_picker(&mut self){
@@ -922,6 +925,8 @@ impl Editor{
             self.status=match result {
                 Ok(())=>{
                     self.file=chosen.to_string_lossy().into_owned();
+                    self.is_dirty=false;self.last_autosave=Instant::now();
+                    self.cleanup_recovery();
                     format!("Сохранено: {}",chosen.display())
                 },
                 Err(e)=>format!("Ошибка сохранения: {e}"),
@@ -966,8 +971,7 @@ impl Editor{
     }
     fn import_svg_picker(&mut self){
         if let Some(path)=rfd::FileDialog::new().add_filter("SVG / SVGZ",&["svg","svgz"]).pick_file(){
-            self.file=path.to_string_lossy().into_owned();
-            self.open();
+            self.request_open(path);
         }
     }
     fn open(&mut self){
@@ -975,6 +979,8 @@ impl Editor{
             Ok(result)=>{
                 self.checkpoint();
                 self.doc=result.document;
+                self.is_dirty=false;self.last_edit=Instant::now();
+                self.last_autosave=Instant::now();self.cleanup_recovery();
                 self.batch_page_selection=None;
                 self.selected=None;self.multi_selected.clear();self.active_layer=1;
                 self.resize_drag=None;self.node_drag=None;self.active_node=None;
@@ -1356,6 +1362,17 @@ impl Editor{
 }
 impl eframe::App for Editor{
     fn update(&mut self,ctx:&egui::Context,_:&mut eframe::Frame){
+        if ctx.input(|i|i.viewport().close_requested())&&!self.close_confirmed{
+            if self.is_dirty{
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                self.request_action(PendingAction::Close);
+            }else{
+                self.cleanup_recovery();
+                self.close_confirmed=true;
+            }
+        }
+        self.check_recovery();
+        self.autosave_tick(ctx);
         let undo=ctx.input(|i|i.modifiers.command&&i.key_pressed(egui::Key::Z)&&!i.modifiers.shift);
         let redo=ctx.input(|i|i.modifiers.command&&(i.key_pressed(egui::Key::Y) ||
             (i.key_pressed(egui::Key::Z)&&i.modifiers.shift)));
@@ -1374,10 +1391,7 @@ impl eframe::App for Editor{
                         "png"|"jpg"|"jpeg"|"webp"|"gif"|"bmp"|"tif"|"tiff"){
                         self.place_bitmap(&path);
                     }else{
-                        let old=self.file.clone();
-                        self.file=path.to_string_lossy().into_owned();
-                        self.open();
-                        if self.status.starts_with("Ошибка"){self.file=old;}
+                        self.request_open(path);
                     }
                 }
             }
@@ -1488,6 +1502,9 @@ impl eframe::App for Editor{
         self.qr_dialog(ctx);
         self.recolor_dialog(ctx);
         self.object_finder_dialog(ctx);
+        self.recovery_dialog(ctx);
+        self.unsaved_dialog(ctx);
+        self.process_pending_action(ctx);
         if self.show_preflight{
             egui::Window::new("Проверка макета")
                 .open(&mut self.show_preflight)
