@@ -1,7 +1,7 @@
 //! Persistent multipage document support compatible with legacy one-page JSON.
 //! Active content remains in Document.page/objects for existing tools; all
 //! inactive pages live here with independent art, clipping and layers.
-use crate::{Document,Page,Object,Layer,ClipLink,Shape,Point,CubicSegment,Contour,
+use crate::{Document,Page,Object,Layer,ClipLink,Shape,Point,CubicSegment,
     default_layers,default_next_layer_id,valid_xml_text};
 use crate::appearance::Appearance;
 use crate::guides::Guide;
