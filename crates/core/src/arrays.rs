@@ -1,7 +1,7 @@
 //! Native copies in repeat patterns. All repeats are prepared in a temporary
 //! document, validated, then committed atomically. Undo is owned by the UI.
 use crate::{Document,Object,Point,Shape,ClipLink,transform};
-use std::collections::{HashMap,HashSet};
+use std::collections::{BTreeMap,HashMap,HashSet};
 
 #[derive(Clone,Copy,Debug)]
 pub enum RepeatPattern{
@@ -86,6 +86,10 @@ impl Document{
             wanted.contains(&link.source_id)!=wanted.contains(&link.target_id)){
             return Err("Select both parts of a clipped object".into());
         }
+        let symbol_sources:Vec<_>=self.symbol_instances.iter()
+            .filter(|instance|instance.page_id==self.active_page_id&&
+                instance.member_ids.iter().all(|id|wanted.contains(id)))
+            .cloned().collect();
         let placements=placements(pattern)?;
         let new_count=sources.len().checked_mul(placements.len())
             .ok_or("Too many objects")?;
@@ -106,7 +110,7 @@ impl Document{
         let mut draft=self.clone();
         let mut created=Vec::with_capacity(new_count);
         for placement in placements{
-            let mut new_ids=HashMap::new();
+            let mut new_ids=BTreeMap::new();
             let mut group_ids=HashMap::new();
             for original in &sources{
                 let shape=placed(&original.shape,placement)?;
@@ -133,6 +137,7 @@ impl Document{
                     draft.clip_links.push(ClipLink{source_id,target_id});
                 }
             }
+            draft.clone_symbol_instances(&symbol_sources,&new_ids)?;
         }
         draft.validate()?;
         *self=draft;
