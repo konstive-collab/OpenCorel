@@ -15,7 +15,7 @@ OpenCorel — самостоятельный редактор макетов. С
 6. Поиск работает по имени и категории. **«Импорт OCLIB...»** объединяет выбранную библиотеку с локальной; **«Экспорт OCLIB...»** сохраняет переносимую копию.
 
 Локальная библиотека автоматически сохраняется в пользовательской папке данных:
-- Windows: `%LOCALAPPDATA%\\OpenCorel\\Libraries\\symbols.oclib`
+- Windows: `%LOCALAPPDATA%\OpenCorel\Libraries\symbols.oclib`
 - Linux: `$XDG_DATA_HOME/OpenCorel/Libraries/symbols.oclib` или `~/.local/share/OpenCorel/Libraries/symbols.oclib`
 - macOS: `~/Library/Application Support/OpenCorel/Libraries/symbols.oclib`
 
