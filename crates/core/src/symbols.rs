@@ -247,6 +247,15 @@ fn page_objects(doc:&Document,page_id:u64)->Option<(&[Object],&BTreeMap<u64,Appe
     if page_id==doc.active_page_id{Some((doc.objects.as_slice(),&doc.appearances))}
     else{doc.inactive_pages.get(&page_id).map(|p|(p.objects.as_slice(),&p.appearances))}
 }
+fn page_layer_editable(doc:&Document,page_id:u64,layer_id:u64)->bool{
+    if page_id==doc.active_page_id{
+        doc.layer(layer_id).is_some_and(|layer|layer.visible&&!layer.locked)
+    }else{
+        doc.inactive_pages.get(&page_id)
+            .and_then(|page|page.layers.iter().find(|layer|layer.id==layer_id))
+            .is_some_and(|layer|layer.visible&&!layer.locked)
+    }
+}
 fn page_objects_mut(doc:&mut Document,page_id:u64)
     ->Option<(&mut Vec<Object>,&mut BTreeMap<u64,Appearance>)>{
     if page_id==doc.active_page_id{Some((&mut doc.objects,&mut doc.appearances))}
@@ -442,18 +451,12 @@ impl Document{
             .ok_or("Selected group is not a linked symbol instance")?.clone();
         let (objects,appearances)=page_objects(self,instance.page_id)
             .ok_or("Symbol instance page is missing")?;
-        let editable=if instance.page_id==self.active_page_id{
-            |layer_id|self.layer(layer_id).is_some_and(|layer|layer.visible&&!layer.locked)
-        }else{
-            |layer_id|self.inactive_pages.get(&instance.page_id)
-                .and_then(|page|page.layers.iter().find(|layer|layer.id==layer_id))
-                .is_some_and(|layer|layer.visible&&!layer.locked)
-        };
         let mut source=Vec::with_capacity(instance.member_ids.len());
         for id in &instance.member_ids{
             let object=objects.iter().find(|item|item.id==*id)
                 .ok_or("Symbol instance member is missing")?;
-            if object.group_id!=Some(group_id)||!editable(object.layer_id){
+            if object.group_id!=Some(group_id)||
+                !page_layer_editable(self,instance.page_id,object.layer_id){
                 return Err("Symbol source must be on visible, unlocked layers".into());
             }
             source.push(SymbolObject::from_object(object,appearances.get(id).cloned()));
