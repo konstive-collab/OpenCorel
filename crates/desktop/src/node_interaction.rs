@@ -394,6 +394,22 @@ mod tests{
             else{panic!()};
         assert_eq!(segments[0].control2,Point{x:8.,y:0.});
     }
+    #[test] fn linked_symbol_member_can_be_node_edited_without_selecting_its_siblings(){
+        let mut editor=Editor::default();
+        editor.doc=Default::default();
+        let first=editor.doc.add(Shape::Polyline{
+            points:vec![Point{x:0.,y:0.},Point{x:5.,y:5.}],closed:false
+        },Style::default());
+        let second=editor.doc.add(Shape::Polyline{
+            points:vec![Point{x:10.,y:0.},Point{x:15.,y:5.}],closed:false
+        },Style::default());
+        editor.doc.create_symbol(&[first,second],"Editable path","Test").unwrap();
+        editor.tool=Tool::Nodes;
+        editor.select_object(Some(first),false);
+        assert_eq!(editor.selection_ids(),vec![first]);
+        assert!(editor.node_edit_allowed(first));
+        assert!(editor.active_node_object().is_some());
+    }
     #[test] fn node_tool_rejects_locked_or_grouped_object(){
         let mut editor=Editor::default();
         let id=editor.doc.add(Shape::Polyline{
