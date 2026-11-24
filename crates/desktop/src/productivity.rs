@@ -3,7 +3,7 @@ use super::{Editor,Tool,PendingAction};
 use eframe::egui::{self,RichText};
 use opencorel_core::{Bounds,Document,Object,Point,Shape,Style};
 use opencorel_core::transform::{self,QuarterTurn};
-use std::collections::{HashSet,HashMap};
+use std::collections::{HashSet,HashMap,BTreeMap};
 
 const CLIPBOARD_LIMIT:usize=24*1024*1024;
 pub(super) fn tool_label(tool:Tool)->&'static str{
@@ -83,6 +83,12 @@ impl Editor{
             return false;
         }
         self.internal_clipboard=chosen.into_iter().cloned().collect();
+        self.internal_symbol_clipboard=self.doc.symbol_instances.iter()
+            .filter(|instance|instance.page_id==self.doc.active_page_id&&
+                instance.member_ids.iter().all(|id|ids.contains(id)))
+            .filter_map(|instance|self.doc.symbol_definition(instance.symbol_id)
+                .map(|definition|(instance.clone(),definition.library_key.clone())))
+            .collect();
         self.paste_number=0;
         self.status=format!("Скопировано {} объектов в буфер OpenCorel (Ctrl+V)",
             self.internal_clipboard.len());
@@ -119,6 +125,15 @@ impl Editor{
         let ids:Vec<u64>=copied.iter()
             .map(|obj|self.doc.copy_object(obj,self.active_layer,offset,offset)).collect();
         remap_groups(&mut self.doc,&copied,&ids);
+        let id_map:BTreeMap<u64,u64>=copied.iter().zip(ids.iter())
+            .map(|(old,new)|(old.id,*new)).collect();
+        let linked:Vec<_>=self.internal_symbol_clipboard.iter()
+            .filter(|(instance,key)|self.doc.symbol_definition(instance.symbol_id)
+                .is_some_and(|definition|definition.library_key==*key))
+            .map(|(instance,_)|instance.clone()).collect();
+        if let Err(error)=self.doc.clone_symbol_instances(&linked,&id_map){
+            self.status=format!("Объекты вставлены, связь символа не восстановлена: {error}");
+        }
         self.selected=ids.first().copied();
         self.multi_selected=ids.into_iter().skip(1).collect();
         self.paste_number=self.paste_number.saturating_add(1);
@@ -138,8 +153,17 @@ impl Editor{
             self.status="Лимит 100 000 объектов превышен".into();return;
         }
         self.checkpoint();
+        let source_instances:Vec<_>=self.doc.symbol_instances.iter()
+            .filter(|instance|instance.page_id==self.doc.active_page_id&&
+                instance.member_ids.iter().all(|id|ids.contains(id)))
+            .cloned().collect();
         let new_ids:Vec<_>=copies.iter().map(|o|self.doc.copy_object(o,o.layer_id,10.0,10.0)).collect();
         remap_groups(&mut self.doc,&copies,&new_ids);
+        let id_map:BTreeMap<u64,u64>=copies.iter().zip(new_ids.iter())
+            .map(|(old,new)|(old.id,*new)).collect();
+        if let Err(error)=self.doc.clone_symbol_instances(&source_instances,&id_map){
+            self.status=format!("Копии созданы, связь символа не восстановлена: {error}");
+        }
         self.selected=new_ids.first().copied();
         self.multi_selected=new_ids.into_iter().skip(1).collect();
         self.status=format!("Создано копий: {}",self.selection_ids().len());
