@@ -234,7 +234,7 @@ impl Document{
         self.get_mut(a.id).expect("preflighted").shape=joined;
         self.remove(b.id);
         Ok(a.id)
-
+    }
 }
 #[cfg(test)]
 mod tests{
