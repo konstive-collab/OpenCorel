@@ -12,7 +12,7 @@ Goal: fast, legally independent vector graphics editor for advertising, posters 
 - Link-preserving copy/paste, duplicate, array repeat, page duplication and cross-page transfer.
 - Validation budgets: 500 objects / 8 MiB per symbol, 512 symbols / 64 MiB per OCLIB file, 32 MiB of embedded symbol definitions per KDR document.
 - SVG/PDF export continues to emit ordinary editable geometry. Nested symbols and per-instance overrides are not supported. Node editing is available for individual objects inside a linked instance; update the definition afterward.
-- Automated tests cover KDR backward readability, instance update propagation, stable placement, cross-document library keys, detach, malformed libraries, page transfer and duplication. CI and manual visual acceptance remain pending.
+- Automated Windows/Linux CI passed: workspace tests, release tests, Clippy, desktop/CLI builds, export smoke tests and independent DXF parsing ([run #45471502966](https://github.com/konstive-collab/OpenCorel/actions/runs/45471502966)). Manual UI acceptance, crash/restart simulations and large-document performance QA remain pending.
 
 ## v0.22 — Reliability and crash recovery
 
