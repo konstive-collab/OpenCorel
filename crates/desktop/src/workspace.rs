@@ -344,6 +344,9 @@ impl Editor {
                     if ui.selectable_label(self.inspector_tab==InspectorTab::Export,"Центр экспорта").clicked(){
                         self.inspector_tab=InspectorTab::Export;self.show_inspector=true;ui.close_menu();
                     }
+                    if ui.selectable_label(self.inspector_tab==InspectorTab::Symbols,"Библиотека символов").clicked(){
+                        self.inspector_tab=InspectorTab::Symbols;self.show_inspector=true;ui.close_menu();
+                    }
                 });
                 ui.menu_button("Справка",|ui|{
                     if ui.button("Начало работы и горячие клавиши — F1").clicked(){
