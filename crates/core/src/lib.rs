@@ -28,6 +28,8 @@ pub mod inventory;
 pub mod qr_vector;
 pub mod recolor;
 pub mod object_search;
+pub mod symbols;
+pub use symbols::{SymbolDefinition,SymbolInstance,SymbolLibrary,SymbolObject};
 use appearance::Appearance;
 
 pub const SCHEMA_VERSION: u32 = 1;
@@ -277,7 +279,14 @@ pub struct Document {
     pub page_tabs:Vec<PageTab>,
     #[serde(default,skip_serializing_if="BTreeMap::is_empty")]
     pub inactive_pages:BTreeMap<u64,PageContent>,
+    #[serde(default,skip_serializing_if="Vec::is_empty")]
+    pub symbols:Vec<SymbolDefinition>,
+    #[serde(default,skip_serializing_if="Vec::is_empty")]
+    pub symbol_instances:Vec<SymbolInstance>,
+    #[serde(default="default_next_symbol_id")]
+    pub next_symbol_id:u64,
 }
+fn default_next_symbol_id()->u64{1}
 impl Default for Document {
     fn default() -> Self {
         Self { schema_version:SCHEMA_VERSION, name:"Новый макет".into(),
@@ -286,7 +295,8 @@ impl Default for Document {
             clip_links:Vec::new(),appearances:BTreeMap::new(),guides:Vec::new(),
             active_page_id:1,next_page_id:2,
             page_tabs:vec![PageTab{id:1,name:"Страница 1".into()}],
-            inactive_pages:BTreeMap::new() }
+            inactive_pages:BTreeMap::new(),symbols:Vec::new(),
+            symbol_instances:Vec::new(),next_symbol_id:1 }
     }
 }
 
@@ -314,6 +324,26 @@ impl Document {
             total=total.saturating_add(std::mem::size_of::<Object>()
                 +obj.style.fill.len()+obj.style.stroke.len()+obj.name.len()+shape_bytes);
         }
+        for symbol in &self.symbols{
+            total=total.saturating_add(std::mem::size_of::<SymbolDefinition>()
+                +symbol.name.len()+symbol.category.len()+symbol.library_key.len());
+            for object in &symbol.objects{
+                total=total.saturating_add(std::mem::size_of::<SymbolObject>()
+                    +object.name.len()+object.text_format.family.len()
+                    +object.style.fill.len()+object.style.stroke.len());
+                total=total.saturating_add(match &object.shape{
+                    Shape::Text{value,..}=>value.len(),
+                    Shape::Polyline{points,..}=>points.len()*std::mem::size_of::<Point>(),
+                    Shape::Bezier{segments,..}=>segments.len()*std::mem::size_of::<CubicSegment>(),
+                    Shape::CompoundPath{contours}=>contours.iter().map(|c|
+                        c.segments.len()*std::mem::size_of::<CubicSegment>()).sum(),
+                    Shape::EmbeddedSvg{svg,..}=>svg.len(),
+                    Shape::Raster{data_base64,..}=>data_base64.len(),
+                    _=>0,
+                });
+            }
+        }
+        total=total.saturating_add(self.symbol_instances.len()*std::mem::size_of::<SymbolInstance>());
         total=total.saturating_add(self.inactive_pages_memory_bytes());
         total.saturating_add(self.clip_links.len()*std::mem::size_of::<ClipLink>())
             .saturating_add(self.appearances.iter().map(|(_,a)|
@@ -425,6 +455,8 @@ impl Document {
                 obj.group_id=None;count+=1;
             }
         }
+        self.symbol_instances.retain(|item|item.page_id!=self.active_page_id||
+            !groups.contains(&item.group_id));
         Ok(count)
     }
     pub fn group_members(&self,id:u64)->Vec<u64>{
@@ -455,6 +487,18 @@ impl Document {
         self.objects.iter_mut().find(|o|o.id==id)
     }
     pub fn remove(&mut self,id:u64) -> bool {
+        let group=self.objects.iter().find(|object|object.id==id)
+            .and_then(|object|object.group_id);
+        if let Some(group_id)=group{
+            if self.symbol_instances.iter().any(|item|
+                item.page_id==self.active_page_id&&item.group_id==group_id){
+                self.symbol_instances.retain(|item|
+                    !(item.page_id==self.active_page_id&&item.group_id==group_id));
+                for object in &mut self.objects{
+                    if object.group_id==Some(group_id){object.group_id=None;}
+                }
+            }
+        }
         let n=self.objects.len(); self.objects.retain(|o|o.id!=id);
         if self.objects.len()!=n {
             self.clip_links.retain(|c|c.source_id!=id&&c.target_id!=id);
@@ -681,6 +725,7 @@ impl Document {
                 }
             }
         }
+        self.validate_symbols()?;
         Ok(())
     }
     pub fn read(path:impl AsRef<Path>)->Result<Self,String>{
