@@ -22,21 +22,19 @@ impl Editor{
     /// Pick a visible node in screen pixels, independent of current zoom.
     pub(super) fn node_at(&self,v:View,pos:Pos2)->Option<(u64,NodeAddress)>{
         let obj=self.active_node_object()?;
-        let mut best=HANDLE_HIT_PX*HANDLE_HIT_PX;
-        let mut hit=None;
-        for (address,point) in node_edit::handles(&obj.shape,MAX_VISIBLE_NODES){
-            let d=(v.screen(point)-pos).length_sq();
-            if d<best{
-                best=d;hit=Some((obj.id,address));
-            }
-        }
-        hit
+        node_edit::nearest_handle(&obj.shape,v.mm(pos),
+            HANDLE_HIT_PX/v.scale.max(0.001))
+            .map(|(address,_)|(obj.id,address))
     }
     /// Draw editable anchors and cubic control handles only for the active object.
     pub(super) fn paint_node_handles(&self,p:&egui::Painter,v:View){
         let Some(obj)=self.active_node_object() else{return;};
-        let active=self.active_node.map(|(_,address)|address);
-        for (address,point) in node_edit::handles(&obj.shape,MAX_VISIBLE_NODES){
+        let active=self.active_node.and_then(|(id,address)|
+            (id==obj.id).then_some(address));
+        let visible=node_edit::handles(&obj.shape,MAX_VISIBLE_NODES);
+        let hidden_active=active.filter(|address|
+            !visible.iter().any(|(other,_)|other==address));
+        for (address,point) in visible{
             let center=v.screen(point);
             if !v.rect.expand(14.0).contains(center){continue;}
             if address.is_handle(){
@@ -65,6 +63,17 @@ impl Editor{
             p.circle_filled(center,if selected{6.0}else{4.5},fill);
             p.circle_stroke(center,if selected{6.0}else{4.5},
                 Stroke::new(1.5,Color32::from_rgb(13,130,118)));
+        }
+        // Selected nodes beyond the rendering cap remain obvious and usable.
+        if let Some(address)=hidden_active{
+            if let Some(point)=node_edit::point_at(&obj.shape,address){
+                let center=v.screen(point);
+                if v.rect.expand(14.0).contains(center){
+                    p.circle_filled(center,6.0,Color32::from_rgb(255,189,63));
+                    p.circle_stroke(center,6.0,
+                        Stroke::new(1.5,Color32::from_rgb(13,130,118)));
+                }
+            }
         }
     }
     pub(super) fn select_node_near(&mut self,v:View,pos:Pos2){
@@ -299,6 +308,27 @@ mod tests{
         let restored=node_edit::point_at(&editor.doc.objects.last().unwrap().shape,
             NodeAddress::BezierStart).unwrap();
         assert_eq!(restored,Point{x:10.,y:20.});
+    }
+    #[test] fn node_editor_can_hit_nodes_beyond_render_cap(){
+        let mut editor=Editor::default();
+        editor.doc=Default::default();
+        let segments=(0..1000).map(|i|{
+            let x=(i+1) as f32*2.0;
+            CubicSegment{control1:Point{x:x-1.5,y:4.},
+                control2:Point{x:x-0.5,y:4.},end:Point{x,y:0.}}
+        }).collect();
+        let id=editor.doc.add(Shape::Bezier{
+            start:Point{x:0.,y:0.},segments,closed:false
+        },Style::default());
+        editor.select_object(Some(id),false);
+        editor.tool=Tool::Nodes;
+        let v=View{
+            rect:egui::Rect::from_min_size(egui::Pos2::ZERO,
+                egui::Vec2::new(4000.,100.)),
+            scale:1.,
+        };
+        assert_eq!(editor.node_at(v,v.screen(Point{x:1902.,y:0.})),
+            Some((id,NodeAddress::BezierEnd(950))));
     }
     #[test] fn split_open_bezier_creates_two_objects_with_single_undo(){
         let mut editor=Editor::default();
