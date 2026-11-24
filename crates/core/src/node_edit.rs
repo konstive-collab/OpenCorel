@@ -252,6 +252,31 @@ pub fn move_handle(shape:&mut Shape,address:NodeAddress,to:Point,
 /// If closure was implicit, materialize its straight edge before reordering.
 /// The result starts and ends at the split point and is editable as an open
 /// path, including non-selected contours in a compound path.
+/// Split an open single-contour path at an interior anchor into two
+/// independent editable shapes. The shared anchor is retained at both ends,
+/// so no original segment or control coordinate is modified.
+pub fn split_open_at_node(shape:&Shape,address:NodeAddress)
+    ->Result<(Shape,Shape),String>{
+    match (shape,address){
+        (Shape::Polyline{points,closed:false},NodeAddress::Polyline(i))
+            if i>0 && i+1<points.len()=>{
+            Ok((
+                Shape::Polyline{points:points[..=i].to_vec(),closed:false},
+                Shape::Polyline{points:points[i..].to_vec(),closed:false}
+            ))
+        }
+        (Shape::Bezier{start,segments,closed:false},NodeAddress::BezierEnd(i))
+            if i+1<segments.len()=>{
+            Ok((
+                Shape::Bezier{start:*start,segments:segments[..=i].to_vec(),closed:false},
+                Shape::Bezier{start:segments[i].end,
+                    segments:segments[i+1..].to_vec(),closed:false}
+            ))
+        }
+        _=>Err("Select an interior anchor of an open polyline or Bézier curve".into()),
+    }
+}
+
 pub fn break_closed_at_node(shape:&mut Shape,address:NodeAddress)
     ->Result<(),String>{
     fn break_cubic(start:&mut Point,segments:&mut Vec<CubicSegment>,
@@ -688,6 +713,43 @@ mod tests{
         let picked=handles(&shape,15);
         assert!(picked.iter().all(|(addr,_)|!addr.is_handle()));
         assert!(picked.iter().any(|(addr,_)|*addr==NodeAddress::CompoundStart(1)));
+    }
+    #[test] fn split_open_cubic_retains_every_control_and_shared_anchor(){
+        let original=Shape::Bezier{start:Point{x:0.,y:0.},segments:vec![
+            CubicSegment{control1:Point{x:2.,y:2.},control2:Point{x:8.,y:2.},
+                end:Point{x:10.,y:0.}},
+            CubicSegment{control1:Point{x:12.,y:4.},control2:Point{x:18.,y:4.},
+                end:Point{x:20.,y:0.}},
+            CubicSegment{control1:Point{x:22.,y:6.},control2:Point{x:28.,y:6.},
+                end:Point{x:30.,y:0.}},
+        ],closed:false};
+        let (left,right)=split_open_at_node(&original,NodeAddress::BezierEnd(0)).unwrap();
+        let Shape::Bezier{start:a,segments:first,..}=left else{panic!()};
+        let Shape::Bezier{start:b,segments:second,..}=right else{panic!()};
+        assert_eq!(a,Point{x:0.,y:0.});
+        assert_eq!(b,first.last().unwrap().end);
+        assert_eq!(first.len(),1);
+        assert_eq!(second.len(),2);
+        assert_eq!(second[0].control1,Point{x:12.,y:4.});
+    }
+    #[test] fn split_open_polyline_keeps_common_vertex(){
+        let original=Shape::Polyline{points:vec![
+            Point{x:0.,y:0.},Point{x:2.,y:3.},Point{x:5.,y:6.},
+            Point{x:8.,y:9.}],closed:false};
+        let (left,right)=split_open_at_node(&original,NodeAddress::Polyline(2)).unwrap();
+        let Shape::Polyline{points:a,..}=left else{panic!()};
+        let Shape::Polyline{points:b,..}=right else{panic!()};
+        assert_eq!(a.len(),3);
+        assert_eq!(b.len(),2);
+        assert_eq!(a.last(),b.first());
+    }
+    #[test] fn split_open_rejects_endpoint_and_closed_paths(){
+        let original=path();
+        assert!(split_open_at_node(&original,NodeAddress::BezierEnd(0)).is_err());
+        let poly=Shape::Polyline{points:vec![
+            Point{x:0.,y:0.},Point{x:10.,y:0.},Point{x:10.,y:10.}
+        ],closed:true};
+        assert!(split_open_at_node(&poly,NodeAddress::Polyline(1)).is_err());
     }
     #[test] fn smooth_handle_drag_preserves_opposite_length_and_collinearity(){
         let mut shape=Shape::Bezier{start:Point{x:0.,y:0.},segments:vec![
