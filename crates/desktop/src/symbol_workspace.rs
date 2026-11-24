@@ -7,6 +7,7 @@ impl Editor{
         self.symbol_library_path=opencorel_core::SymbolLibrary::default_path();
         if !self.symbol_library_path.exists(){
             self.symbol_library=opencorel_core::SymbolLibrary::default();
+            self.symbol_library_error=None;
             return;
         }
         match opencorel_core::SymbolLibrary::read(&self.symbol_library_path){
@@ -24,6 +25,9 @@ impl Editor{
     }
     fn persist_symbol_library(&mut self,library:&opencorel_core::SymbolLibrary)
         ->Result<(),String>{
+        if self.symbol_library_error.is_some(){
+            return Err("The local OCLIB failed validation. Import a valid backup before replacing it.".into());
+        }
         library.save_atomic(&self.symbol_library_path)?;
         self.symbol_library_error=None;
         Ok(())
@@ -141,6 +145,10 @@ impl Editor{
         }
     }
     fn export_symbol_library_picker(&mut self){
+        if self.symbol_library_error.is_some(){
+            self.status="Сначала восстановите локальную библиотеку из корректного OCLIB-файла".into();
+            return;
+        }
         if let Some(path)=rfd::FileDialog::new()
             .add_filter("OpenCorel Symbol Library",&["oclib"])
             .set_file_name("symbols.oclib").save_file(){
@@ -157,7 +165,13 @@ impl Editor{
             Ok(value)=>value,
             Err(error)=>{self.status=format!("Не удалось прочитать библиотеку: {error}");return;}
         };
-        let mut library=self.symbol_library.clone();
+        // Importing a valid backup is the explicit recovery action for a
+        // corrupt local file; in that case start from the backup, not the
+        // empty in-memory fallback, and replace the broken file atomically.
+        let replacing_corrupt=self.symbol_library_error.is_some();
+        let mut library=if replacing_corrupt{
+            opencorel_core::SymbolLibrary::default()
+        }else{self.symbol_library.clone()};
         let mut count=0usize;
         for symbol in imported.symbols{
             if let Err(error)=library.upsert(symbol){
@@ -165,13 +179,17 @@ impl Editor{
             }
             count+=1;
         }
-        if let Err(error)=self.persist_symbol_library(&library){
-            self.symbol_library_error=Some(error.clone());
-            self.status=format!("Не удалось сохранить локальную библиотеку: {error}");
-            return;
+        match library.save_atomic(&self.symbol_library_path){
+            Ok(())=>{
+                self.symbol_library=library;
+                self.symbol_library_error=None;
+                self.status=format!("Импортировано или обновлено символов: {count}");
+            }
+            Err(error)=>{
+                self.symbol_library_error=Some(error.clone());
+                self.status=format!("Не удалось сохранить локальную библиотеку: {error}");
+            }
         }
-        self.symbol_library=library;
-        self.status=format!("Импортировано или обновлено символов: {count}");
     }
     fn remove_selected_library_symbol(&mut self){
         let Some(key)=self.selected_symbol_key.clone() else{return;};
