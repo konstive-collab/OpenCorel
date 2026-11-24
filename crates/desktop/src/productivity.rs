@@ -544,6 +544,7 @@ mod tests{
     fn sample_is_a_valid_editable_design(){
         let mut editor=Editor::default();
         editor.sample_design();
+        editor.process_pending_action(&egui::Context::default());
         assert!(editor.doc.objects.len()>10);
         editor.doc.validate().unwrap();
         assert_eq!(editor.doc.page.width_mm,420.0);
