@@ -18,6 +18,8 @@ pub const SYMBOL_LIBRARY_VERSION:u32=1;
 pub const MAX_LIBRARY_BYTES:usize=64*1024*1024;
 pub const MAX_LIBRARY_SYMBOLS:usize=512;
 pub const MAX_SYMBOL_OBJECTS:usize=500;
+pub const MAX_SYMBOL_BYTES:usize=8*1024*1024;
+pub const MAX_DOCUMENT_SYMBOL_BYTES:usize=32*1024*1024;
 pub const MAX_SYMBOL_INSTANCES:usize=10_000;
 
 #[derive(Clone,Debug,PartialEq,Serialize,Deserialize)]
@@ -69,6 +71,11 @@ impl SymbolDefinition{
         }
         if self.objects.is_empty()||self.objects.len()>MAX_SYMBOL_OBJECTS{
             return Err("A symbol must contain 1–500 objects".into());
+        }
+        let bytes=self.objects.iter().fold(0usize,|sum,item|
+            sum.saturating_add(symbol_object_bytes(item)));
+        if bytes>MAX_SYMBOL_BYTES{
+            return Err("A symbol exceeds the 8 MiB embedded-resource budget".into());
         }
         let mut draft=Document::default();
         for item in &self.objects{
@@ -196,6 +203,21 @@ pub fn new_library_key()->String{
     format!("{stamp:x}-{:x}-{count:x}",std::process::id())
 }
 
+fn symbol_object_bytes(object:&SymbolObject)->usize{
+    std::mem::size_of::<SymbolObject>()+object.name.len()
+        +object.text_format.family.len()+object.style.fill.len()+object.style.stroke.len()
+        +match &object.shape{
+            Shape::Text{value,..}=>value.len(),
+            Shape::Polyline{points,..}=>points.len()*std::mem::size_of::<Point>(),
+            Shape::Bezier{segments,..}=>segments.len()*std::mem::size_of::<crate::CubicSegment>(),
+            Shape::CompoundPath{contours}=>contours.iter().map(|c|
+                std::mem::size_of::<crate::Contour>()+
+                c.segments.len()*std::mem::size_of::<crate::CubicSegment>()).sum(),
+            Shape::EmbeddedSvg{svg,..}=>svg.len(),
+            Shape::Raster{data_base64,..}=>data_base64.len(),
+            _=>0,
+        }
+}
 fn union_symbol_bounds(objects:&[SymbolObject])->Bounds{
     let mut left=f32::INFINITY;
     let mut top=f32::INFINITY;
@@ -420,11 +442,20 @@ impl Document{
             .ok_or("Selected group is not a linked symbol instance")?.clone();
         let (objects,appearances)=page_objects(self,instance.page_id)
             .ok_or("Symbol instance page is missing")?;
+        let editable=if instance.page_id==self.active_page_id{
+            |layer_id|self.layer(layer_id).is_some_and(|layer|layer.visible&&!layer.locked)
+        }else{
+            |layer_id|self.inactive_pages.get(&instance.page_id)
+                .and_then(|page|page.layers.iter().find(|layer|layer.id==layer_id))
+                .is_some_and(|layer|layer.visible&&!layer.locked)
+        };
         let mut source=Vec::with_capacity(instance.member_ids.len());
         for id in &instance.member_ids{
             let object=objects.iter().find(|item|item.id==*id)
                 .ok_or("Symbol instance member is missing")?;
-            if object.group_id!=Some(group_id){return Err("Symbol group membership is inconsistent".into());}
+            if object.group_id!=Some(group_id)||!editable(object.layer_id){
+                return Err("Symbol source must be on visible, unlocked layers".into());
+            }
             source.push(SymbolObject::from_object(object,appearances.get(id).cloned()));
         }
         let old=self.symbol_definition(instance.symbol_id)
@@ -483,7 +514,13 @@ impl Document{
         }
         let mut symbol_ids=HashSet::new();
         let mut keys=HashSet::new();
+        let mut symbol_bytes=0usize;
         for symbol in &self.symbols{
+            symbol_bytes=symbol_bytes.saturating_add(symbol.objects.iter()
+                .map(symbol_object_bytes).sum::<usize>());
+            if symbol_bytes>MAX_DOCUMENT_SYMBOL_BYTES{
+                return Err("Document symbol definitions exceed the 32 MiB resource budget".into());
+            }
             symbol.validate()?;
             if symbol.id>=self.next_symbol_id||!symbol_ids.insert(symbol.id)||
                 !keys.insert(symbol.library_key.as_str()){
@@ -705,6 +742,35 @@ mod tests{
         assert!(copy.member_ids.iter().all(|id|!ids.contains(id)));
         doc.switch_page(old_page).unwrap();
         doc.validate().unwrap();
+    }
+    #[test]
+    fn importing_a_library_key_reuses_and_updates_document_definition(){
+        let mut source_doc=Document::default();
+        let ids=add_pair(&mut source_doc);
+        let original=source_doc.create_symbol(&ids,"Portable mark","Brand").unwrap();
+        let mut destination=Document::default();
+        let local_id=destination.import_symbol_definition(&original).unwrap();
+        assert_eq!(destination.import_symbol_definition(&original).unwrap(),local_id);
+        let instance=destination.insert_symbol(local_id,1,40.,50.).unwrap();
+        let mut updated=original.clone();
+        if let Shape::Rectangle{w,..}=&mut updated.objects[0].shape{*w=60.;}
+        destination.import_symbol_definition(&updated).unwrap();
+        assert!(destination.get(instance[0]).unwrap().bounds().w>20.);
+        assert_eq!(destination.symbols.len(),1);
+        destination.validate().unwrap();
+    }
+    #[test]
+    fn invalid_symbol_update_leaves_all_instances_unchanged(){
+        let mut doc=Document::default();
+        let ids=add_pair(&mut doc);
+        let symbol=doc.create_symbol(&ids,"Stable","Test").unwrap();
+        let second=doc.insert_symbol(symbol.id,1,100.,100.).unwrap();
+        let before=doc.clone();
+        let mut invalid=symbol.clone();
+        invalid.objects.clear();
+        assert!(doc.replace_symbol_definition(symbol.id,invalid).is_err());
+        assert_eq!(doc,before);
+        assert!(doc.get(second[0]).is_some());
     }
     #[test]
     fn page_deletion_removes_instances_but_keeps_library_definition(){
