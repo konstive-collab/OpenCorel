@@ -767,6 +767,10 @@ impl Editor {
                     "Открыть замкнутую кривую в указанном узле, не теряя геометрию").clicked(){
                     self.break_selected_closed_path();
                 }
+                if ui.button("Разделить открытый контур на 2 объекта").on_hover_text(
+                    "Разбить в выбранном внутреннем узле; оба объекта сохраняют стиль и остаются редактируемыми").clicked(){
+                    self.split_selected_open_path();
+                }
                 if ui.button("Ломаная → кривая Безье").clicked(){
                     self.convert_selected_polyline_to_bezier();
                 }
