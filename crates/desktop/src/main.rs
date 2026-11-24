@@ -1525,6 +1525,58 @@ impl eframe::App for Editor{
 mod tests {
     use super::*;
     #[test]
+    fn checkpoint_undo_and_redo_keep_document_marked_unsaved(){
+        let mut editor=Editor::fresh_workspace();
+        let id=editor.doc.add(Shape::Rectangle{
+            x:1.,y:1.,w:10.,h:10.
+        },Style::default());
+        editor.selected=Some(id);
+        editor.is_dirty=false;
+        editor.checkpoint();
+        editor.doc.get_mut(id).unwrap().shape.translate(5.,0.);
+        assert!(editor.is_dirty);
+        editor.undo();
+        assert!(editor.is_dirty);
+        editor.redo();
+        assert!(editor.is_dirty);
+    }
+    #[test]
+    fn destructive_new_document_action_waits_for_user_decision(){
+        let mut editor=Editor::fresh_workspace();
+        let before=editor.doc.clone();
+        editor.is_dirty=true;
+        editor.new_document();
+        assert!(editor.show_unsaved_dialog);
+        assert!(!editor.run_pending_action);
+        assert!(matches!(editor.pending_action,Some(PendingAction::NewDocument)));
+        assert_eq!(editor.doc,before);
+    }
+    #[test]
+    fn clean_new_document_action_runs_and_keeps_history(){
+        let mut editor=Editor::fresh_workspace();
+        let previous=editor.doc.clone();
+        editor.new_document();
+        assert!(editor.run_pending_action);
+        editor.process_pending_action(&egui::Context::default());
+        assert!(editor.doc.objects.is_empty());
+        assert!(!editor.is_dirty);
+        assert_eq!(editor.undo.len(),1);
+        editor.undo();
+        assert_eq!(editor.doc,previous);
+        assert!(editor.is_dirty);
+    }
+    #[test]
+    fn successful_save_clears_dirty_and_recovery_snapshot(){
+        let dir=tempfile::tempdir().unwrap();
+        let mut editor=Editor::fresh_workspace();
+        editor.file=dir.path().join("saved.kdr").to_string_lossy().into_owned();
+        editor.is_dirty=true;
+        editor.save();
+        assert!(!editor.is_dirty);
+        assert!(std::path::Path::new(&editor.file).exists());
+        assert_eq!(opencorel_core::kdr::read_kdr(&editor.file).unwrap(),editor.doc);
+    }
+    #[test]
     fn production_workspace_opens_empty_a4_and_keeps_document_valid(){
         let e=Editor::fresh_workspace();
         assert_eq!(e.doc.objects.len(),0);
@@ -1763,6 +1815,7 @@ impl Editor{
     }
 }
 fn main()->eframe::Result<()>{
+    recovery::install_panic_hook();
     let options=eframe::NativeOptions{
         viewport:egui::ViewportBuilder::default().with_inner_size([1280.0,780.0])
             .with_min_inner_size([780.0,520.0]),
