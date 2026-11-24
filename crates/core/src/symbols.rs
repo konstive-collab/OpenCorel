@@ -346,7 +346,7 @@ impl Document{
             }
             return Ok(existing.id);
         }
-        if self.symbols.len()>=MAX_LIBRARY_SYMBOLS||self.next_symbol_id==u64::MAX{
+        if self.symbols.len()>=MAX_LIBRARY_SYMBOLS||self.next_symbol_id>=u64::MAX-1{
             return Err("Document symbol limit reached".into());
         }
         let mut imported=definition.clone();
@@ -369,7 +369,7 @@ impl Document{
         }
         if self.symbols.len()>=MAX_LIBRARY_SYMBOLS||
             self.symbol_instances.len()>=MAX_SYMBOL_INSTANCES||
-            self.next_symbol_id==u64::MAX||self.next_id==u64::MAX{
+            self.next_symbol_id>=u64::MAX-1||self.next_id>=u64::MAX-1{
             return Err("Document symbol capacity reached".into());
         }
         let editable:HashSet<u64>=self.layers.iter()
@@ -421,6 +421,10 @@ impl Document{
             return Err("Whole document object limit exceeded".into());
         }
         let source=definition.bounds();
+        let needed=definition.objects.len() as u64+1;
+        if self.next_id.checked_add(needed).is_none_or(|next|next>=u64::MAX){
+            return Err("Object identifier limit reached".into());
+        }
         let dx=x-source.x;let dy=y-source.y;
         let mut draft=self.clone();
         let mut ids=Vec::with_capacity(definition.objects.len());
@@ -436,7 +440,7 @@ impl Document{
             }
             ids.push(id);
         }
-        if draft.next_id==u64::MAX{return Err("Object identifier limit reached".into());}
+        if draft.next_id>=u64::MAX-1{return Err("Object identifier limit reached".into());}
         let group_id=draft.next_id;draft.next_id+=1;
         for id in &ids{draft.get_mut(*id).ok_or("Inserted object missing")?.group_id=Some(group_id);}
         draft.symbol_instances.push(SymbolInstance{symbol_id,page_id:draft.active_page_id,
