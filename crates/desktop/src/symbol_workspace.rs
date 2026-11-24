@@ -140,6 +140,39 @@ impl Editor{
             Err(error)=>self.status=format!("Не удалось отвязать экземпляр: {error}"),
         }
     }
+    fn export_symbol_library_picker(&mut self){
+        if let Some(path)=rfd::FileDialog::new()
+            .add_filter("OpenCorel Symbol Library",&["oclib"])
+            .set_file_name("symbols.oclib").save_file(){
+            match self.symbol_library.save_atomic(&path){
+                Ok(())=>self.status=format!("Библиотека экспортирована: {}",path.display()),
+                Err(error)=>self.status=format!("Экспорт библиотеки не выполнен: {error}"),
+            }
+        }
+    }
+    fn import_symbol_library_picker(&mut self){
+        let Some(path)=rfd::FileDialog::new()
+            .add_filter("OpenCorel Symbol Library",&["oclib"]).pick_file() else{return;};
+        let imported=match opencorel_core::SymbolLibrary::read(&path){
+            Ok(value)=>value,
+            Err(error)=>{self.status=format!("Не удалось прочитать библиотеку: {error}");return;}
+        };
+        let mut library=self.symbol_library.clone();
+        let mut count=0usize;
+        for symbol in imported.symbols{
+            if let Err(error)=library.upsert(symbol){
+                self.status=format!("Импорт остановлен: {error}");return;
+            }
+            count+=1;
+        }
+        if let Err(error)=self.persist_symbol_library(&library){
+            self.symbol_library_error=Some(error.clone());
+            self.status=format!("Не удалось сохранить локальную библиотеку: {error}");
+            return;
+        }
+        self.symbol_library=library;
+        self.status=format!("Импортировано или обновлено символов: {count}");
+    }
     fn remove_selected_library_symbol(&mut self){
         let Some(key)=self.selected_symbol_key.clone() else{return;};
         let mut library=self.symbol_library.clone();
@@ -185,6 +218,10 @@ impl Editor{
         });
         ui.add(egui::TextEdit::singleline(&mut self.symbol_search)
             .hint_text("Поиск символа или категории..."));
+        ui.horizontal_wrapped(|ui|{
+            if ui.small_button("Импорт OCLIB...").clicked(){self.import_symbol_library_picker();}
+            if ui.small_button("Экспорт OCLIB...").clicked(){self.export_symbol_library_picker();}
+        });
         let mut categories:Vec<String>=self.symbol_library.symbols.iter()
             .map(|item|item.category.clone()).filter(|item|!item.is_empty()).collect();
         categories.sort();categories.dedup();
@@ -227,7 +264,7 @@ impl Editor{
                 .find(|item|&item.library_key==key)).cloned();
         if let Some(asset)=selected_asset{
             ui.separator();
-            ui.label(RichText::new(&asset.name).strong());
+            ui.label(RichText::new(asset.name.as_str()).strong());
             if !asset.category.is_empty(){ui.small(format!("Категория: {}",asset.category));}
             ui.small(format!("Объектов: {}",asset.objects.len()));
             ui.horizontal_wrapped(|ui|{
