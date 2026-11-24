@@ -326,8 +326,26 @@ fn transformed_object(template:&SymbolObject,source:Bounds,target:Bounds,
     let mut shape=template.shape.clone();
     map_shape(&mut shape,source,target)?;
     let sx=if source.w.abs()>0.0001{target.w/source.w}else{1.0};
+    let sy=if source.h.abs()>0.0001{target.h/source.h}else{1.0};
     let mut text_format=template.text_format.clone();
-    text_format.letter_spacing_mm*=sx;
+    if let Shape::Text{value,size_mm,..}=&template.shape{
+        let max_chars=value.split('\n').map(|line|line.chars().count()).max().unwrap_or(0);
+        let new_size=*size_mm*sy;
+        let desired_width=template.text_format.line_width_mm(value,*size_mm)*sx;
+        if max_chars>1{
+            let spacing=(desired_width-new_size*0.6*max_chars as f32)
+                /(max_chars.saturating_sub(1) as f32);
+            if spacing.is_finite()&&(-100.0..=100.0).contains(&spacing){
+                text_format.letter_spacing_mm=spacing;
+            }else{
+                text_format.letter_spacing_mm*=sx;
+            }
+        }else{
+            text_format.letter_spacing_mm*=sx;
+        }
+    }else{
+        text_format.letter_spacing_mm*=sx;
+    }
     Ok(Object{id,shape,style:template.style.clone(),layer_id,text_format,
         name:template.name.clone(),group_id:Some(group_id)})
 }
