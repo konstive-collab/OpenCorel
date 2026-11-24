@@ -88,6 +88,13 @@ impl SymbolDefinition{
             }
         }
         draft.validate().map_err(|e|format!("Invalid symbol artwork: {e}"))?;
+        let bounds=self.bounds();
+        if ![bounds.x,bounds.y,bounds.w,bounds.h].iter().all(|v|v.is_finite())||
+            bounds.x.abs()>100_000.||bounds.y.abs()>100_000.||
+            (bounds.x+bounds.w).abs()>100_000.||
+            (bounds.y+bounds.h).abs()>100_000.{
+            return Err("Symbol geometry exceeds the supported coordinate range".into());
+        }
         Ok(())
     }
 }
@@ -425,12 +432,11 @@ impl Document{
         if self.next_id.checked_add(needed).is_none_or(|next|next>=u64::MAX){
             return Err("Object identifier limit reached".into());
         }
-        let dx=x-source.x;let dy=y-source.y;
         let mut draft=self.clone();
         let mut ids=Vec::with_capacity(definition.objects.len());
         for template in &definition.objects{
             let mut shape=template.shape.clone();
-            shape.translate(dx,dy);
+            map_shape(&mut shape,source,Bounds{x,y,w:source.w,h:source.h})?;
             let id=draft.add_to_layer(shape,template.style.clone(),layer_id);
             let object=draft.get_mut(id).ok_or("Inserted symbol object missing")?;
             object.text_format=template.text_format.clone();
