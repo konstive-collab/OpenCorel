@@ -137,7 +137,17 @@ impl Document{
                     draft.clip_links.push(ClipLink{source_id,target_id});
                 }
             }
-            draft.clone_symbol_instances(&symbol_sources,&new_ids)?;
+            for instance in &symbol_sources{
+                let group_id=group_ids.get(&instance.group_id).copied()
+                    .ok_or("Repeated symbol group ID was not remapped")?;
+                let member_ids=instance.member_ids.iter().map(|old|
+                    new_ids.get(old).copied().ok_or("Repeated symbol member ID was not remapped"))
+                    .collect::<Result<Vec<_>,_>>()?;
+                draft.symbol_instances.push(crate::SymbolInstance{
+                    symbol_id:instance.symbol_id,page_id:draft.active_page_id,
+                    group_id,member_ids
+                });
+            }
         }
         draft.validate()?;
         *self=draft;
