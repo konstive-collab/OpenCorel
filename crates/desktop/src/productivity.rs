@@ -551,6 +551,20 @@ mod tests{
         e.doc.validate().unwrap();
     }
     #[test]
+    fn duplicate_and_clipboard_keep_linked_symbol_instances(){
+        let mut editor=Editor::default();
+        let ids:Vec<_>=editor.doc.objects.iter().map(|object|object.id).collect();
+        let symbol=editor.doc.create_symbol(&ids,"Editor mark","Test").unwrap();
+        editor.select_object(Some(ids[0]),false);
+        editor.duplicate_preserving_styles();
+        assert_eq!(editor.doc.symbol_instances.len(),2);
+        assert!(editor.doc.symbol_instances.iter().all(|item|item.symbol_id==symbol.id));
+        assert!(editor.copy_selection());
+        editor.paste_selection();
+        assert_eq!(editor.doc.symbol_instances.len(),3);
+        editor.doc.validate().unwrap();
+    }
+    #[test]
     fn clipboard_retains_text_format_and_undo(){
         let mut editor=Editor::default();
         let id=editor.doc.objects[1].id;
