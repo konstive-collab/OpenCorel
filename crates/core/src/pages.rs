@@ -110,6 +110,9 @@ impl Document{
     /// Duplicate the current page with fresh object/group IDs and valid
     /// clipped pairs. The source retains its geometry and all metadata.
     pub fn duplicate_page(&mut self)->Result<u64,String>{
+        let source_page_id=self.active_page_id;
+        let source_instances:Vec<_>=self.symbol_instances.iter()
+            .filter(|item|item.page_id==source_page_id).cloned().collect();
         let original=self.capture_page();
         let source_name=self.pages()[self.page_index()].name.clone();
         let groups:HashSet<_>=original.objects.iter().filter_map(|o|o.group_id).collect();
@@ -148,6 +151,17 @@ impl Document{
         self.appearances=original.appearances.into_iter().map(|(key,value)|
             (ids[&key],value)).collect();
         self.guides=original.guides;
+        for instance in source_instances{
+            let Some(&group_id)=group_ids.get(&instance.group_id) else{
+                return Err("Cannot duplicate an incomplete symbol instance".into());
+            };
+            let member_ids=instance.member_ids.iter().map(|old|
+                ids.get(old).copied().ok_or("Missing duplicated symbol member"))
+                .collect::<Result<Vec<_>,_>>()?;
+            self.symbol_instances.push(crate::SymbolInstance{
+                symbol_id:instance.symbol_id,page_id:id,group_id,member_ids
+            });
+        }
         if let Some(tab)=self.page_tabs.iter_mut().find(|p|p.id==id){
             tab.name=format!("{source_name} — копия");
         }
@@ -189,6 +203,7 @@ impl Document{
             self.active_page_id=next;
         }else{self.inactive_pages.remove(&id);}
         self.page_tabs.remove(index);
+        self.symbol_instances.retain(|item|item.page_id!=id);
         Ok(())
     }
     /// Render a detached document containing only the requested page. Existing
