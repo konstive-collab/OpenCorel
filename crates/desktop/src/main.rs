@@ -1,7 +1,8 @@
 use eframe::egui::{self,Align2,Color32,FontId,Pos2,Rect,Sense,Stroke,Vec2};
 use opencorel_core::{Bounds,CubicSegment,Document,Object,Point,Shape,Style,valid_color,valid_paint,Alignment,Distribution};
-use std::{f32::consts::TAU,collections::{HashMap,HashSet},hash::{Hash,Hasher},collections::hash_map::DefaultHasher};
+use std::{f32::consts::TAU,collections::{HashMap,HashSet},hash::{Hash,Hasher},collections::hash_map::DefaultHasher,path::PathBuf,time::{Duration,Instant}};
 mod workspace;
+mod recovery;
 mod tool_dock;
 mod ui_theme;
 mod productivity;
@@ -38,6 +39,14 @@ use workspace::InspectorTab;
 
 #[derive(Clone,Copy,PartialEq)]
 enum Tool { Select, Nodes, Rect, Ellipse, Text, Curve, Line, Polygon, Freehand, Eyedropper }
+#[derive(Debug)]
+enum PendingAction{
+    NewDocument,
+    BlankPage{width:f32,height:f32},
+    SampleDesign,
+    Open(PathBuf),
+    Close,
+}
 #[derive(Clone,Copy,Debug,PartialEq,Eq)]
 enum ResizeCorner{TopLeft,TopRight,BottomLeft,BottomRight}
 impl ResizeCorner{
@@ -194,6 +203,17 @@ struct Editor{
     active_node:Option<(u64,NodeAddress)>,
     node_drag:Option<(u64,NodeAddress)>,
     node_handle_mode:node_edit::HandleMode,
+    is_dirty:bool,
+    last_edit:Instant,
+    last_autosave:Instant,
+    recovery_path:PathBuf,
+    recovery_checked:bool,
+    recovery_candidate:Option<recovery::RecoveryCandidate>,
+    show_recovery_dialog:bool,
+    show_unsaved_dialog:bool,
+    pending_action:Option<PendingAction>,
+    run_pending_action:bool,
+    close_confirmed:bool,
 }
 impl Default for Editor{
     fn default()->Self{
@@ -273,7 +293,12 @@ impl Default for Editor{
             trim_margin_mm:12.0,
             path_simplify_tolerance_mm:0.30,path_join_tolerance_mm:0.15,
             active_node:None,node_drag:None,
-            node_handle_mode:node_edit::HandleMode::Independent}
+            node_handle_mode:node_edit::HandleMode::Independent,
+            is_dirty:false,last_edit:Instant::now(),last_autosave:Instant::now(),
+            recovery_path:recovery::new_session_path(),recovery_checked:false,
+            recovery_candidate:None,show_recovery_dialog:false,
+            show_unsaved_dialog:false,pending_action:None,
+            run_pending_action:false,close_confirmed:false}
     }
 }
 #[derive(Clone,Copy)]
@@ -594,7 +619,146 @@ impl Editor{
         }
         true
     }
+    fn request_action(&mut self,action:PendingAction){
+        if self.show_unsaved_dialog{return;}
+        self.pending_action=Some(action);
+        if self.is_dirty{
+            self.show_unsaved_dialog=true;
+        }else{
+            self.run_pending_action=true;
+        }
+    }
+    fn request_open(&mut self,path:PathBuf){
+        self.request_action(PendingAction::Open(path));
+    }
+    fn open_path(&mut self,path:PathBuf){
+        let previous=self.file.clone();
+        self.file=path.to_string_lossy().into_owned();
+        self.open();
+        if self.status.starts_with("Ошибка"){self.file=previous;}
+    }
+    fn process_pending_action(&mut self,ctx:&egui::Context){
+        if !self.run_pending_action{return;}
+        self.run_pending_action=false;
+        let Some(action)=self.pending_action.take() else{return;};
+        match action{
+            PendingAction::NewDocument=>self.reset_document(),
+            PendingAction::BlankPage{width,height}=>self.blank_page_now(width,height),
+            PendingAction::SampleDesign=>self.sample_design_now(),
+            PendingAction::Open(path)=>self.open_path(path),
+            PendingAction::Close=>{
+                self.cleanup_recovery();
+                self.close_confirmed=true;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+        }
+    }
+    fn cleanup_recovery(&mut self){
+        recovery::discard(&self.recovery_path);
+    }
+    fn autosave_tick(&mut self,ctx:&egui::Context){
+        ctx.request_repaint_after(Duration::from_secs(5));
+        if !self.is_dirty||self.last_edit.elapsed()<Duration::from_secs(2)
+            ||self.last_autosave.elapsed()<Duration::from_secs(45){return;}
+        match recovery::save_snapshot(&self.doc,&self.recovery_path){
+            Ok(())=>self.last_autosave=Instant::now(),
+            Err(error)=>self.status=format!("Ошибка автосохранения: {error}"),
+        }
+    }
+    fn check_recovery(&mut self){
+        if self.recovery_checked{return;}
+        self.recovery_checked=true;
+        self.recovery_candidate=recovery::latest(&self.recovery_path);
+        self.show_recovery_dialog=self.recovery_candidate.is_some();
+    }
+    fn recovery_dialog(&mut self,ctx:&egui::Context){
+        if !self.show_recovery_dialog{return;}
+        let mut choice=0u8;
+        egui::Window::new("Восстановление проекта")
+            .collapsible(false).resizable(false)
+            .anchor(Align2::CENTER_CENTER,Vec2::ZERO)
+            .show(ctx,|ui|{
+                if let Some(candidate)=&self.recovery_candidate{
+                    ui.label("Найдена резервная копия предыдущего сеанса.");
+                    ui.heading(&candidate.document.name);
+                    ui.label(format!("Объектов: {} · Страниц: {}",
+                        candidate.document.all_object_count(),
+                        candidate.document.pages().len()));
+                    let age=candidate.modified.elapsed().unwrap_or_default().as_secs();
+                    ui.label(format!("Создана примерно {} мин. назад",age/60));
+                    ui.separator();
+                    ui.label("Исходный файл не перезаписывается. Восстановленный проект откроется как отдельный документ.");
+                    ui.horizontal(|ui|{
+                        if ui.button("Восстановить").clicked(){choice=1;}
+                        if ui.button("Удалить копию").clicked(){choice=2;}
+                    });
+                }else{choice=2;}
+            });
+        if choice==1{
+            if let Some(candidate)=self.recovery_candidate.take(){
+                self.doc=candidate.document;
+                self.file="Восстановленный проект.kdr".into();
+                recovery::discard(&candidate.path);
+                self.is_dirty=true;
+                self.last_edit=Instant::now();
+                self.last_autosave=Instant::now();
+                self.selected=None;self.multi_selected.clear();
+                self.active_node=None;self.node_drag=None;
+                self.fill_cache.entries.clear();self.vector_cache.clear();
+                self.raster_cache.clear();self.compound_cache.clear();
+                self.masked_canvas=Default::default();
+                self.show_welcome=false;
+                self.status="Проект восстановлен. Сохраните его под новым именем.".into();
+            }
+            self.show_recovery_dialog=false;
+        }else if choice==2{
+            if let Some(candidate)=self.recovery_candidate.take(){
+                recovery::discard(&candidate.path);
+            }
+            self.show_recovery_dialog=false;
+            self.status="Резервная копия предыдущего сеанса удалена".into();
+        }
+    }
+    fn unsaved_dialog(&mut self,ctx:&egui::Context){
+        if !self.show_unsaved_dialog{return;}
+        let mut choice=0u8;
+        egui::Window::new("Несохранённые изменения")
+            .collapsible(false).resizable(false)
+            .anchor(Align2::CENTER_CENTER,Vec2::ZERO)
+            .show(ctx,|ui|{
+                ui.label("В документе есть изменения, которые ещё не сохранены.");
+                ui.label("Сохраните их перед продолжением?");
+                ui.separator();
+                ui.horizontal(|ui|{
+                    if ui.button("Сохранить").clicked(){choice=1;}
+                    if ui.button("Не сохранять").clicked(){choice=2;}
+                    if ui.button("Отмена").clicked(){choice=3;}
+                });
+            });
+        match choice{
+            1=>{
+                self.save();
+                if !self.is_dirty{
+                    self.show_unsaved_dialog=false;
+                    self.run_pending_action=true;
+                }
+            }
+            2=>{
+                self.is_dirty=false;
+                self.cleanup_recovery();
+                self.show_unsaved_dialog=false;
+                self.run_pending_action=true;
+            }
+            3=>{
+                self.pending_action=None;
+                self.show_unsaved_dialog=false;
+            }
+            _=>{}
+        }
+    }
     fn checkpoint(&mut self){
+        self.is_dirty=true;
+        self.last_edit=Instant::now();
         self.undo.push(self.doc.clone());
         trim_history(&mut self.undo);
         self.redo.clear();
@@ -613,6 +777,7 @@ impl Editor{
             self.resize_drag=None;self.node_drag=None;self.active_node=None;
             self.marquee_start=None;self.marquee_end=None;
             self.freehand_points.clear();
+            self.is_dirty=true;self.last_edit=Instant::now();
             self.status="Отменено".into();
         }
     }
@@ -626,6 +791,7 @@ impl Editor{
             self.selected=None;self.multi_selected.clear();
             self.curve_draft=None;self.curve_start=None;
             self.resize_drag=None;self.node_drag=None;self.active_node=None;
+            self.is_dirty=true;self.last_edit=Instant::now();
             self.status="Повторено".into();
         }
     }
@@ -689,17 +855,23 @@ impl Editor{
         self.curve_outgoing=outgoing;
         self.status="Узел добавлен: протягивание создаёт плавные касательные; двойной щелчок завершает".into();
     }
-    fn import_svg(&mut self){self.open();}
+    fn import_svg(&mut self){
+        self.request_open(PathBuf::from(self.file.clone()));
+    }
     fn save(&mut self){
         // New documents have only a suggested filename. Ask where to save
         // instead of silently writing into an unpredictable working directory.
         if !std::path::Path::new(&self.file).is_absolute(){
             self.save_as_picker();return;
         }
-        self.status=match opencorel_formats::save_document(&self.doc,&self.file){
-            Ok(())=>format!("Сохранено: {}",self.file),
-            Err(e)=>format!("Ошибка сохранения: {e}"),
-        };
+        match opencorel_formats::save_document(&self.doc,&self.file){
+            Ok(())=>{
+                self.is_dirty=false;self.last_autosave=Instant::now();
+                self.cleanup_recovery();
+                self.status=format!("Сохранено: {}",self.file);
+            }
+            Err(e)=>self.status=format!("Ошибка сохранения: {e}"),
+        }
     }
     fn place_bitmap_picker(&mut self){
         if let Some(path)=rfd::FileDialog::new().add_filter(
@@ -736,10 +908,7 @@ impl Editor{
                 "odg","fodg","dxf","wmf","emf","wpg","vsd","vsdx","sxd",
                 "png","jpg","jpeg","webp","gif","bmp","tif","tiff"
             ]).pick_file(){
-            let previous=self.file.clone();
-            self.file=path.to_string_lossy().into_owned();
-            self.open();
-            if self.status.starts_with("Ошибка"){self.file=previous;}
+            self.request_open(path);
         }
     }
     fn save_as_picker(&mut self){
@@ -756,6 +925,8 @@ impl Editor{
             self.status=match result {
                 Ok(())=>{
                     self.file=chosen.to_string_lossy().into_owned();
+                    self.is_dirty=false;self.last_autosave=Instant::now();
+                    self.cleanup_recovery();
                     format!("Сохранено: {}",chosen.display())
                 },
                 Err(e)=>format!("Ошибка сохранения: {e}"),
@@ -800,8 +971,7 @@ impl Editor{
     }
     fn import_svg_picker(&mut self){
         if let Some(path)=rfd::FileDialog::new().add_filter("SVG / SVGZ",&["svg","svgz"]).pick_file(){
-            self.file=path.to_string_lossy().into_owned();
-            self.open();
+            self.request_open(path);
         }
     }
     fn open(&mut self){
@@ -809,6 +979,8 @@ impl Editor{
             Ok(result)=>{
                 self.checkpoint();
                 self.doc=result.document;
+                self.is_dirty=false;self.last_edit=Instant::now();
+                self.last_autosave=Instant::now();self.cleanup_recovery();
                 self.batch_page_selection=None;
                 self.selected=None;self.multi_selected.clear();self.active_layer=1;
                 self.resize_drag=None;self.node_drag=None;self.active_node=None;
@@ -1190,6 +1362,17 @@ impl Editor{
 }
 impl eframe::App for Editor{
     fn update(&mut self,ctx:&egui::Context,_:&mut eframe::Frame){
+        if ctx.input(|i|i.viewport().close_requested())&&!self.close_confirmed{
+            if self.is_dirty{
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                self.request_action(PendingAction::Close);
+            }else{
+                self.cleanup_recovery();
+                self.close_confirmed=true;
+            }
+        }
+        self.check_recovery();
+        self.autosave_tick(ctx);
         let undo=ctx.input(|i|i.modifiers.command&&i.key_pressed(egui::Key::Z)&&!i.modifiers.shift);
         let redo=ctx.input(|i|i.modifiers.command&&(i.key_pressed(egui::Key::Y) ||
             (i.key_pressed(egui::Key::Z)&&i.modifiers.shift)));
@@ -1208,10 +1391,7 @@ impl eframe::App for Editor{
                         "png"|"jpg"|"jpeg"|"webp"|"gif"|"bmp"|"tif"|"tiff"){
                         self.place_bitmap(&path);
                     }else{
-                        let old=self.file.clone();
-                        self.file=path.to_string_lossy().into_owned();
-                        self.open();
-                        if self.status.starts_with("Ошибка"){self.file=old;}
+                        self.request_open(path);
                     }
                 }
             }
@@ -1322,6 +1502,9 @@ impl eframe::App for Editor{
         self.qr_dialog(ctx);
         self.recolor_dialog(ctx);
         self.object_finder_dialog(ctx);
+        self.recovery_dialog(ctx);
+        self.unsaved_dialog(ctx);
+        self.process_pending_action(ctx);
         if self.show_preflight{
             egui::Window::new("Проверка макета")
                 .open(&mut self.show_preflight)
@@ -1341,6 +1524,58 @@ impl eframe::App for Editor{
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn checkpoint_undo_and_redo_keep_document_marked_unsaved(){
+        let mut editor=Editor::fresh_workspace();
+        let id=editor.doc.add(Shape::Rectangle{
+            x:1.,y:1.,w:10.,h:10.
+        },Style::default());
+        editor.selected=Some(id);
+        editor.is_dirty=false;
+        editor.checkpoint();
+        editor.doc.get_mut(id).unwrap().shape.translate(5.,0.);
+        assert!(editor.is_dirty);
+        editor.undo();
+        assert!(editor.is_dirty);
+        editor.redo();
+        assert!(editor.is_dirty);
+    }
+    #[test]
+    fn destructive_new_document_action_waits_for_user_decision(){
+        let mut editor=Editor::fresh_workspace();
+        let before=editor.doc.clone();
+        editor.is_dirty=true;
+        editor.new_document();
+        assert!(editor.show_unsaved_dialog);
+        assert!(!editor.run_pending_action);
+        assert!(matches!(editor.pending_action,Some(PendingAction::NewDocument)));
+        assert_eq!(editor.doc,before);
+    }
+    #[test]
+    fn clean_new_document_action_runs_and_keeps_history(){
+        let mut editor=Editor::fresh_workspace();
+        let previous=editor.doc.clone();
+        editor.new_document();
+        assert!(editor.run_pending_action);
+        editor.process_pending_action(&egui::Context::default());
+        assert!(editor.doc.objects.is_empty());
+        assert!(!editor.is_dirty);
+        assert_eq!(editor.undo.len(),1);
+        editor.undo();
+        assert_eq!(editor.doc,previous);
+        assert!(editor.is_dirty);
+    }
+    #[test]
+    fn successful_save_clears_dirty_and_recovery_snapshot(){
+        let dir=tempfile::tempdir().unwrap();
+        let mut editor=Editor::fresh_workspace();
+        editor.file=dir.path().join("saved.kdr").to_string_lossy().into_owned();
+        editor.is_dirty=true;
+        editor.save();
+        assert!(!editor.is_dirty);
+        assert!(std::path::Path::new(&editor.file).exists());
+        assert_eq!(opencorel_core::kdr::read_kdr(&editor.file).unwrap(),editor.doc);
+    }
     #[test]
     fn production_workspace_opens_empty_a4_and_keeps_document_valid(){
         let e=Editor::fresh_workspace();
@@ -1580,6 +1815,7 @@ impl Editor{
     }
 }
 fn main()->eframe::Result<()>{
+    recovery::install_panic_hook();
     let options=eframe::NativeOptions{
         viewport:egui::ViewportBuilder::default().with_inner_size([1280.0,780.0])
             .with_min_inner_size([780.0,520.0]),

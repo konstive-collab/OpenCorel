@@ -36,7 +36,10 @@ impl Editor {
         }
     }
 
-    pub(super) fn new_document(&mut self) {
+    pub(super) fn new_document(&mut self){
+        self.request_action(super::PendingAction::NewDocument);
+    }
+    pub(super) fn reset_document(&mut self){
         self.checkpoint();
         self.doc=Default::default();
         self.batch_page_selection=None;
@@ -58,6 +61,9 @@ impl Editor {
         self.marquee_start=None;self.marquee_end=None;
         self.freehand_points.clear();
         self.file="untitled.kdr".into();
+        self.is_dirty=false;self.last_edit=std::time::Instant::now();
+        self.last_autosave=std::time::Instant::now();
+        self.cleanup_recovery();
         self.status="Создан новый документ. Выберите инструмент слева или нажмите F1 для помощи.".into();
     }
 
@@ -1320,6 +1326,9 @@ impl Editor {
                 ui.label(pos);
                 ui.separator();
                 ui.label(format!("Объектов: {}",self.doc.objects.len()));
+                ui.separator();
+                ui.label(if self.is_dirty{"● Не сохранено"}else{"✓ Сохранено"});
+                ui.label("Автосохранение · 45 с");
                 if !self.multi_selected.is_empty(){
                     ui.separator();
                     ui.label(format!("Выделено: {}",self.selection_ids().len()));

@@ -4,7 +4,7 @@ members = ["crates/core", "crates/desktop", "crates/cli", "crates/export", "crat
 
 [workspace.package]
 edition = "2021"
-version = "0.21.0-alpha.1"
+version = "0.22.0-alpha.1"
 license = "MIT"
 repository = "https://github.com/konstive-collab/OpenCorel"
 

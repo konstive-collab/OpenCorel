@@ -40,7 +40,7 @@
 
 ## Scheduling, scope changes, and dependencies
 
-Each new user request to **continue development** should begin from the next uncompleted numbered iteration; the actual status is tracked below. If an iteration uncovers a blocking architecture issue, fix and test it before adding unrelated features; record any rescheduling explicitly. We cannot implement 20 full releases asynchronously in the background from a single chat turn. Development happens during active turns or user-configured external automation, and each reported status must be grounded in GitHub commits/CI.
+Each new user request to **continue development** should begin from the next uncompleted numbered iteration; the actual status is tracked below. If an iteration uncovers a blocking architecture issue, fix and test it before adding unrelated features; record any rescheduling explicitly. We cannot implement 20 full releases asynchronously in the background from a single chat turn. Development happens during active turns or user-configured external automation, and each reported status must be grounded in GitHub commits/CI. I12 reliability work has been pulled forward as a data-loss prevention priority; I09–I11 remain on the backlog and must not be treated as completed.
 
 No estimated dates are asserted. Capabilities marked "research", especially CDR export, PDF/X certification and Windows 7, are contingent on feasibility and external validation.
 
@@ -50,5 +50,7 @@ No estimated dates are asserted. Capabilities marked "research", especially CDR 
 |---|---|---|---|---|
 | I01 v0.9 | Implemented; manual GUI/production QA pending | [#15](https://github.com/konstive-collab/OpenCorel/pull/15) | [Windows + Linux passed](https://github.com/konstive-collab/OpenCorel/actions/runs/43726921360) | Node edit, tested geometry and published desktop/CLI artifacts; merged as `58466f5` |
 | I02 v0.10 | Implemented; manual GUI/production QA pending | [#17](https://github.com/konstive-collab/OpenCorel/pull/17) | [Windows + Linux passed](https://github.com/konstive-collab/OpenCorel/actions/runs/43736421574) | Boolean union/subtract/intersect/XOR, editable compound result, holes and undo; merged as `4feef2f` |
-| I03 v0.11 | In progress: vector clipping, GUI actions and cached preview implemented; Windows/Linux CI + manual QA pending | [#19](https://github.com/konstive-collab/OpenCorel/pull/19) | pending | Mask links, KDR, SVG/PDF, geometry-aware hit test; alpha masks and external fidelity fixtures outstanding |
-| I04–I20 | Planned | — | — | Not implemented |
+| I03 v0.11 | Implemented in source; manual export/alpha-mask QA remains | [#19](https://github.com/konstive-collab/OpenCorel/pull/19) | historical CI pending verification | Vector clipping, KDR, SVG/PDF and geometry-aware hit test |
+| I04–I11 | Backlog / partial delivery | — | — | Advanced transforms, appearance, text, pages and guides exist in later source versions; symbols, raster editing and interchange hardening still need explicit acceptance against this plan |
+| I12 v1.0 RC | Implemented in source; manual crash/restart and UI QA pending | [#36](https://github.com/konstive-collab/OpenCorel/pull/36) | [Windows + Linux passed](https://github.com/konstive-collab/OpenCorel/actions/runs/45440702114) | Atomic KDR snapshots, startup recovery prompt, destructive-action guard, panic reports; manual recovery simulation still required |
+| I13–I20 | Planned | — | — | Not implemented |
