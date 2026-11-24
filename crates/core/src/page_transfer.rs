@@ -49,11 +49,12 @@ impl Document{
         let appearances:Vec<_>=self.appearances.iter().filter(|(id,_)|
             selected.contains(id)).map(|(id,appearance)|
             (*id,appearance.clone())).collect();
-        let target=self.inactive_pages.get_mut(&destination)
-            .ok_or("Destination page data missing")?;
         let mut ids_map=BTreeMap::new();
         let mut groups_map=BTreeMap::new();
         let mut copies=Vec::with_capacity(source.len());
+        {
+        let target=self.inactive_pages.get_mut(&destination)
+            .ok_or("Destination page data missing")?;
         for mut object in source{
             let old=object.id;
             object.id=self.next_id;
@@ -97,12 +98,38 @@ impl Document{
         for (id,appearance) in appearances{
             target.appearances.insert(ids_map[&id],appearance);
         }
+        }
+        let source_page_id=self.active_page_id;
+        let symbol_copies:Vec<(u64,crate::SymbolInstance)>=self.symbol_instances.iter()
+            .filter(|instance|instance.page_id==source_page_id&&
+                instance.member_ids.iter().all(|id|selected.contains(id)))
+            .map(|instance|{
+                let group_id=groups_map.get(&instance.group_id).copied()
+                    .ok_or("Symbol group ID was not remapped")?;
+                let member_ids=instance.member_ids.iter().map(|old|
+                    ids_map.get(old).copied().ok_or("Symbol member ID was not remapped"))
+                    .collect::<Result<Vec<_>,_>>()?;
+                Ok((instance.group_id,crate::SymbolInstance{
+                    symbol_id:instance.symbol_id,page_id:destination,group_id,member_ids
+                }))
+            }).collect::<Result<_,String>>()?;
+        if remove_original{
+            for (old_group,new_instance) in symbol_copies{
+                if let Some(instance)=self.symbol_instances.iter_mut().find(|item|
+                    item.page_id==source_page_id&&item.group_id==old_group){
+                    *instance=new_instance;
+                }
+            }
+        }else{
+            self.symbol_instances.extend(symbol_copies.into_iter().map(|(_,item)|item));
+        }
         if remove_original{
             self.objects.retain(|o|!selected.contains(&o.id));
             self.clip_links.retain(|link|!selected.contains(&link.source_id)
                 &&!selected.contains(&link.target_id));
             self.appearances.retain(|id,_|!selected.contains(id));
         }
+        self.validate()?;
         Ok(inserted)
     }
 }
