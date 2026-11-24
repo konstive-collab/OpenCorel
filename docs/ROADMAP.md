@@ -6,7 +6,7 @@ Goal: fast, legally independent vector graphics editor for advertising, posters 
 
 - Document-local symbol definitions and linked instances stored as additive, serde-default KDR metadata; schema version remains unchanged.
 - Create a symbol from a visible, unlocked, ungrouped, unclipped selection on one source layer; insert grouped instances on the active layer.
-- Update a definition from a linked source group and propagate to all instances while preserving each instance's current bounding box.
+- Update a definition from a linked source group and propagate to all instances, mapping geometry into each instance's prior frame and preserving placement. Text metrics may produce small residual frame differences.
 - Detach a linked instance without flattening or deleting its editable objects.
 - Portable JSON OCLIB library with atomic writes, import/export, search and category filters.
 - Link-preserving copy/paste, duplicate, array repeat, page duplication and cross-page transfer.
