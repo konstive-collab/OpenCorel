@@ -1,6 +1,6 @@
 //! Transfer complete editable groups and clip-linked objects between
 //! independent pages, retaining styles and allocating collision-free IDs.
-use crate::{Document,Layer,Object,ClipLink};
+use crate::{Document,Layer,ClipLink};
 use std::collections::{BTreeMap,HashSet};
 impl Document{
     /// Copy or move selected objects onto an existing, inactive page.
