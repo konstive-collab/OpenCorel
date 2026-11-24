@@ -157,7 +157,7 @@ impl Document{
 #[cfg(test)]
 mod tests{
     use super::*;
-    use crate::{Style,Shape,Bounds};
+    use crate::{Style,Shape};
     #[test] fn grid_copies_preserve_styles_and_groups(){
         let mut doc=Document::default();
         let a=doc.add(Shape::Rectangle{x:1.,y:2.,w:10.,h:10.},Style::default());
