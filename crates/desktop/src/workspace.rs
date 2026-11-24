@@ -7,7 +7,7 @@ use opencorel_core::{Bounds, Shape, Alignment, Distribution, TextAlign, valid_pa
 use std::collections::HashSet;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum InspectorTab { Objects, Properties, Page, Export }
+pub(super) enum InspectorTab { Objects, Properties, Page, Export, Symbols }
 
 const SWATCHES: [&str; 27] = [
     "#FFFFFF", "#E8E8E8", "#C0C0C0", "#808080", "#333333", "#000000",
@@ -548,11 +548,12 @@ impl Editor {
             .width_range(220.0..=450.0).resizable(true).show(ctx,|ui|{
             ui.label(RichText::new("ПАНЕЛЬ УПРАВЛЕНИЯ").strong().size(11.0)
                 .color(Color32::from_rgb(35,183,159)));
-            ui.horizontal(|ui|{
+            ui.horizontal_wrapped(|ui|{
                 ui.selectable_value(&mut self.inspector_tab,InspectorTab::Objects,"Объекты");
                 ui.selectable_value(&mut self.inspector_tab,InspectorTab::Properties,"Свойства");
                 ui.selectable_value(&mut self.inspector_tab,InspectorTab::Page,"Лист");
                 ui.selectable_value(&mut self.inspector_tab,InspectorTab::Export,"Экспорт");
+                ui.selectable_value(&mut self.inspector_tab,InspectorTab::Symbols,"Символы");
             });
             ui.separator();
             if self.inspector_tab==InspectorTab::Objects{
@@ -569,6 +570,7 @@ impl Editor {
                             InspectorTab::Properties=>self.inspector_properties(ui),
                             InspectorTab::Page=>self.inspector_page(ui),
                             InspectorTab::Export=>self.export_docker(ui),
+                            InspectorTab::Symbols=>self.symbol_library_docker(ui),
                             InspectorTab::Objects=>{},
                         }
                     });
