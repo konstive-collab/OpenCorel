@@ -781,6 +781,11 @@ mod tests{
         library.save_atomic(&path).unwrap();
         let loaded=SymbolLibrary::read(&path).unwrap();
         assert_eq!(loaded.symbols.len(),1);
+        let mut changed=loaded.clone();
+        changed.symbols[0].name="Updated library item".into();
+        changed.save_atomic(&path).unwrap();
+        assert_eq!(SymbolLibrary::read(&path).unwrap().symbols[0].name,
+            "Updated library item");
         fs::write(&path,b"{broken").unwrap();
         assert!(SymbolLibrary::read(&path).is_err());
     }
@@ -826,6 +831,38 @@ mod tests{
         assert!(doc.replace_symbol_definition(symbol.id,invalid).is_err());
         assert_eq!(doc,before);
         assert!(doc.get(second[0]).is_some());
+    }
+    #[test]
+    fn deleting_or_ungrouping_a_linked_member_detaches_the_instance(){
+        let mut deleted=Document::default();
+        let ids=add_pair(&mut deleted);
+        deleted.create_symbol(&ids,"Delete test","Test").unwrap();
+        assert!(deleted.remove(ids[0]));
+        assert!(deleted.symbol_instances.is_empty());
+        assert!(deleted.get(ids[1]).unwrap().group_id.is_none());
+        deleted.validate().unwrap();
+
+        let mut ungrouped=Document::default();
+        let ids=add_pair(&mut ungrouped);
+        ungrouped.create_symbol(&ids,"Ungroup test","Test").unwrap();
+        assert_eq!(ungrouped.ungroup_objects(&ids).unwrap(),2);
+        assert!(ungrouped.symbol_instances.is_empty());
+        assert!(ids.iter().all(|id|ungrouped.get(*id).unwrap().group_id.is_none()));
+        ungrouped.validate().unwrap();
+    }
+    #[test]
+    fn single_object_symbol_can_be_copied_without_losing_its_link(){
+        let mut doc=Document::default();
+        let id=doc.add(rect(10.,10.),Style::default());
+        let symbol=doc.create_symbol(&[id],"Single","Test").unwrap();
+        let instance=doc.symbol_instances[0].clone();
+        let copy=doc.copy_object(doc.get(id).unwrap(),1,30.,0.);
+        let map=BTreeMap::from([(id,copy)]);
+        assert_eq!(doc.clone_symbol_instances(&[instance],&map).unwrap(),1);
+        assert_eq!(doc.symbol_instances.len(),2);
+        assert_eq!(doc.get(copy).unwrap().group_id,Some(doc.symbol_instances[1].group_id));
+        assert_eq!(doc.symbols[0].id,symbol.id);
+        doc.validate().unwrap();
     }
     #[test]
     fn page_deletion_removes_instances_but_keeps_library_definition(){
