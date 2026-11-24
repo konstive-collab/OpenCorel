@@ -105,9 +105,9 @@ impl Document{
                 instance.member_ids.iter().all(|id|selected.contains(id)))
             .map(|instance|{
                 let group_id=groups_map.get(&instance.group_id).copied()
-                    .ok_or("Symbol group ID was not remapped")?;
+                    .ok_or_else(||"Symbol group ID was not remapped".to_owned())?;
                 let member_ids=instance.member_ids.iter().map(|old|
-                    ids_map.get(old).copied().ok_or("Symbol member ID was not remapped"))
+                    ids_map.get(old).copied().ok_or_else(||"Symbol member ID was not remapped".to_owned()))
                     .collect::<Result<Vec<_>,_>>()?;
                 Ok((instance.group_id,crate::SymbolInstance{
                     symbol_id:instance.symbol_id,page_id:destination,group_id,member_ids
@@ -152,6 +152,25 @@ mod tests{
         assert_eq!(d.objects.len(),2);
         assert_ne!(d.objects[0].id,a);
         assert_eq!(d.clip_links.len(),1);
+        d.validate().unwrap();
+    }
+    #[test] fn copying_and_moving_symbol_instances_preserves_links(){
+        let mut d=Document::default();
+        let a=d.add(Shape::Rectangle{x:1.,y:2.,w:20.,h:20.},Style::default());
+        let b=d.add(Shape::Ellipse{x:3.,y:4.,w:8.,h:8.},Style::default());
+        let symbol=d.create_symbol(&[a,b],"Page symbol","Test").unwrap();
+        let target=d.add_page(Page{width_mm:210.,height_mm:297.}).unwrap();
+        d.switch_page(1).unwrap();
+        let copied=d.transfer_objects_to_page(&[a,b],target,false).unwrap();
+        assert_eq!(d.symbol_instances.len(),2);
+        let copied_instance=d.symbol_instances.iter()
+            .find(|item|item.page_id==target).unwrap();
+        assert_eq!(copied_instance.symbol_id,symbol.id);
+        assert_eq!(copied_instance.member_ids,copied);
+        d.transfer_objects_to_page(&[a,b],target,true).unwrap();
+        assert_eq!(d.symbol_instances.len(),1);
+        assert_eq!(d.symbol_instances[0].page_id,target);
+        assert!(d.symbol_instances[0].member_ids.iter().all(|id|copied.contains(id)));
         d.validate().unwrap();
     }
     #[test] fn move_group_to_page_is_reversible_by_document_snapshot(){
