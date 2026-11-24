@@ -619,7 +619,146 @@ impl Editor{
         }
         true
     }
+    fn request_action(&mut self,action:PendingAction){
+        if self.show_unsaved_dialog{return;}
+        self.pending_action=Some(action);
+        if self.is_dirty{
+            self.show_unsaved_dialog=true;
+        }else{
+            self.run_pending_action=true;
+        }
+    }
+    fn request_open(&mut self,path:PathBuf){
+        self.request_action(PendingAction::Open(path));
+    }
+    fn open_path(&mut self,path:PathBuf){
+        let previous=self.file.clone();
+        self.file=path.to_string_lossy().into_owned();
+        self.open();
+        if self.status.starts_with("Ошибка"){self.file=previous;}
+    }
+    fn process_pending_action(&mut self,ctx:&egui::Context){
+        if !self.run_pending_action{return;}
+        self.run_pending_action=false;
+        let Some(action)=self.pending_action.take() else{return;};
+        match action{
+            PendingAction::NewDocument=>self.reset_document(),
+            PendingAction::BlankPage{width,height}=>self.blank_page_now(width,height),
+            PendingAction::SampleDesign=>self.sample_design_now(),
+            PendingAction::Open(path)=>self.open_path(path),
+            PendingAction::Close=>{
+                self.cleanup_recovery();
+                self.close_confirmed=true;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+        }
+    }
+    fn cleanup_recovery(&mut self){
+        recovery::discard(&self.recovery_path);
+    }
+    fn autosave_tick(&mut self,ctx:&egui::Context){
+        ctx.request_repaint_after(Duration::from_secs(5));
+        if !self.is_dirty||self.last_edit.elapsed()<Duration::from_secs(2)
+            ||self.last_autosave.elapsed()<Duration::from_secs(45){return;}
+        match recovery::save_snapshot(&self.doc,&self.recovery_path){
+            Ok(())=>self.last_autosave=Instant::now(),
+            Err(error)=>self.status=format!("Ошибка автосохранения: {error}"),
+        }
+    }
+    fn check_recovery(&mut self){
+        if self.recovery_checked{return;}
+        self.recovery_checked=true;
+        self.recovery_candidate=recovery::latest(&self.recovery_path);
+        self.show_recovery_dialog=self.recovery_candidate.is_some();
+    }
+    fn recovery_dialog(&mut self,ctx:&egui::Context){
+        if !self.show_recovery_dialog{return;}
+        let mut choice=0u8;
+        egui::Window::new("Восстановление проекта")
+            .collapsible(false).resizable(false)
+            .anchor(Align2::CENTER_CENTER,Vec2::ZERO)
+            .show(ctx,|ui|{
+                if let Some(candidate)=&self.recovery_candidate{
+                    ui.label("Найдена резервная копия предыдущего сеанса.");
+                    ui.heading(&candidate.document.name);
+                    ui.label(format!("Объектов: {} · Страниц: {}",
+                        candidate.document.all_object_count(),
+                        candidate.document.pages().len()));
+                    let age=candidate.modified.elapsed().unwrap_or_default().as_secs();
+                    ui.label(format!("Создана примерно {} мин. назад",age/60));
+                    ui.separator();
+                    ui.label("Исходный файл не перезаписывается. Восстановленный проект откроется как отдельный документ.");
+                    ui.horizontal(|ui|{
+                        if ui.button("Восстановить").clicked(){choice=1;}
+                        if ui.button("Удалить копию").clicked(){choice=2;}
+                    });
+                }else{choice=2;}
+            });
+        if choice==1{
+            if let Some(candidate)=self.recovery_candidate.take(){
+                self.doc=candidate.document;
+                self.file="Восстановленный проект.kdr".into();
+                recovery::discard(&candidate.path);
+                self.is_dirty=true;
+                self.last_edit=Instant::now();
+                self.last_autosave=Instant::now();
+                self.selected=None;self.multi_selected.clear();
+                self.active_node=None;self.node_drag=None;
+                self.fill_cache.entries.clear();self.vector_cache.clear();
+                self.raster_cache.clear();self.compound_cache.clear();
+                self.masked_canvas=Default::default();
+                self.show_welcome=false;
+                self.status="Проект восстановлен. Сохраните его под новым именем.".into();
+            }
+            self.show_recovery_dialog=false;
+        }else if choice==2{
+            if let Some(candidate)=self.recovery_candidate.take(){
+                recovery::discard(&candidate.path);
+            }
+            self.show_recovery_dialog=false;
+            self.status="Резервная копия предыдущего сеанса удалена".into();
+        }
+    }
+    fn unsaved_dialog(&mut self,ctx:&egui::Context){
+        if !self.show_unsaved_dialog{return;}
+        let mut choice=0u8;
+        egui::Window::new("Несохранённые изменения")
+            .collapsible(false).resizable(false)
+            .anchor(Align2::CENTER_CENTER,Vec2::ZERO)
+            .show(ctx,|ui|{
+                ui.label("В документе есть изменения, которые ещё не сохранены.");
+                ui.label("Сохраните их перед продолжением?");
+                ui.separator();
+                ui.horizontal(|ui|{
+                    if ui.button("Сохранить").clicked(){choice=1;}
+                    if ui.button("Не сохранять").clicked(){choice=2;}
+                    if ui.button("Отмена").clicked(){choice=3;}
+                });
+            });
+        match choice{
+            1=>{
+                self.save();
+                if !self.is_dirty{
+                    self.show_unsaved_dialog=false;
+                    self.run_pending_action=true;
+                }
+            }
+            2=>{
+                self.is_dirty=false;
+                self.cleanup_recovery();
+                self.show_unsaved_dialog=false;
+                self.run_pending_action=true;
+            }
+            3=>{
+                self.pending_action=None;
+                self.show_unsaved_dialog=false;
+            }
+            _=>{}
+        }
+    }
     fn checkpoint(&mut self){
+        self.is_dirty=true;
+        self.last_edit=Instant::now();
         self.undo.push(self.doc.clone());
         trim_history(&mut self.undo);
         self.redo.clear();
@@ -638,6 +777,7 @@ impl Editor{
             self.resize_drag=None;self.node_drag=None;self.active_node=None;
             self.marquee_start=None;self.marquee_end=None;
             self.freehand_points.clear();
+            self.is_dirty=true;self.last_edit=Instant::now();
             self.status="Отменено".into();
         }
     }
@@ -651,6 +791,7 @@ impl Editor{
             self.selected=None;self.multi_selected.clear();
             self.curve_draft=None;self.curve_start=None;
             self.resize_drag=None;self.node_drag=None;self.active_node=None;
+            self.is_dirty=true;self.last_edit=Instant::now();
             self.status="Повторено".into();
         }
     }
