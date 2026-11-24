@@ -719,13 +719,13 @@ mod tests{
     #[test] fn linked_handle_drag_rejects_out_of_bounds_atomically(){
         let mut shape=Shape::Bezier{start:Point{x:0.,y:0.},segments:vec![
             CubicSegment{control1:Point{x:0.,y:0.},control2:Point{x:-99_999.,y:0.},
-                end:Point{x:0.,y:0.}},
-            CubicSegment{control1:Point{x:1.,y:0.},control2:Point{x:3.,y:0.},
-                end:Point{x:4.,y:0.}}
+                end:Point{x:90_000.,y:0.}},
+            CubicSegment{control1:Point{x:90_001.,y:0.},control2:Point{x:90_003.,y:0.},
+                end:Point{x:90_004.,y:0.}}
         ],closed:false};
         let before=shape.clone();
         assert!(move_handle(&mut shape,NodeAddress::BezierControl1(1),
-            Point{x:0.,y:20.},HandleMode::Smooth).is_err());
+            Point{x:90_000.,y:20.},HandleMode::Smooth).is_err());
         assert_eq!(shape,before);
     }
     #[test] fn split_closed_bezier_at_middle_anchor_keeps_segments(){
