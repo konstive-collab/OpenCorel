@@ -581,6 +581,11 @@ impl Editor{
             return;
         };
         let members=self.doc.group_members(id);
+        if self.tool==Tool::Nodes&&self.doc.symbol_instance_for_object(id).is_some(){
+            self.selected=Some(id);
+            self.multi_selected.clear();
+            return;
+        }
         if !additive{
             self.selected=Some(id);
             self.multi_selected=members.into_iter().filter(|value|*value!=id).collect();
