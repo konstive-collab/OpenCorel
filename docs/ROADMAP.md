@@ -4,7 +4,7 @@ Goal: fast, legally independent vector graphics editor for advertising, posters 
 
 ## v0.22 — Reliability and crash recovery
 
-- Atomic KDR recovery snapshots after 45 seconds of inactivity on a dirty document.
+- Atomic KDR recovery snapshots on a 45-second cadence while dirty, with a 2-second edit debounce.
 - Startup discovery of the newest valid recovery snapshot; explicit restore/discard choice.
 - Save / discard / cancel guard before replacing a dirty document or closing the application.
 - Crash reports contain version, timestamp, panic location and message, but never artwork contents.
