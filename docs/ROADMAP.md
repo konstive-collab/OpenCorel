@@ -2,6 +2,15 @@
 
 Goal: fast, legally independent vector graphics editor for advertising, posters and maps, especially on older Windows/Linux workstations.
 
+## v0.22 — Reliability and crash recovery
+
+- Atomic KDR recovery snapshots after 45 seconds of inactivity on a dirty document.
+- Startup discovery of the newest valid recovery snapshot; explicit restore/discard choice.
+- Save / discard / cancel guard before replacing a dirty document or closing the application.
+- Crash reports contain version, timestamp, panic location and message, but never artwork contents.
+- Unit tests for recovery round-trips, failed-save preservation, dirty state and guarded document replacement.
+- Still requires manual crash/restart testing on Windows and Linux; autosave is not a substitute for saving the project deliberately.
+
 ## v0.21 — QR, Palette Management and Cross-page Object Explorer
 
 - Real editable QR Module 2 path geometry, four error correction levels, protected quiet zone, print-sized validation.
