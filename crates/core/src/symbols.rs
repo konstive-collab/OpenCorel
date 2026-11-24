@@ -536,16 +536,14 @@ impl Document{
                 group
             }else{
                 if draft.next_id>=u64::MAX-1{return Err("Group identifier limit reached".into());}
-                let group=draft.next_id;draft.next_id+=1;
-                for id in &member_ids{
-                    draft.get_mut(*id).ok_or("Copied symbol object is missing")?
-                        .group_id=Some(group);
-                }
-                group
+                let group=draft.next_id;draft.next_id+=1;group
             };
-            if objects.iter().any(|object|
-                object.group_id.is_some_and(|group|group!=group_id)){
-                return Err("Copied symbol members have inconsistent groups".into());
+            for id in &member_ids{
+                let object=draft.get_mut(*id).ok_or("Copied symbol object is missing")?;
+                if object.group_id.is_some_and(|group|group!=group_id){
+                    return Err("Copied symbol members have inconsistent groups".into());
+                }
+                object.group_id=Some(group_id);
             }
             draft.symbol_instances.push(SymbolInstance{
                 symbol_id:instance.symbol_id,page_id:draft.active_page_id,
