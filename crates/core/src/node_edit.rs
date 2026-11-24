@@ -80,6 +80,58 @@ pub fn handles(shape:&Shape,limit:usize)->Vec<(NodeAddress,Point)>{
     }
     nodes
 }
+/// Pick the nearest editable anchor/handle across the ENTIRE path, not
+/// just the first MAX_VISIBLE_NODES used for rendering. Anchors win exact
+/// ties over controls, making dense curves predictable to select.
+pub fn nearest_handle(shape:&Shape,target:Point,tolerance_mm:f32)
+    ->Option<(NodeAddress,Point)>{
+    if !valid(target)||!tolerance_mm.is_finite()||tolerance_mm<=0.{
+        return None;
+    }
+    let mut best=tolerance_mm*tolerance_mm;
+    let mut found=None;
+    let mut check=|address:NodeAddress,point:Point|{
+        if !valid(point){return;}
+        let dx=point.x-target.x;
+        let dy=point.y-target.y;
+        let dist=dx*dx+dy*dy;
+        if dist<best{best=dist;found=Some((address,point));}
+    };
+    match shape{
+        Shape::Polyline{points,..}=>{
+            for (i,p) in points.iter().enumerate(){
+                check(NodeAddress::Polyline(i),*p);
+            }
+        }
+        Shape::Bezier{start,segments,..}=>{
+            check(NodeAddress::BezierStart,*start);
+            for (i,segment) in segments.iter().enumerate(){
+                check(NodeAddress::BezierEnd(i),segment.end);
+            }
+            for (i,segment) in segments.iter().enumerate(){
+                check(NodeAddress::BezierControl1(i),segment.control1);
+                check(NodeAddress::BezierControl2(i),segment.control2);
+            }
+        }
+        Shape::CompoundPath{contours}=>{
+            for (j,c) in contours.iter().enumerate(){
+                check(NodeAddress::CompoundStart(j),c.start);
+                for (i,segment) in c.segments.iter().enumerate(){
+                    check(NodeAddress::CompoundEnd(j,i),segment.end);
+                }
+            }
+            for (j,c) in contours.iter().enumerate(){
+                for (i,segment) in c.segments.iter().enumerate(){
+                    check(NodeAddress::CompoundControl1(j,i),segment.control1);
+                    check(NodeAddress::CompoundControl2(j,i),segment.control2);
+                }
+            }
+        }
+        _=>{}
+    }
+    found
+}
+
 pub fn point_at(shape:&Shape,address:NodeAddress)->Option<Point>{
     match (shape,address){
         (Shape::Polyline{points,..},NodeAddress::Polyline(i))=>points.get(i).copied(),
@@ -713,6 +765,31 @@ mod tests{
         let picked=handles(&shape,15);
         assert!(picked.iter().all(|(addr,_)|!addr.is_handle()));
         assert!(picked.iter().any(|(addr,_)|*addr==NodeAddress::CompoundStart(1)));
+    }
+    #[test] fn nearest_handle_reaches_nodes_beyond_visible_750_limit(){
+        let segments=(0..1500).map(|i|{
+            let x=(i+1) as f32*2.0;
+            CubicSegment{
+                control1:Point{x:x-1.5,y:5.},
+                control2:Point{x:x-0.5,y:5.},
+                end:Point{x,y:0.},
+            }
+        }).collect();
+        let shape=Shape::Bezier{start:Point{x:0.,y:0.},segments,closed:false};
+        assert!(!handles(&shape,750).iter().any(|(a,_)|
+            *a==NodeAddress::BezierEnd(1450)));
+        let target=Point{x:2902.,y:0.};
+        let (address,position)=nearest_handle(&shape,target,0.5).unwrap();
+        assert_eq!(address,NodeAddress::BezierEnd(1450));
+        assert_eq!(position,target);
+    }
+    #[test] fn nearest_handle_prefers_anchor_on_coincident_controls(){
+        let shape=Shape::Bezier{start:Point{x:0.,y:0.},segments:vec![
+            CubicSegment{control1:Point{x:0.,y:0.},control2:Point{x:10.,y:0.},
+                end:Point{x:10.,y:0.}}
+        ],closed:false};
+        let (address,_)=nearest_handle(&shape,Point{x:0.,y:0.},1.).unwrap();
+        assert_eq!(address,NodeAddress::BezierStart);
     }
     #[test] fn split_open_cubic_retains_every_control_and_shared_anchor(){
         let original=Shape::Bezier{start:Point{x:0.,y:0.},segments:vec![
