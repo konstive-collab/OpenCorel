@@ -52,7 +52,7 @@ impl Document{
         let mut ids_map=BTreeMap::new();
         let mut groups_map=BTreeMap::new();
         let mut copies=Vec::with_capacity(source.len());
-        let mut inserted=Vec::new();
+        let inserted:Vec<u64>;
         {
         let target=self.inactive_pages.get_mut(&destination)
             .ok_or("Destination page data missing")?;
