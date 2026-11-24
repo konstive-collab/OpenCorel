@@ -58,6 +58,6 @@ A symbol instance is represented by ordinary `Object` entries sharing a group ID
 
 - Nested symbols are not supported.
 - Node editing is available for individual objects inside a linked instance; update the definition afterward. Per-instance overrides and nested symbols are not supported.
-- Updating a definition scales the replacement geometry to each instance's current bounding box. It preserves position and frame, not arbitrary per-object overrides.
+- Updating a definition maps replacement geometry into each instance's prior frame and preserves placement. Multi-character text width is compensated with letter spacing where possible; single-character text can differ slightly. Rotation/skew and arbitrary per-instance overrides are not preserved.
 - Source objects must be on one visible, unlocked layer; grouped objects and clipping relationships are rejected.
 - OCLIB stores source resources, not rendered thumbnails or font files.
