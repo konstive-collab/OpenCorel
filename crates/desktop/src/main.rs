@@ -1,7 +1,8 @@
 use eframe::egui::{self,Align2,Color32,FontId,Pos2,Rect,Sense,Stroke,Vec2};
 use opencorel_core::{Bounds,CubicSegment,Document,Object,Point,Shape,Style,valid_color,valid_paint,Alignment,Distribution};
-use std::{f32::consts::TAU,collections::{HashMap,HashSet},hash::{Hash,Hasher},collections::hash_map::DefaultHasher};
+use std::{f32::consts::TAU,collections::{HashMap,HashSet},hash::{Hash,Hasher},collections::hash_map::DefaultHasher,path::PathBuf,time::{Duration,Instant}};
 mod workspace;
+mod recovery;
 mod tool_dock;
 mod ui_theme;
 mod productivity;
@@ -38,6 +39,14 @@ use workspace::InspectorTab;
 
 #[derive(Clone,Copy,PartialEq)]
 enum Tool { Select, Nodes, Rect, Ellipse, Text, Curve, Line, Polygon, Freehand, Eyedropper }
+#[derive(Debug)]
+enum PendingAction{
+    NewDocument,
+    BlankPage{width:f32,height:f32},
+    SampleDesign,
+    Open(PathBuf),
+    Close,
+}
 #[derive(Clone,Copy,Debug,PartialEq,Eq)]
 enum ResizeCorner{TopLeft,TopRight,BottomLeft,BottomRight}
 impl ResizeCorner{
@@ -194,6 +203,17 @@ struct Editor{
     active_node:Option<(u64,NodeAddress)>,
     node_drag:Option<(u64,NodeAddress)>,
     node_handle_mode:node_edit::HandleMode,
+    is_dirty:bool,
+    last_edit:Instant,
+    last_autosave:Instant,
+    recovery_path:PathBuf,
+    recovery_checked:bool,
+    recovery_candidate:Option<recovery::RecoveryCandidate>,
+    show_recovery_dialog:bool,
+    show_unsaved_dialog:bool,
+    pending_action:Option<PendingAction>,
+    run_pending_action:bool,
+    close_confirmed:bool,
 }
 impl Default for Editor{
     fn default()->Self{
@@ -273,7 +293,12 @@ impl Default for Editor{
             trim_margin_mm:12.0,
             path_simplify_tolerance_mm:0.30,path_join_tolerance_mm:0.15,
             active_node:None,node_drag:None,
-            node_handle_mode:node_edit::HandleMode::Independent}
+            node_handle_mode:node_edit::HandleMode::Independent,
+            is_dirty:false,last_edit:Instant::now(),last_autosave:Instant::now(),
+            recovery_path:recovery::new_session_path(),recovery_checked:false,
+            recovery_candidate:None,show_recovery_dialog:false,
+            show_unsaved_dialog:false,pending_action:None,
+            run_pending_action:false,close_confirmed:false}
     }
 }
 #[derive(Clone,Copy)]
