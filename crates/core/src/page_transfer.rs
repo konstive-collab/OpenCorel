@@ -167,10 +167,11 @@ mod tests{
             .find(|item|item.page_id==target).unwrap();
         assert_eq!(copied_instance.symbol_id,symbol.id);
         assert_eq!(copied_instance.member_ids,copied);
-        d.transfer_objects_to_page(&[a,b],target,true).unwrap();
-        assert_eq!(d.symbol_instances.len(),1);
-        assert_eq!(d.symbol_instances[0].page_id,target);
-        assert!(d.symbol_instances[0].member_ids.iter().all(|id|copied.contains(id)));
+        let moved=d.transfer_objects_to_page(&[a,b],target,true).unwrap();
+        assert_eq!(d.symbol_instances.len(),2);
+        assert!(d.symbol_instances.iter().all(|item|item.page_id==target));
+        assert!(d.symbol_instances.iter().any(|item|item.member_ids==copied));
+        assert!(d.symbol_instances.iter().any(|item|item.member_ids==moved));
         d.validate().unwrap();
     }
     #[test] fn move_group_to_page_is_reversible_by_document_snapshot(){
