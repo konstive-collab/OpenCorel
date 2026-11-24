@@ -222,8 +222,8 @@ fn union_object_bounds(objects:&[Object])->Bounds{
     Bounds{x:left,y:top,w:(right-left).max(0.),h:(bottom-top).max(0.)}
 }
 fn page_objects(doc:&Document,page_id:u64)->Option<(&[Object],&BTreeMap<u64,Appearance>)>{
-    if page_id==doc.active_page_id{Some((&doc.objects,&doc.appearances))}
-    else{doc.inactive_pages.get(&page_id).map(|p|(&p.objects,&p.appearances))}
+    if page_id==doc.active_page_id{Some((doc.objects.as_slice(),&doc.appearances))}
+    else{doc.inactive_pages.get(&page_id).map(|p|(p.objects.as_slice(),&p.appearances))}
 }
 fn page_objects_mut(doc:&mut Document,page_id:u64)
     ->Option<(&mut Vec<Object>,&mut BTreeMap<u64,Appearance>)>{
