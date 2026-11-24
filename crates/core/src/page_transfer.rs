@@ -52,6 +52,7 @@ impl Document{
         let mut ids_map=BTreeMap::new();
         let mut groups_map=BTreeMap::new();
         let mut copies=Vec::with_capacity(source.len());
+        let mut inserted=Vec::new();
         {
         let target=self.inactive_pages.get_mut(&destination)
             .ok_or("Destination page data missing")?;
@@ -87,7 +88,7 @@ impl Document{
             object.layer_id=target_id;
             copies.push(object);
         }
-        let inserted:Vec<_>=copies.iter().map(|o|o.id).collect();
+        inserted=copies.iter().map(|o|o.id).collect();
         target.objects.extend(copies);
         for link in clipped{
             target.clip_links.push(ClipLink{
