@@ -36,6 +36,7 @@ Each symbol object stores native OpenCorel geometry, style, text format, optiona
 |---|---:|
 | OCLIB file size | 64 MiB |
 | Symbols per library | 512 |
+| Linked instances per KDR document | 10,000 |
 | Objects per symbol | 500 |
 | Embedded source data per symbol | 8 MiB |
 | Embedded symbol definitions per KDR document | 32 MiB |
@@ -46,7 +47,7 @@ The reader validates the format/version, stable keys, symbol names/categories, e
 
 ## Atomic persistence
 
-The application writes a temporary file in the destination directory, flushes it, and atomically persists it over the previous library. A failed write leaves the last valid file untouched. A corrupt local library is not automatically overwritten at startup; the user can restore it or import a backup.
+The application writes a temporary file in the destination directory, flushes it, and atomically persists it over the previous library. A failed write leaves the last valid file untouched. A corrupt local library is not automatically overwritten at startup; writes and exports are blocked until the user imports a valid backup. Importing a valid OCLIB is the explicit recovery action.
 
 ## KDR relationship
 
