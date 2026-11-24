@@ -9,7 +9,8 @@ const HANDLE_HIT_PX:f32=11.0;
 impl Editor{
     pub(super) fn node_edit_allowed(&self,id:u64)->bool{
         let Some(obj)=self.doc.objects.iter().find(|obj|obj.id==id) else{return false;};
-        obj.group_id.is_none()
+        (obj.group_id.is_none()||obj.group_id
+            .is_some_and(|group|self.doc.symbol_instance_for_group(group).is_some()))
             && self.doc.layer(obj.layer_id).map(|l|l.visible&&!l.locked).unwrap_or(false)
             && node_edit::editable(&obj.shape)
     }
@@ -87,7 +88,7 @@ impl Editor{
             if !self.node_edit_allowed(id){
                 self.select_object(Some(id),false);
                 self.active_node=None;
-                self.status="Для редактирования узлов выберите кривую/линию. Группу сначала разгруппируйте, а текст преобразуйте в кривые.".into();
+                self.status="Для редактирования узлов выберите кривую/линию. Обычную группу сначала разгруппируйте; текст преобразуйте в кривые.".into();
             }else{
                 self.select_object(Some(id),false);
                 self.active_node=None;
