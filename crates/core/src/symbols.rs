@@ -405,6 +405,10 @@ impl Document{
             object.group_id.is_some()){
             return Err("Symbols require visible, unlocked, ungrouped objects".into());
         }
+        let source_layers:HashSet<u64>=chosen.iter().map(|object|object.layer_id).collect();
+        if source_layers.len()!=1{
+            return Err("Create a symbol from one layer at a time; instances are inserted onto a single target layer".into());
+        }
         if self.clip_links.iter().any(|link|
             wanted.contains(&link.source_id)||wanted.contains(&link.target_id)){
             return Err("Clipped objects must be detached before creating a symbol".into());
