@@ -1,6 +1,6 @@
 //! Transfer complete editable groups and clip-linked objects between
 //! independent pages, retaining styles and allocating collision-free IDs.
-use crate::{Document,Layer,Object,ClipLink};
+use crate::{Document,Layer,ClipLink};
 use std::collections::{BTreeMap,HashSet};
 impl Document{
     /// Copy or move selected objects onto an existing, inactive page.
@@ -49,11 +49,13 @@ impl Document{
         let appearances:Vec<_>=self.appearances.iter().filter(|(id,_)|
             selected.contains(id)).map(|(id,appearance)|
             (*id,appearance.clone())).collect();
-        let target=self.inactive_pages.get_mut(&destination)
-            .ok_or("Destination page data missing")?;
         let mut ids_map=BTreeMap::new();
         let mut groups_map=BTreeMap::new();
         let mut copies=Vec::with_capacity(source.len());
+        let inserted:Vec<u64>;
+        {
+        let target=self.inactive_pages.get_mut(&destination)
+            .ok_or("Destination page data missing")?;
         for mut object in source{
             let old=object.id;
             object.id=self.next_id;
@@ -86,7 +88,7 @@ impl Document{
             object.layer_id=target_id;
             copies.push(object);
         }
-        let inserted:Vec<_>=copies.iter().map(|o|o.id).collect();
+        inserted=copies.iter().map(|o|o.id).collect();
         target.objects.extend(copies);
         for link in clipped{
             target.clip_links.push(ClipLink{
@@ -97,12 +99,38 @@ impl Document{
         for (id,appearance) in appearances{
             target.appearances.insert(ids_map[&id],appearance);
         }
+        }
+        let source_page_id=self.active_page_id;
+        let symbol_copies:Vec<(u64,crate::SymbolInstance)>=self.symbol_instances.iter()
+            .filter(|instance|instance.page_id==source_page_id&&
+                instance.member_ids.iter().all(|id|selected.contains(id)))
+            .map(|instance|{
+                let group_id=groups_map.get(&instance.group_id).copied()
+                    .ok_or_else(||"Symbol group ID was not remapped".to_owned())?;
+                let member_ids=instance.member_ids.iter().map(|old|
+                    ids_map.get(old).copied().ok_or_else(||"Symbol member ID was not remapped".to_owned()))
+                    .collect::<Result<Vec<_>,_>>()?;
+                Ok((instance.group_id,crate::SymbolInstance{
+                    symbol_id:instance.symbol_id,page_id:destination,group_id,member_ids
+                }))
+            }).collect::<Result<_,String>>()?;
+        if remove_original{
+            for (old_group,new_instance) in symbol_copies{
+                if let Some(instance)=self.symbol_instances.iter_mut().find(|item|
+                    item.page_id==source_page_id&&item.group_id==old_group){
+                    *instance=new_instance;
+                }
+            }
+        }else{
+            self.symbol_instances.extend(symbol_copies.into_iter().map(|(_,item)|item));
+        }
         if remove_original{
             self.objects.retain(|o|!selected.contains(&o.id));
             self.clip_links.retain(|link|!selected.contains(&link.source_id)
                 &&!selected.contains(&link.target_id));
             self.appearances.retain(|id,_|!selected.contains(id));
         }
+        self.validate()?;
         Ok(inserted)
     }
 }
@@ -125,6 +153,26 @@ mod tests{
         assert_eq!(d.objects.len(),2);
         assert_ne!(d.objects[0].id,a);
         assert_eq!(d.clip_links.len(),1);
+        d.validate().unwrap();
+    }
+    #[test] fn copying_and_moving_symbol_instances_preserves_links(){
+        let mut d=Document::default();
+        let a=d.add(Shape::Rectangle{x:1.,y:2.,w:20.,h:20.},Style::default());
+        let b=d.add(Shape::Ellipse{x:3.,y:4.,w:8.,h:8.},Style::default());
+        let symbol=d.create_symbol(&[a,b],"Page symbol","Test").unwrap();
+        let target=d.add_page(Page{width_mm:210.,height_mm:297.}).unwrap();
+        d.switch_page(1).unwrap();
+        let copied=d.transfer_objects_to_page(&[a,b],target,false).unwrap();
+        assert_eq!(d.symbol_instances.len(),2);
+        let copied_instance=d.symbol_instances.iter()
+            .find(|item|item.page_id==target).unwrap();
+        assert_eq!(copied_instance.symbol_id,symbol.id);
+        assert_eq!(copied_instance.member_ids,copied);
+        let moved=d.transfer_objects_to_page(&[a,b],target,true).unwrap();
+        assert_eq!(d.symbol_instances.len(),2);
+        assert!(d.symbol_instances.iter().all(|item|item.page_id==target));
+        assert!(d.symbol_instances.iter().any(|item|item.member_ids==copied));
+        assert!(d.symbol_instances.iter().any(|item|item.member_ids==moved));
         d.validate().unwrap();
     }
     #[test] fn move_group_to_page_is_reversible_by_document_snapshot(){

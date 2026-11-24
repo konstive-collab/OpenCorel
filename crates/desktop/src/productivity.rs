@@ -3,7 +3,7 @@ use super::{Editor,Tool,PendingAction};
 use eframe::egui::{self,RichText};
 use opencorel_core::{Bounds,Document,Object,Point,Shape,Style};
 use opencorel_core::transform::{self,QuarterTurn};
-use std::collections::{HashSet,HashMap};
+use std::collections::{HashSet,HashMap,BTreeMap};
 
 const CLIPBOARD_LIMIT:usize=24*1024*1024;
 pub(super) fn tool_label(tool:Tool)->&'static str{
@@ -23,7 +23,7 @@ pub(super) fn tool_label(tool:Tool)->&'static str{
 pub(super) fn tool_hint(tool:Tool)->&'static str{
     match tool{
         Tool::Select=>"Щёлкните по объекту и перетащите его. Shift + щелчок выделяет несколько. Углы рамки изменяют размер.",
-        Tool::Nodes=>"Выберите линию или кривую и потяните её опорную точку или рычаг. Двойной щелчок по сегменту добавляет узел, Del удаляет выбранный опорный узел, Esc возвращает выделение. Для текста сначала используйте «Преобразовать в кривые»; группы перед редактированием разгруппируйте.",
+        Tool::Nodes=>"Выберите линию или кривую и потяните её опорную точку или рычаг. Двойной щелчок по сегменту добавляет узел, Del удаляет выбранный опорный узел, Esc возвращает выделение. Для текста сначала используйте «Преобразовать в кривые». В связанном символе можно редактировать узлы отдельного объекта, затем обновить определение; обычную группу сначала разгруппируйте.",
         Tool::Rect=>"Протяните мышь по листу, чтобы нарисовать прямоугольник. Щелчок создаёт фигуру стандартного размера.",
         Tool::Ellipse=>"Протяните мышь, чтобы создать эллипс. После создания выберите его инструментом «Выделение».",
         Tool::Text=>"Напечатайте надпись в поле ниже, затем щёлкните по листу. Шрифт и размер меняются справа, во вкладке «Свойства».",
@@ -83,6 +83,12 @@ impl Editor{
             return false;
         }
         self.internal_clipboard=chosen.into_iter().cloned().collect();
+        self.internal_symbol_clipboard=self.doc.symbol_instances.iter()
+            .filter(|instance|instance.page_id==self.doc.active_page_id&&
+                instance.member_ids.iter().all(|id|ids.contains(id)))
+            .filter_map(|instance|self.doc.symbol_definition(instance.symbol_id)
+                .map(|definition|(instance.clone(),definition.library_key.clone())))
+            .collect();
         self.paste_number=0;
         self.status=format!("Скопировано {} объектов в буфер OpenCorel (Ctrl+V)",
             self.internal_clipboard.len());
@@ -119,6 +125,15 @@ impl Editor{
         let ids:Vec<u64>=copied.iter()
             .map(|obj|self.doc.copy_object(obj,self.active_layer,offset,offset)).collect();
         remap_groups(&mut self.doc,&copied,&ids);
+        let id_map:BTreeMap<u64,u64>=copied.iter().zip(ids.iter())
+            .map(|(old,new)|(old.id,*new)).collect();
+        let linked:Vec<_>=self.internal_symbol_clipboard.iter()
+            .filter(|(instance,key)|self.doc.symbol_definition(instance.symbol_id)
+                .is_some_and(|definition|definition.library_key==*key))
+            .map(|(instance,_)|instance.clone()).collect();
+        if let Err(error)=self.doc.clone_symbol_instances(&linked,&id_map){
+            self.status=format!("Объекты вставлены, связь символа не восстановлена: {error}");
+        }
         self.selected=ids.first().copied();
         self.multi_selected=ids.into_iter().skip(1).collect();
         self.paste_number=self.paste_number.saturating_add(1);
@@ -138,8 +153,17 @@ impl Editor{
             self.status="Лимит 100 000 объектов превышен".into();return;
         }
         self.checkpoint();
+        let source_instances:Vec<_>=self.doc.symbol_instances.iter()
+            .filter(|instance|instance.page_id==self.doc.active_page_id&&
+                instance.member_ids.iter().all(|id|ids.contains(id)))
+            .cloned().collect();
         let new_ids:Vec<_>=copies.iter().map(|o|self.doc.copy_object(o,o.layer_id,10.0,10.0)).collect();
         remap_groups(&mut self.doc,&copies,&new_ids);
+        let id_map:BTreeMap<u64,u64>=copies.iter().zip(new_ids.iter())
+            .map(|(old,new)|(old.id,*new)).collect();
+        if let Err(error)=self.doc.clone_symbol_instances(&source_instances,&id_map){
+            self.status=format!("Копии созданы, связь символа не восстановлена: {error}");
+        }
         self.selected=new_ids.first().copied();
         self.multi_selected=new_ids.into_iter().skip(1).collect();
         self.status=format!("Создано копий: {}",self.selection_ids().len());
@@ -525,6 +549,20 @@ mod tests{
         assert!(e.doc.objects[2].group_id.is_none());
         assert!(e.doc.objects[0].group_id.is_some());
         e.doc.validate().unwrap();
+    }
+    #[test]
+    fn duplicate_and_clipboard_keep_linked_symbol_instances(){
+        let mut editor=Editor::default();
+        let ids:Vec<_>=editor.doc.objects.iter().map(|object|object.id).collect();
+        let symbol=editor.doc.create_symbol(&ids,"Editor mark","Test").unwrap();
+        editor.select_object(Some(ids[0]),false);
+        editor.duplicate_preserving_styles();
+        assert_eq!(editor.doc.symbol_instances.len(),2);
+        assert!(editor.doc.symbol_instances.iter().all(|item|item.symbol_id==symbol.id));
+        assert!(editor.copy_selection());
+        editor.paste_selection();
+        assert_eq!(editor.doc.symbol_instances.len(),3);
+        editor.doc.validate().unwrap();
     }
     #[test]
     fn clipboard_retains_text_format_and_undo(){

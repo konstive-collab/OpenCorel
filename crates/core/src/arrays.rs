@@ -1,7 +1,7 @@
 //! Native copies in repeat patterns. All repeats are prepared in a temporary
 //! document, validated, then committed atomically. Undo is owned by the UI.
 use crate::{Document,Object,Point,Shape,ClipLink,transform};
-use std::collections::{HashMap,HashSet};
+use std::collections::{BTreeMap,HashMap,HashSet};
 
 #[derive(Clone,Copy,Debug)]
 pub enum RepeatPattern{
@@ -86,6 +86,10 @@ impl Document{
             wanted.contains(&link.source_id)!=wanted.contains(&link.target_id)){
             return Err("Select both parts of a clipped object".into());
         }
+        let symbol_sources:Vec<_>=self.symbol_instances.iter()
+            .filter(|instance|instance.page_id==self.active_page_id&&
+                instance.member_ids.iter().all(|id|wanted.contains(id)))
+            .cloned().collect();
         let placements=placements(pattern)?;
         let new_count=sources.len().checked_mul(placements.len())
             .ok_or("Too many objects")?;
@@ -106,7 +110,7 @@ impl Document{
         let mut draft=self.clone();
         let mut created=Vec::with_capacity(new_count);
         for placement in placements{
-            let mut new_ids=HashMap::new();
+            let mut new_ids=BTreeMap::new();
             let mut group_ids=HashMap::new();
             for original in &sources{
                 let shape=placed(&original.shape,placement)?;
@@ -133,6 +137,17 @@ impl Document{
                     draft.clip_links.push(ClipLink{source_id,target_id});
                 }
             }
+            for instance in &symbol_sources{
+                let group_id=group_ids.get(&instance.group_id).copied()
+                    .ok_or("Repeated symbol group ID was not remapped")?;
+                let member_ids=instance.member_ids.iter().map(|old|
+                    new_ids.get(old).copied().ok_or("Repeated symbol member ID was not remapped"))
+                    .collect::<Result<Vec<_>,_>>()?;
+                draft.symbol_instances.push(crate::SymbolInstance{
+                    symbol_id:instance.symbol_id,page_id:draft.active_page_id,
+                    group_id,member_ids
+                });
+            }
         }
         draft.validate()?;
         *self=draft;
@@ -142,7 +157,7 @@ impl Document{
 #[cfg(test)]
 mod tests{
     use super::*;
-    use crate::{Style,Shape,Bounds};
+    use crate::{Style,Shape};
     #[test] fn grid_copies_preserve_styles_and_groups(){
         let mut doc=Document::default();
         let a=doc.add(Shape::Rectangle{x:1.,y:2.,w:10.,h:10.},Style::default());
@@ -155,6 +170,19 @@ mod tests{
         assert_eq!(doc.objects.len(),12);
         assert_ne!(doc.get(ids[0]).unwrap().group_id,doc.get(a).unwrap().group_id);
         assert_eq!(doc.group_members(ids[0]).len(),2);
+        doc.validate().unwrap();
+    }
+    #[test] fn repeated_symbol_instances_keep_their_link(){
+        let mut doc=Document::default();
+        let a=doc.add(Shape::Rectangle{x:1.,y:2.,w:10.,h:10.},Style::default());
+        let b=doc.add(Shape::Ellipse{x:12.,y:2.,w:8.,h:8.},Style::default());
+        let symbol=doc.create_symbol(&[a,b],"Array mark","Test").unwrap();
+        let copies=doc.duplicate_pattern(&[a,b],RepeatPattern::Linear{
+            count:3,dx_mm:40.,dy_mm:0.
+        }).unwrap();
+        assert_eq!(copies.len(),4);
+        assert_eq!(doc.symbol_instances.len(),3);
+        assert!(doc.symbol_instances.iter().all(|item|item.symbol_id==symbol.id));
         doc.validate().unwrap();
     }
     #[test] fn repeat_rejects_partial_group_atomically(){

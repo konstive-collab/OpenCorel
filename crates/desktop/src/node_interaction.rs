@@ -9,7 +9,8 @@ const HANDLE_HIT_PX:f32=11.0;
 impl Editor{
     pub(super) fn node_edit_allowed(&self,id:u64)->bool{
         let Some(obj)=self.doc.objects.iter().find(|obj|obj.id==id) else{return false;};
-        obj.group_id.is_none()
+        (obj.group_id.is_none()||obj.group_id
+            .is_some_and(|group|self.doc.symbol_instance_for_group(group).is_some()))
             && self.doc.layer(obj.layer_id).map(|l|l.visible&&!l.locked).unwrap_or(false)
             && node_edit::editable(&obj.shape)
     }
@@ -87,7 +88,7 @@ impl Editor{
             if !self.node_edit_allowed(id){
                 self.select_object(Some(id),false);
                 self.active_node=None;
-                self.status="Для редактирования узлов выберите кривую/линию. Группу сначала разгруппируйте, а текст преобразуйте в кривые.".into();
+                self.status="Для редактирования узлов выберите кривую/линию. Обычную группу сначала разгруппируйте; текст преобразуйте в кривые.".into();
             }else{
                 self.select_object(Some(id),false);
                 self.active_node=None;
@@ -392,6 +393,22 @@ mod tests{
         let Shape::Bezier{segments,..}=&editor.doc.get(id).unwrap().shape
             else{panic!()};
         assert_eq!(segments[0].control2,Point{x:8.,y:0.});
+    }
+    #[test] fn linked_symbol_member_can_be_node_edited_without_selecting_its_siblings(){
+        let mut editor=Editor::default();
+        editor.doc=Default::default();
+        let first=editor.doc.add(Shape::Polyline{
+            points:vec![Point{x:0.,y:0.},Point{x:5.,y:5.}],closed:false
+        },Style::default());
+        let second=editor.doc.add(Shape::Polyline{
+            points:vec![Point{x:10.,y:0.},Point{x:15.,y:5.}],closed:false
+        },Style::default());
+        editor.doc.create_symbol(&[first,second],"Editable path","Test").unwrap();
+        editor.tool=Tool::Nodes;
+        editor.select_object(Some(first),false);
+        assert_eq!(editor.selection_ids(),vec![first]);
+        assert!(editor.node_edit_allowed(first));
+        assert!(editor.active_node_object().is_some());
     }
     #[test] fn node_tool_rejects_locked_or_grouped_object(){
         let mut editor=Editor::default();

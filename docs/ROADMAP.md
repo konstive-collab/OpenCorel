@@ -2,6 +2,18 @@
 
 Goal: fast, legally independent vector graphics editor for advertising, posters and maps, especially on older Windows/Linux workstations.
 
+## v0.23 — Linked symbols and local component libraries
+
+- Document-local symbol definitions and linked instances stored as additive, serde-default KDR metadata; schema version remains unchanged.
+- Create a symbol from a visible, unlocked, ungrouped, unclipped selection on one source layer; insert grouped instances on the active layer.
+- Update a definition from a linked source group and propagate to all instances, mapping geometry into each instance's prior frame and preserving placement. Text metrics may produce small residual frame differences.
+- Detach a linked instance without flattening or deleting its editable objects.
+- Portable JSON OCLIB library with atomic writes, import/export, search and category filters.
+- Link-preserving copy/paste, duplicate, array repeat, page duplication and cross-page transfer.
+- Validation budgets: 500 objects / 8 MiB per symbol, 512 symbols / 64 MiB per OCLIB file, 32 MiB of embedded symbol definitions per KDR document.
+- SVG/PDF export continues to emit ordinary editable geometry. Nested symbols and per-instance overrides are not supported. Node editing is available for individual objects inside a linked instance; update the definition afterward.
+- Automated Windows/Linux CI passed: workspace tests, release tests, Clippy, desktop/CLI builds, export smoke tests and independent DXF parsing ([run #45471502966](https://github.com/konstive-collab/OpenCorel/actions/runs/45471502966)). Manual UI acceptance, crash/restart simulations and large-document performance QA remain pending.
+
 ## v0.22 — Reliability and crash recovery
 
 - Atomic KDR recovery snapshots on a 45-second cadence while dirty, with a 2-second edit debounce.

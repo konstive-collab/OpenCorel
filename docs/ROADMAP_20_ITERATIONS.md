@@ -25,9 +25,9 @@
 | I06 | v0.14 | **Text editing and shaping**: font picker, glyph-level shaping on canvas, accurate Cyrillic layout, text runs | Cross-platform text fixture checks and editable text preservation |
 | I07 | v0.15 | **Multi-page documents**: page navigator, pages with distinct sizes, export page ranges, versioned migration | Old KDR migration and 1/100-page document tests |
 | I08 | v0.16 | **Guides and smart snapping**: alignment guides, object edges/centres, ruler controls, measuring tool, units | Snap precision tests across zoom levels and large sheets |
-| I09 | v0.17 | **Reusable design system**: symbols/components, named styles, saved templates, importable asset libraries | Instance/update propagation tests and portable template fixtures |
-| I10 | v0.18 | **Non-destructive raster editing**: crop, alpha, placement, EXIF orientation, basic adjustments | Reopen/export parity; resolution and resource cap tests |
-| I11 | v0.19 | **Vector interchange hardening**: editable SVG subset expansion, AI/EPS/PDF ingestion tests, font handling and warnings | Published format matrix and external gold-document corpus |
+| I09 | v0.23 | **Reusable design system**: symbols/components, named styles, saved templates, importable asset libraries | Instance/update propagation tests and portable template fixtures |
+| I10 | v0.24 | **Non-destructive raster editing**: crop, alpha, placement, EXIF orientation, basic adjustments | Reopen/export parity; resolution and resource cap tests |
+| I11 | v0.25 | **Vector interchange hardening**: editable SVG subset expansion, AI/EPS/PDF ingestion tests, font handling and warnings | Published format matrix and external gold-document corpus |
 | I12 | v1.0 RC | **Reliability release**: autosave/recovery, unsaved-changes guard, crash diagnosis, file corruption defense | Recovery simulations, CI gating, hands-on Win10/Linux acceptance |
 | I13 | v1.1 | **Color management**: ICC profile handling and CMYK data model (not yet PDF/X certification) | Color-transform test charts and reference-profile comparisons |
 | I14 | v1.2 | **Standards-oriented PDF export**: PDF/X export research, transparency/font embedding and conformance validation | Independent PDF validators and print-shop proof checks |
@@ -40,7 +40,7 @@
 
 ## Scheduling, scope changes, and dependencies
 
-Each new user request to **continue development** should begin from the next uncompleted numbered iteration; the actual status is tracked below. If an iteration uncovers a blocking architecture issue, fix and test it before adding unrelated features; record any rescheduling explicitly. We cannot implement 20 full releases asynchronously in the background from a single chat turn. Development happens during active turns or user-configured external automation, and each reported status must be grounded in GitHub commits/CI. I12 reliability work has been pulled forward as a data-loss prevention priority; I09–I11 remain on the backlog and must not be treated as completed.
+Each new user request to **continue development** should begin from the next uncompleted numbered iteration; the actual status is tracked below. If an iteration uncovers a blocking architecture issue, fix and test it before adding unrelated features; record any rescheduling explicitly. We cannot implement 20 full releases asynchronously in the background from a single chat turn. Development happens during active turns or user-configured external automation, and each reported status must be grounded in GitHub commits/CI. I12 reliability work was pulled forward as a data-loss prevention priority. I09 is now in implementation as v0.23; I10–I11 remain on the backlog.
 
 No estimated dates are asserted. Capabilities marked "research", especially CDR export, PDF/X certification and Windows 7, are contingent on feasibility and external validation.
 
@@ -51,6 +51,8 @@ No estimated dates are asserted. Capabilities marked "research", especially CDR 
 | I01 v0.9 | Implemented; manual GUI/production QA pending | [#15](https://github.com/konstive-collab/OpenCorel/pull/15) | [Windows + Linux passed](https://github.com/konstive-collab/OpenCorel/actions/runs/43726921360) | Node edit, tested geometry and published desktop/CLI artifacts; merged as `58466f5` |
 | I02 v0.10 | Implemented; manual GUI/production QA pending | [#17](https://github.com/konstive-collab/OpenCorel/pull/17) | [Windows + Linux passed](https://github.com/konstive-collab/OpenCorel/actions/runs/43736421574) | Boolean union/subtract/intersect/XOR, editable compound result, holes and undo; merged as `4feef2f` |
 | I03 v0.11 | Implemented in source; manual export/alpha-mask QA remains | [#19](https://github.com/konstive-collab/OpenCorel/pull/19) | historical CI pending verification | Vector clipping, KDR, SVG/PDF and geometry-aware hit test |
-| I04–I11 | Backlog / partial delivery | — | — | Advanced transforms, appearance, text, pages and guides exist in later source versions; symbols, raster editing and interchange hardening still need explicit acceptance against this plan |
+| I04–I08 | Partial delivery in later source versions; manual acceptance remains | — | — | Transforms, appearance, text, pages and guides need acceptance against the original criteria |
+| I09 v0.23 | Implemented in source; manual UI acceptance pending | [#37](https://github.com/konstive-collab/OpenCorel/pull/37) | [Windows + Linux passed](https://github.com/konstive-collab/OpenCorel/actions/runs/45471502966) | KDR-linked symbols, update propagation, OCLIB import/export, document-embedded assets, copy/paste, array and page-transfer preservation |
+| I10–I11 | Planned | — | — | Raster editing and vector interchange hardening |
 | I12 v1.0 RC | Implemented in source; manual crash/restart and UI QA pending | [#36](https://github.com/konstive-collab/OpenCorel/pull/36) | [Windows + Linux passed](https://github.com/konstive-collab/OpenCorel/actions/runs/45440702114) | Atomic KDR snapshots, startup recovery prompt, destructive-action guard, panic reports; manual recovery simulation still required |
 | I13–I20 | Planned | — | — | Not implemented |

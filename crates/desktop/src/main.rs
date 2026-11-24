@@ -26,6 +26,7 @@ mod appearance_commands;
 mod text_workspace;
 mod path_workspace;
 mod inventory_tools;
+mod symbol_workspace;
 mod production_tools;
 use masked_canvas::MaskedCanvasCache;
 mod vector_preview;
@@ -167,7 +168,16 @@ struct Editor{
     show_safe_area:bool,
     safe_margin_mm:f32,
     internal_clipboard:Vec<Object>,
+    internal_symbol_clipboard:Vec<(opencorel_core::SymbolInstance,String)>,
     paste_number:usize,
+    symbol_library:opencorel_core::SymbolLibrary,
+    symbol_library_path:PathBuf,
+    symbol_library_error:Option<String>,
+    symbol_search:String,
+    symbol_category_filter:String,
+    symbol_new_name:String,
+    symbol_new_category:String,
+    selected_symbol_key:Option<String>,
     show_welcome:bool,
     toolbox_expanded:bool,
     resize_drag:Option<(u64,ResizeCorner)>,
@@ -269,7 +279,14 @@ impl Default for Editor{
             inventory_lines:Vec::new(),
             minimum_image_dpi:150.0,
             show_safe_area:false,safe_margin_mm:5.0,
-            internal_clipboard:Vec::new(),paste_number:0,
+            internal_clipboard:Vec::new(),
+            internal_symbol_clipboard:Vec::new(),paste_number:0,
+            symbol_library:opencorel_core::SymbolLibrary::default(),
+            symbol_library_path:opencorel_core::SymbolLibrary::default_path(),
+            symbol_library_error:None,symbol_search:String::new(),
+            symbol_category_filter:String::new(),
+            symbol_new_name:"Новый символ".into(),
+            symbol_new_category:"Общее".into(),selected_symbol_key:None,
             show_welcome:true,toolbox_expanded:false,resize_drag:None,
             object_filter:String::new(),show_command_palette:false,
             show_qr_dialog:false,qr_text:"https://example.org".into(),
@@ -564,6 +581,11 @@ impl Editor{
             return;
         };
         let members=self.doc.group_members(id);
+        if self.tool==Tool::Nodes&&self.doc.symbol_instance_for_object(id).is_some(){
+            self.selected=Some(id);
+            self.multi_selected.clear();
+            return;
+        }
         if !additive{
             self.selected=Some(id);
             self.multi_selected=members.into_iter().filter(|value|*value!=id).collect();
@@ -1811,6 +1833,7 @@ impl Editor{
         editor.file="Безымянный.kdr".into();
         editor.show_welcome=true;
         editor.status="Готово к работе · A4 · 210 × 297 мм".into();
+        editor.load_symbol_library();
         editor
     }
 }
