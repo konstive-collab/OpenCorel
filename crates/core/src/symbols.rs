@@ -509,6 +509,14 @@ impl Document{
             return Err("A symbol update cannot change its library key".into());
         }
         definition.validate()?;
+        let instance_count=self.symbol_instances.iter()
+            .filter(|item|item.symbol_id==symbol_id).count();
+        let added_per_instance=definition.objects.len()
+            .saturating_sub(old.objects.len());
+        let additional_objects=added_per_instance.saturating_mul(instance_count);
+        if self.all_object_count().saturating_add(additional_objects)>100_000{
+            return Err("Updating this symbol would exceed the 100,000-object document limit".into());
+        }
         let mut draft=self.clone();
         let index=draft.symbols.iter().position(|item|item.id==symbol_id)
             .ok_or("Symbol definition not found")?;
