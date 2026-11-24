@@ -11,7 +11,7 @@ Goal: fast, legally independent vector graphics editor for advertising, posters 
 - Portable JSON OCLIB library with atomic writes, import/export, search and category filters.
 - Link-preserving copy/paste, duplicate, array repeat, page duplication and cross-page transfer.
 - Validation budgets: 500 objects / 8 MiB per symbol, 512 symbols / 64 MiB per OCLIB file, 32 MiB of embedded symbol definitions per KDR document.
-- SVG/PDF export continues to emit ordinary editable geometry. Nested symbols and node editing inside linked groups are not supported in this alpha; detach first.
+- SVG/PDF export continues to emit ordinary editable geometry. Nested symbols and per-instance overrides are not supported. Node editing is available for individual objects inside a linked instance; update the definition afterward.
 - Automated tests cover KDR backward readability, instance update propagation, stable placement, cross-document library keys, detach, malformed libraries, page transfer and duplication. CI and manual visual acceptance remain pending.
 
 ## v0.22 — Reliability and crash recovery
