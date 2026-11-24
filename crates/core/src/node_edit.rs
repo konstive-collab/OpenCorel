@@ -38,34 +38,100 @@ pub fn handles(shape:&Shape,limit:usize)->Vec<(NodeAddress,Point)>{
     let mut nodes=Vec::new();
     if limit==0{return nodes;}
 
+    // Always expose anchors before control points. Previously every cubic
+    // consumed three of the visible slots, so a long path stopped exposing
+    // anchors after only limit / 3 segments.
     match shape{
         Shape::Polyline{points,..}=>{
-            for (i,p) in points.iter().enumerate().take(limit){push_handle(&mut nodes,limit,NodeAddress::Polyline(i),*p);}
+            for (i,p) in points.iter().enumerate().take(limit){
+                push_handle(&mut nodes,limit,NodeAddress::Polyline(i),*p);
+            }
         }
         Shape::Bezier{start,segments,..}=>{
             push_handle(&mut nodes,limit,NodeAddress::BezierStart,*start);
-            for (i,s) in segments.iter().enumerate().take(limit){
+            for (i,s) in segments.iter().enumerate(){
+                if nodes.len()>=limit{break;}
                 push_handle(&mut nodes,limit,NodeAddress::BezierEnd(i),s.end);
+            }
+            for (i,s) in segments.iter().enumerate(){
+                if nodes.len()>=limit{break;}
                 push_handle(&mut nodes,limit,NodeAddress::BezierControl1(i),s.control1);
                 push_handle(&mut nodes,limit,NodeAddress::BezierControl2(i),s.control2);
             }
         }
         Shape::CompoundPath{contours}=>{
-            for (j,c) in contours.iter().enumerate(){
+            'anchors:for (j,c) in contours.iter().enumerate(){
+                if nodes.len()>=limit{break;}
                 push_handle(&mut nodes,limit,NodeAddress::CompoundStart(j),c.start);
                 for (i,s) in c.segments.iter().enumerate(){
+                    if nodes.len()>=limit{break 'anchors;}
                     push_handle(&mut nodes,limit,NodeAddress::CompoundEnd(j,i),s.end);
+                }
+            }
+            'controls:for (j,c) in contours.iter().enumerate(){
+                for (i,s) in c.segments.iter().enumerate(){
+                    if nodes.len()>=limit{break 'controls;}
                     push_handle(&mut nodes,limit,NodeAddress::CompoundControl1(j,i),s.control1);
                     push_handle(&mut nodes,limit,NodeAddress::CompoundControl2(j,i),s.control2);
-                    if nodes.len()>=limit{break;}
                 }
-                if nodes.len()>=limit{break;}
             }
         }
         _=>{}
     }
     nodes
 }
+/// Pick the nearest editable anchor/handle across the ENTIRE path, not
+/// just the first MAX_VISIBLE_NODES used for rendering. Anchors win exact
+/// ties over controls, making dense curves predictable to select.
+pub fn nearest_handle(shape:&Shape,target:Point,tolerance_mm:f32)
+    ->Option<(NodeAddress,Point)>{
+    if !valid(target)||!tolerance_mm.is_finite()||tolerance_mm<=0.{
+        return None;
+    }
+    let mut best=tolerance_mm*tolerance_mm;
+    let mut found=None;
+    let mut check=|address:NodeAddress,point:Point|{
+        if !valid(point){return;}
+        let dx=point.x-target.x;
+        let dy=point.y-target.y;
+        let dist=dx*dx+dy*dy;
+        if dist<best{best=dist;found=Some((address,point));}
+    };
+    match shape{
+        Shape::Polyline{points,..}=>{
+            for (i,p) in points.iter().enumerate(){
+                check(NodeAddress::Polyline(i),*p);
+            }
+        }
+        Shape::Bezier{start,segments,..}=>{
+            check(NodeAddress::BezierStart,*start);
+            for (i,segment) in segments.iter().enumerate(){
+                check(NodeAddress::BezierEnd(i),segment.end);
+            }
+            for (i,segment) in segments.iter().enumerate(){
+                check(NodeAddress::BezierControl1(i),segment.control1);
+                check(NodeAddress::BezierControl2(i),segment.control2);
+            }
+        }
+        Shape::CompoundPath{contours}=>{
+            for (j,c) in contours.iter().enumerate(){
+                check(NodeAddress::CompoundStart(j),c.start);
+                for (i,segment) in c.segments.iter().enumerate(){
+                    check(NodeAddress::CompoundEnd(j,i),segment.end);
+                }
+            }
+            for (j,c) in contours.iter().enumerate(){
+                for (i,segment) in c.segments.iter().enumerate(){
+                    check(NodeAddress::CompoundControl1(j,i),segment.control1);
+                    check(NodeAddress::CompoundControl2(j,i),segment.control2);
+                }
+            }
+        }
+        _=>{}
+    }
+    found
+}
+
 pub fn point_at(shape:&Shape,address:NodeAddress)->Option<Point>{
     match (shape,address){
         (Shape::Polyline{points,..},NodeAddress::Polyline(i))=>points.get(i).copied(),
@@ -146,6 +212,176 @@ pub fn move_node(shape:&mut Shape,address:NodeAddress,to:Point)->Result<(),Strin
     }
     Ok(())
 }
+/// How the opposite control handle reacts while dragging a cubic tangent.
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+pub enum HandleMode{Independent,Smooth,Symmetric}
+
+/// Locate a tangent paired across a continuous Bézier anchor. The seam is
+/// linked only when the closed contour has an explicit final cubic ending at
+/// the start; an implicit straight closing edge is not a smooth tangent.
+fn adjacent_tangent(segments:&[CubicSegment],start:Point,closed:bool,
+    index:usize,first:bool)->Option<(Point,usize,bool,Point)>{
+    let current=segments.get(index)?;
+    if first{
+        if index>0{
+            let previous=&segments[index-1];
+            Some((previous.end,index-1,false,previous.control2))
+        }else if closed && segments.last()?.end==start{
+            let previous=segments.last()?;
+            Some((start,segments.len()-1,false,previous.control2))
+        }else{None}
+    }else if index+1<segments.len(){
+        let following=&segments[index+1];
+        Some((current.end,index+1,true,following.control1))
+    }else if closed && current.end==start{
+        Some((start,0,true,segments.first()?.control1))
+    }else{None}
+}
+
+/// Move a cubic control handle with optional C1 continuity. On failure the
+/// path is unchanged; symmetric mode mirrors the moved handle, while smooth
+/// mode preserves the opposite handle's length.
+pub fn move_handle(shape:&mut Shape,address:NodeAddress,to:Point,
+    mode:HandleMode)->Result<(),String>{
+    if mode==HandleMode::Independent || !address.is_handle(){
+        return move_node(shape,address,to);
+    }
+    if !valid(to){return Err("Handle coordinates must stay within safe bounds".into());}
+    let pairing=match (&*shape,address){
+        (Shape::Bezier{start,segments,closed},NodeAddress::BezierControl1(i))=>
+            adjacent_tangent(segments,*start,*closed,i,true)
+                .map(|(anchor,j,first,old)|(anchor,
+                    if first{NodeAddress::BezierControl1(j)}
+                    else{NodeAddress::BezierControl2(j)},old)),
+        (Shape::Bezier{start,segments,closed},NodeAddress::BezierControl2(i))=>
+            adjacent_tangent(segments,*start,*closed,i,false)
+                .map(|(anchor,j,first,old)|(anchor,
+                    if first{NodeAddress::BezierControl1(j)}
+                    else{NodeAddress::BezierControl2(j)},old)),
+        (Shape::CompoundPath{contours},NodeAddress::CompoundControl1(j,i))=>
+            contours.get(j).and_then(|c|
+                adjacent_tangent(&c.segments,c.start,c.closed,i,true))
+                .map(|(anchor,k,first,old)|(anchor,
+                    if first{NodeAddress::CompoundControl1(j,k)}
+                    else{NodeAddress::CompoundControl2(j,k)},old)),
+        (Shape::CompoundPath{contours},NodeAddress::CompoundControl2(j,i))=>
+            contours.get(j).and_then(|c|
+                adjacent_tangent(&c.segments,c.start,c.closed,i,false))
+                .map(|(anchor,k,first,old)|(anchor,
+                    if first{NodeAddress::CompoundControl1(j,k)}
+                    else{NodeAddress::CompoundControl2(j,k)},old)),
+        _=>None,
+    };
+    let opposite=if let Some((anchor,other,old))=pairing{
+        let dx=to.x-anchor.x;
+        let dy=to.y-anchor.y;
+        let length=dx.hypot(dy);
+        let other_length=if mode==HandleMode::Smooth{
+            (old.x-anchor.x).hypot(old.y-anchor.y)
+        }else{length};
+        let point=if length<=1e-6{
+            // Avoid a singular direction when a tangent collapses.
+            anchor
+        }else{
+            Point{x:anchor.x-dx/length*other_length,
+                y:anchor.y-dy/length*other_length}
+        };
+        if !valid(point){
+            return Err("Linked control handle would exceed safe bounds".into());
+        }
+        Some((other,point))
+    }else{None};
+    move_node(shape,address,to)?;
+    if let Some((other,point))=opposite{
+        // A control handle has no attached dependents, so this cannot fail
+        // after coordinate and address preflight.
+        move_node(shape,other,point)?;
+    }
+    Ok(())
+}
+
+/// Open a closed contour at the chosen anchor, retaining every cubic segment.
+/// If closure was implicit, materialize its straight edge before reordering.
+/// The result starts and ends at the split point and is editable as an open
+/// path, including non-selected contours in a compound path.
+/// Split an open single-contour path at an interior anchor into two
+/// independent editable shapes. The shared anchor is retained at both ends,
+/// so no original segment or control coordinate is modified.
+pub fn split_open_at_node(shape:&Shape,address:NodeAddress)
+    ->Result<(Shape,Shape),String>{
+    match (shape,address){
+        (Shape::Polyline{points,closed:false},NodeAddress::Polyline(i))
+            if i>0 && i+1<points.len()=>{
+            Ok((
+                Shape::Polyline{points:points[..=i].to_vec(),closed:false},
+                Shape::Polyline{points:points[i..].to_vec(),closed:false}
+            ))
+        }
+        (Shape::Bezier{start,segments,closed:false},NodeAddress::BezierEnd(i))
+            if i+1<segments.len()=>{
+            Ok((
+                Shape::Bezier{start:*start,segments:segments[..=i].to_vec(),closed:false},
+                Shape::Bezier{start:segments[i].end,
+                    segments:segments[i+1..].to_vec(),closed:false}
+            ))
+        }
+        _=>Err("Select an interior anchor of an open polyline or Bézier curve".into()),
+    }
+}
+
+pub fn break_closed_at_node(shape:&mut Shape,address:NodeAddress)
+    ->Result<(),String>{
+    fn break_cubic(start:&mut Point,segments:&mut Vec<CubicSegment>,
+        closed:&mut bool,index:Option<usize>)->Result<(),String>{
+        if !*closed{return Err("Contour is already open".into());}
+        if segments.is_empty(){return Err("Cannot break an empty contour".into());}
+        if index.is_some_and(|i|i>=segments.len()){
+            return Err("Invalid anchor index".into());
+        }
+        let original_start=*start;
+        let origin=if let Some(i)=index{segments[i].end}else{original_start};
+        if segments.last().expect("nonempty").end!=original_start{
+            if segments.len()>=60_000{return Err("Contour exceeds safe node limit".into());}
+            let last=segments.last().expect("nonempty").end;
+            segments.push(CubicSegment{
+                control1:lerp(last,original_start,1.0/3.0),
+                control2:lerp(last,original_start,2.0/3.0),
+                end:original_start,
+            });
+        }
+        let offset=index.map_or(0,|i|i+1);
+        let count=segments.len();
+        segments.rotate_left(offset%count);
+        *start=origin;
+        *closed=false;
+        Ok(())
+    }
+    match (shape,address){
+        (Shape::Polyline{points,closed},NodeAddress::Polyline(i))=>{
+            if !*closed{return Err("Polyline is already open".into());}
+            if i>=points.len(){return Err("Invalid polyline anchor".into());}
+            if points.len()>=60_000{return Err("Polyline exceeds safe node limit".into());}
+            points.rotate_left(i);
+            points.push(points[0]);
+            *closed=false;
+            Ok(())
+        }
+        (Shape::Bezier{start,segments,closed},NodeAddress::BezierStart)=>
+            break_cubic(start,segments,closed,None),
+        (Shape::Bezier{start,segments,closed},NodeAddress::BezierEnd(i))=>
+            break_cubic(start,segments,closed,Some(i)),
+        (Shape::CompoundPath{contours},NodeAddress::CompoundStart(j))=>{
+            let c=contours.get_mut(j).ok_or("Invalid contour")?;
+            break_cubic(&mut c.start,&mut c.segments,&mut c.closed,None)
+        }
+        (Shape::CompoundPath{contours},NodeAddress::CompoundEnd(j,i))=>{
+            let c=contours.get_mut(j).ok_or("Invalid contour")?;
+            break_cubic(&mut c.start,&mut c.segments,&mut c.closed,Some(i))
+        }
+        _=>Err("Select a closed path anchor to break at".into()),
+    }
+}
+
 fn shift(p:&mut Point,d:Point){p.x+=d.x;p.y+=d.y;}
 fn valid(p:Point)->bool{
     p.x.is_finite()&&p.y.is_finite()&&p.x.abs()<=100_000.&&p.y.abs()<=100_000.
@@ -494,6 +730,190 @@ mod tests{
             CubicSegment{control1:Point{x:0.,y:10.},control2:Point{x:10.,y:10.},
                 end:Point{x:10.,y:0.}}
         ],closed:false}
+    }
+    #[test] fn visible_handles_prioritize_anchors_on_long_bezier(){
+        let segment=CubicSegment{
+            control1:Point{x:1.,y:1.},control2:Point{x:2.,y:2.},
+            end:Point{x:3.,y:3.},
+        };
+        let shape=Shape::Bezier{
+            start:Point{x:0.,y:0.},segments:vec![segment;1000],closed:false,
+        };
+        let picked=handles(&shape,750);
+        assert_eq!(picked.len(),750);
+        assert!(picked.iter().all(|(addr,_)|!addr.is_handle()));
+        assert_eq!(picked[0].0,NodeAddress::BezierStart);
+        assert_eq!(picked[749].0,NodeAddress::BezierEnd(748));
+    }
+    #[test] fn visible_handles_keep_controls_on_small_paths(){
+        let picked=handles(&path(),4);
+        assert_eq!(picked.len(),4);
+        assert_eq!(picked[0].0,NodeAddress::BezierStart);
+        assert_eq!(picked[1].0,NodeAddress::BezierEnd(0));
+        assert_eq!(picked[2].0,NodeAddress::BezierControl1(0));
+        assert_eq!(picked[3].0,NodeAddress::BezierControl2(0));
+    }
+    #[test] fn compound_visible_handles_prioritize_contour_anchors(){
+        let segment=CubicSegment{
+            control1:Point{x:1.,y:1.},control2:Point{x:2.,y:2.},
+            end:Point{x:3.,y:3.},
+        };
+        let shape=Shape::CompoundPath{contours:vec![
+            Contour{start:Point{x:0.,y:0.},segments:vec![segment;10],closed:true},
+            Contour{start:Point{x:5.,y:5.},segments:vec![segment;10],closed:true},
+        ]};
+        let picked=handles(&shape,15);
+        assert!(picked.iter().all(|(addr,_)|!addr.is_handle()));
+        assert!(picked.iter().any(|(addr,_)|*addr==NodeAddress::CompoundStart(1)));
+    }
+    #[test] fn nearest_handle_reaches_nodes_beyond_visible_750_limit(){
+        let segments=(0..1500).map(|i|{
+            let x=(i+1) as f32*2.0;
+            CubicSegment{
+                control1:Point{x:x-1.5,y:5.},
+                control2:Point{x:x-0.5,y:5.},
+                end:Point{x,y:0.},
+            }
+        }).collect();
+        let shape=Shape::Bezier{start:Point{x:0.,y:0.},segments,closed:false};
+        assert!(!handles(&shape,750).iter().any(|(a,_)|
+            *a==NodeAddress::BezierEnd(1450)));
+        let target=Point{x:2902.,y:0.};
+        let (address,position)=nearest_handle(&shape,target,0.5).unwrap();
+        assert_eq!(address,NodeAddress::BezierEnd(1450));
+        assert_eq!(position,target);
+    }
+    #[test] fn nearest_handle_prefers_anchor_on_coincident_controls(){
+        let shape=Shape::Bezier{start:Point{x:0.,y:0.},segments:vec![
+            CubicSegment{control1:Point{x:0.,y:0.},control2:Point{x:10.,y:0.},
+                end:Point{x:10.,y:0.}}
+        ],closed:false};
+        let (address,_)=nearest_handle(&shape,Point{x:0.,y:0.},1.).unwrap();
+        assert_eq!(address,NodeAddress::BezierStart);
+    }
+    #[test] fn split_open_cubic_retains_every_control_and_shared_anchor(){
+        let original=Shape::Bezier{start:Point{x:0.,y:0.},segments:vec![
+            CubicSegment{control1:Point{x:2.,y:2.},control2:Point{x:8.,y:2.},
+                end:Point{x:10.,y:0.}},
+            CubicSegment{control1:Point{x:12.,y:4.},control2:Point{x:18.,y:4.},
+                end:Point{x:20.,y:0.}},
+            CubicSegment{control1:Point{x:22.,y:6.},control2:Point{x:28.,y:6.},
+                end:Point{x:30.,y:0.}},
+        ],closed:false};
+        let (left,right)=split_open_at_node(&original,NodeAddress::BezierEnd(0)).unwrap();
+        let Shape::Bezier{start:a,segments:first,..}=left else{panic!()};
+        let Shape::Bezier{start:b,segments:second,..}=right else{panic!()};
+        assert_eq!(a,Point{x:0.,y:0.});
+        assert_eq!(b,first.last().unwrap().end);
+        assert_eq!(first.len(),1);
+        assert_eq!(second.len(),2);
+        assert_eq!(second[0].control1,Point{x:12.,y:4.});
+    }
+    #[test] fn split_open_polyline_keeps_common_vertex(){
+        let original=Shape::Polyline{points:vec![
+            Point{x:0.,y:0.},Point{x:2.,y:3.},Point{x:5.,y:6.},
+            Point{x:8.,y:9.}],closed:false};
+        let (left,right)=split_open_at_node(&original,NodeAddress::Polyline(2)).unwrap();
+        let Shape::Polyline{points:a,..}=left else{panic!()};
+        let Shape::Polyline{points:b,..}=right else{panic!()};
+        assert_eq!(a.len(),3);
+        assert_eq!(b.len(),2);
+        assert_eq!(a.last(),b.first());
+    }
+    #[test] fn split_open_rejects_endpoint_and_closed_paths(){
+        let original=path();
+        assert!(split_open_at_node(&original,NodeAddress::BezierEnd(0)).is_err());
+        let poly=Shape::Polyline{points:vec![
+            Point{x:0.,y:0.},Point{x:10.,y:0.},Point{x:10.,y:10.}
+        ],closed:true};
+        assert!(split_open_at_node(&poly,NodeAddress::Polyline(1)).is_err());
+    }
+    #[test] fn smooth_handle_drag_preserves_opposite_length_and_collinearity(){
+        let mut shape=Shape::Bezier{start:Point{x:0.,y:0.},segments:vec![
+            CubicSegment{control1:Point{x:2.,y:0.},control2:Point{x:8.,y:0.},
+                end:Point{x:10.,y:0.}},
+            CubicSegment{control1:Point{x:14.,y:0.},control2:Point{x:18.,y:2.},
+                end:Point{x:20.,y:0.}},
+        ],closed:false};
+        move_handle(&mut shape,NodeAddress::BezierControl1(1),
+            Point{x:10.,y:4.},HandleMode::Smooth).unwrap();
+        let Shape::Bezier{segments,..}=&shape else{panic!()};
+        assert!((segments[0].control2.x-10.).abs()<1e-5);
+        assert!((segments[0].control2.y+2.).abs()<1e-5);
+        assert_eq!(segments[1].control1,Point{x:10.,y:4.});
+    }
+    #[test] fn symmetric_handle_drag_mirrors_opposite(){
+        let mut shape=Shape::Bezier{start:Point{x:0.,y:0.},segments:vec![
+            CubicSegment{control1:Point{x:1.,y:2.},control2:Point{x:8.,y:0.},
+                end:Point{x:10.,y:0.}},
+            CubicSegment{control1:Point{x:12.,y:3.},control2:Point{x:18.,y:0.},
+                end:Point{x:20.,y:0.}},
+        ],closed:false};
+        move_handle(&mut shape,NodeAddress::BezierControl2(0),
+            Point{x:7.,y:-4.},HandleMode::Symmetric).unwrap();
+        let Shape::Bezier{segments,..}=&shape else{panic!()};
+        assert_eq!(segments[1].control1,Point{x:13.,y:4.});
+        assert_eq!(segments[0].control2,Point{x:7.,y:-4.});
+    }
+    #[test] fn linked_handle_drag_rejects_out_of_bounds_atomically(){
+        let mut shape=Shape::Bezier{start:Point{x:0.,y:0.},segments:vec![
+            CubicSegment{control1:Point{x:0.,y:0.},control2:Point{x:-99_999.,y:0.},
+                end:Point{x:90_000.,y:0.}},
+            CubicSegment{control1:Point{x:90_001.,y:0.},control2:Point{x:90_003.,y:0.},
+                end:Point{x:90_004.,y:0.}}
+        ],closed:false};
+        let before=shape.clone();
+        assert!(move_handle(&mut shape,NodeAddress::BezierControl1(1),
+            Point{x:90_000.,y:20.},HandleMode::Smooth).is_err());
+        assert_eq!(shape,before);
+    }
+    #[test] fn split_closed_bezier_at_middle_anchor_keeps_segments(){
+        let mut shape=Shape::Bezier{start:Point{x:0.,y:0.},segments:vec![
+            CubicSegment{control1:Point{x:2.,y:0.},control2:Point{x:8.,y:0.},
+                end:Point{x:10.,y:0.}},
+            CubicSegment{control1:Point{x:10.,y:2.},control2:Point{x:0.,y:8.},
+                end:Point{x:0.,y:0.}},
+        ],closed:true};
+        break_closed_at_node(&mut shape,NodeAddress::BezierEnd(0)).unwrap();
+        let Shape::Bezier{start,segments,closed}=shape else{panic!()};
+        assert!(!closed);
+        assert_eq!(start,Point{x:10.,y:0.});
+        assert_eq!(segments.len(),2);
+        assert_eq!(segments[0].end,Point{x:0.,y:0.});
+        assert_eq!(segments[1].end,start);
+    }
+    #[test] fn split_implicit_closure_materializes_straight_segment(){
+        let mut shape=Shape::Bezier{start:Point{x:0.,y:0.},segments:vec![
+            CubicSegment{control1:Point{x:2.,y:0.},control2:Point{x:8.,y:0.},
+                end:Point{x:10.,y:0.}}
+        ],closed:true};
+        break_closed_at_node(&mut shape,NodeAddress::BezierStart).unwrap();
+        let Shape::Bezier{start,segments,closed}=shape else{panic!()};
+        assert!(!closed);
+        assert_eq!(segments.len(),2);
+        assert_eq!(segments[1].end,start);
+        assert!((segments[1].control1.x-10.0*2.0/3.0).abs()<1e-4);
+        assert_eq!(segments[1].control1.y,0.);
+    }
+    #[test] fn break_closed_polyline_duplicates_seam_without_losing_edges(){
+        let mut shape=Shape::Polyline{points:vec![
+            Point{x:0.,y:0.},Point{x:5.,y:0.},Point{x:5.,y:5.}],closed:true};
+        break_closed_at_node(&mut shape,NodeAddress::Polyline(1)).unwrap();
+        let Shape::Polyline{points,closed}=shape else{panic!()};
+        assert!(!closed);
+        assert_eq!(points,vec![Point{x:5.,y:0.},Point{x:5.,y:5.},
+            Point{x:0.,y:0.},Point{x:5.,y:0.}]);
+    }
+    #[test] fn break_invalid_or_open_path_preserves_geometry(){
+        let mut shape=path();
+        let before=shape.clone();
+        assert!(break_closed_at_node(&mut shape,NodeAddress::BezierEnd(0)).is_err());
+        assert_eq!(shape,before);
+        let Shape::Bezier{closed,..}=&mut shape else{panic!()};
+        *closed=true;
+        let before=shape.clone();
+        assert!(break_closed_at_node(&mut shape,NodeAddress::BezierEnd(9)).is_err());
+        assert_eq!(shape,before);
     }
     #[test] fn insert_bezier_preserves_entire_curve(){
         let mut shape=path();

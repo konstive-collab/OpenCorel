@@ -67,7 +67,7 @@ impl Editor{
                 .range(0.01..=20.0).speed(0.05).suffix(" мм"));
         });
         if ui.add_enabled(self.selection_ids().len()==2,
-            egui::Button::new("Соединить открытые концы 2 контуров")).clicked(){
+            egui::Button::new("Соединить два открытых контура (линии / Безье)")).clicked(){
             self.execute_path_command(PathCommand::JoinEndpoints);
             ui.close_menu();
         }
@@ -85,6 +85,24 @@ mod tests{
         editor.selected=Some(id);
         editor.execute_path_command(PathCommand::Convert);
         assert!(matches!(editor.doc.get(id).unwrap().shape,Shape::Bezier{..}));
+        editor.undo();
+        assert_eq!(editor.doc,snapshot);
+    }
+    #[test] fn join_mixed_line_and_bezier_preserves_undo(){
+        use opencorel_core::CubicSegment;
+        let mut editor=Editor::default();
+        editor.doc=Default::default();
+        let a=editor.doc.add(Shape::Polyline{points:vec![
+            Point{x:0.,y:0.},Point{x:10.,y:0.}],closed:false},Style::default());
+        let b=editor.doc.add(Shape::Bezier{start:Point{x:10.05,y:0.},
+            segments:vec![CubicSegment{
+                control1:Point{x:12.,y:5.},control2:Point{x:18.,y:5.},
+                end:Point{x:20.,y:0.}}],closed:false},Style::default());
+        let snapshot=editor.doc.clone();
+        editor.selected=Some(a);editor.multi_selected=vec![b];
+        editor.execute_path_command(PathCommand::JoinEndpoints);
+        assert_eq!(editor.doc.objects.len(),1);
+        assert!(matches!(editor.doc.get(a).unwrap().shape,Shape::Bezier{..}));
         editor.undo();
         assert_eq!(editor.doc,snapshot);
     }
