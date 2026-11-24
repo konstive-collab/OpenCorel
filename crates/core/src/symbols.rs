@@ -509,6 +509,56 @@ impl Document{
         *self=draft;
         Ok(count)
     }
+    /// Recreate linked symbol metadata for a copied set of objects.
+    /// Missing definitions (for example, clipboard content pasted into another
+    /// document) are intentionally left as ordinary grouped artwork.
+    pub fn clone_symbol_instances(&mut self,source:&[SymbolInstance],
+        id_map:&BTreeMap<u64,u64>)->Result<usize,String>{
+        let mut draft=self.clone();
+        let mut created=0usize;
+        for instance in source{
+            if draft.symbol_definition(instance.symbol_id).is_none(){continue;}
+            let Some(member_ids)=instance.member_ids.iter()
+                .map(|old|id_map.get(old).copied()).collect::<Option<Vec<_>>>() else{
+                continue;
+            };
+            if member_ids.is_empty()||draft.symbol_instances.len()>=MAX_SYMBOL_INSTANCES{
+                return Err("Cannot duplicate symbol instance: capacity reached".into());
+            }
+            let objects:Vec<_>=member_ids.iter().map(|id|
+                draft.get(*id).cloned().ok_or("Copied symbol object is missing"))
+                .collect::<Result<_,_>>()?;
+            let group_ids:HashSet<_>=objects.iter().filter_map(|object|object.group_id).collect();
+            if group_ids.len()>1{
+                return Err("Copied symbol members have inconsistent groups".into());
+            }
+            let group_id=if let Some(group)=group_ids.iter().next().copied(){
+                group
+            }else{
+                if draft.next_id>=u64::MAX-1{return Err("Group identifier limit reached".into());}
+                let group=draft.next_id;draft.next_id+=1;
+                for id in &member_ids{
+                    draft.get_mut(*id).ok_or("Copied symbol object is missing")?
+                        .group_id=Some(group);
+                }
+                group
+            };
+            if objects.iter().any(|object|
+                object.group_id.is_some_and(|group|group!=group_id)){
+                return Err("Copied symbol members have inconsistent groups".into());
+            }
+            draft.symbol_instances.push(SymbolInstance{
+                symbol_id:instance.symbol_id,page_id:draft.active_page_id,
+                group_id,member_ids
+            });
+            created+=1;
+        }
+        if created>0{
+            draft.validate()?;
+            *self=draft;
+        }
+        Ok(created)
+    }
     pub fn validate_symbols(&self)->Result<(),String>{
         if self.next_symbol_id==0||self.next_symbol_id==u64::MAX||
             self.symbols.len()>MAX_LIBRARY_SYMBOLS||
