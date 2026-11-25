@@ -7,7 +7,7 @@ use opencorel_typography::TextOutliner;
 fn main()->ExitCode{
     let args:Vec<_>=env::args().collect();
     let outcome=match args.as_slice(){
-        [_,op,src,dst,page_id,object_id,settings] if op=="raster-adjust" => raster_adjust(src,dst,page_id,object_id,settings),
+        [_,op,src,dst,page_id,object_id,settings] if op=="raster-adjust"||op=="raster-batch" => raster_adjust(src,dst,page_id,object_id,settings),
         [_,op,src,dst,page_id,object_id,kind] if op=="raster-extract" => raster_extract(src,dst,page_id,object_id,kind),
         [_,op,path,phrase] if op=="find-objects" =>open_any(path).and_then(|r|{
             let hits=r.document.find_objects(&opencorel_core::object_search::ObjectQuery{
@@ -262,7 +262,7 @@ fn main()->ExitCode{
             .and_then(|r|save_document(&r.document,dst)),
         [_,op,src,dst] if op=="export-svg" => open_any(src)
             .and_then(|r|save_document(&r.document,dst)),
-        _=>{eprintln!("Usage:\n  opencorel-cli raster-adjust IN.kdr OUT.kdr PAGE_ID OBJECT_ID SETTINGS.json\n  opencorel-cli raster-extract IN.kdr OUT.png PAGE_ID OBJECT_ID original|adjusted\n  opencorel-cli benchmark COUNT\n  opencorel-cli new FILE.kdr\n  opencorel-cli inventory FILE.kdr\n  opencorel-cli qr-code IN.kdr OUT.kdr URL_OR_TEXT SIZE_MM\n  opencorel-cli recolor-rgb IN.kdr OUT.kdr #RRGGBB #RRGGBB\n  opencorel-cli find-objects FILE.kdr QUERY\n  opencorel-cli find-text FILE.kdr QUERY\n  opencorel-cli replace-text IN.kdr OUT.kdr QUERY REPLACEMENT\n  opencorel-cli gradient-preset IN.kdr OUT.kdr OBJECT_ID sunrise|ocean|forest|sunset|steel|candy|monochrome\n  opencorel-cli inspect FILE.kdr\n  opencorel-cli pages FILE.kdr\n  opencorel-cli add-page IN.kdr OUT.kdr WIDTH_MM HEIGHT_MM\n  opencorel-cli duplicate-page IN.kdr OUT.kdr\n  opencorel-cli batch-svg FILE.kdr DIRECTORY\n  opencorel-cli batch-pdf FILE.kdr DIRECTORY\n  opencorel-cli export-pdf-book FILE.kdr DOCUMENT.pdf\n  opencorel-cli export-trim-pdf FILE.kdr TRIM.pdf\n  opencorel-cli export-trim-svg FILE.kdr TRIM.svg\n  opencorel-cli preflight FILE.kdr\n  opencorel-cli convert INPUT OUTPUT\n  opencorel-cli outline-text INPUT.kdr OUTPUT.kdr\n  opencorel-cli export-bitmap FILE.kdr FILE.png DPI\n  opencorel-cli export-svg FILE.kdr FILE.svg\n  opencorel-cli export-pdf FILE.kdr FILE.pdf\n  opencorel-cli plotter-preflight FILE.kdr\n  opencorel-cli export-plt FILE.kdr FILE.plt\n  opencorel-cli dxf-preflight FILE.kdr\n  opencorel-cli export-dxf FILE.kdr FILE.dxf\n  opencorel-cli import-svg FILE.svg FILE.kdr");
+        _=>{eprintln!("Usage:\n  opencorel-cli raster-adjust IN.kdr OUT.kdr PAGE_ID OBJECT_ID SETTINGS.json\n  opencorel-cli raster-batch IN.kdr OUT.kdr PAGE_ID ID1,ID2 SETTINGS.json\n  opencorel-cli raster-extract IN.kdr OUT.png PAGE_ID OBJECT_ID original|adjusted\n  opencorel-cli benchmark COUNT\n  opencorel-cli new FILE.kdr\n  opencorel-cli inventory FILE.kdr\n  opencorel-cli qr-code IN.kdr OUT.kdr URL_OR_TEXT SIZE_MM\n  opencorel-cli recolor-rgb IN.kdr OUT.kdr #RRGGBB #RRGGBB\n  opencorel-cli find-objects FILE.kdr QUERY\n  opencorel-cli find-text FILE.kdr QUERY\n  opencorel-cli replace-text IN.kdr OUT.kdr QUERY REPLACEMENT\n  opencorel-cli gradient-preset IN.kdr OUT.kdr OBJECT_ID sunrise|ocean|forest|sunset|steel|candy|monochrome\n  opencorel-cli inspect FILE.kdr\n  opencorel-cli pages FILE.kdr\n  opencorel-cli add-page IN.kdr OUT.kdr WIDTH_MM HEIGHT_MM\n  opencorel-cli duplicate-page IN.kdr OUT.kdr\n  opencorel-cli batch-svg FILE.kdr DIRECTORY\n  opencorel-cli batch-pdf FILE.kdr DIRECTORY\n  opencorel-cli export-pdf-book FILE.kdr DOCUMENT.pdf\n  opencorel-cli export-trim-pdf FILE.kdr TRIM.pdf\n  opencorel-cli export-trim-svg FILE.kdr TRIM.svg\n  opencorel-cli preflight FILE.kdr\n  opencorel-cli convert INPUT OUTPUT\n  opencorel-cli outline-text INPUT.kdr OUTPUT.kdr\n  opencorel-cli export-bitmap FILE.kdr FILE.png DPI\n  opencorel-cli export-svg FILE.kdr FILE.svg\n  opencorel-cli export-pdf FILE.kdr FILE.pdf\n  opencorel-cli plotter-preflight FILE.kdr\n  opencorel-cli export-plt FILE.kdr FILE.plt\n  opencorel-cli dxf-preflight FILE.kdr\n  opencorel-cli export-dxf FILE.kdr FILE.dxf\n  opencorel-cli import-svg FILE.svg FILE.kdr");
             return ExitCode::FAILURE;}
     };
     match outcome{
@@ -305,7 +305,8 @@ fn raster_adjust(src:&str,dst:&str,page:&str,object:&str,settings:&str)->Result<
         return Err("Raster adjustment output must be KDR or OCD to preserve the original source".into());
     }
     let page_id=page.parse::<u64>().map_err(|_|"Invalid page ID")?;
-    let object_id=object.parse::<u64>().map_err(|_|"Invalid object ID")?;
+    let ids=object.split(',').map(|v|v.parse::<u64>().map_err(|_|"Invalid object ID"))
+        .collect::<Result<Vec<_>,_>>()?;
     if std::fs::metadata(settings).map_err(|e|e.to_string())?.len()>16384{
         return Err("Raster settings file exceeds 16 KiB".into());
     }
@@ -314,9 +315,9 @@ fn raster_adjust(src:&str,dst:&str,page:&str,object:&str,settings:&str)->Result<
             .map_err(|e|format!("Invalid raster settings: {e}"))?;
     let mut doc=open_any(src)?.document;
     doc.switch_page(page_id)?;
-    doc.apply_raster_edit(object_id,params)?;
+    doc.apply_raster_batch(&ids,params)?;
     save_document(&doc,dst)?;
-    println!("Adjusted raster #{object_id} on page #{page_id}; original retained in the project.");
+    println!("Adjusted {} raster object(s) on page #{page_id}; originals retained.",ids.len());
     Ok(())
 }
 fn raster_extract(src:&str,dst:&str,page:&str,object:&str,kind:&str)->Result<(),String>{
