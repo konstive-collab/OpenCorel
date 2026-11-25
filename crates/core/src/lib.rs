@@ -720,7 +720,7 @@ impl Document {
                         return Err("Invalid raster image header or size".into());
                     }
                     if let Some(edit)=edit{
-                        edit.validate(*pixel_width,*pixel_height,mime)?;
+                        edit.validate(*pixel_width,*pixel_height,mime,&raw)?;
                     }
                 }
                 _=>{}
