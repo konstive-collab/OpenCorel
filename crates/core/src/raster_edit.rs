@@ -3,7 +3,7 @@
 //! consumed identically by canvas, SVG/PDF and raster proof exporters.
 use crate::{Document,Shape};
 use base64::{Engine,engine::general_purpose::STANDARD};
-use image::{DynamicImage,ImageFormat,ImageReader,RgbaImage,imageops};
+use image::{ImageFormat,ImageReader,RgbaImage,imageops};
 use serde::{Deserialize,Serialize};
 use std::io::{Cursor,Write};
 
