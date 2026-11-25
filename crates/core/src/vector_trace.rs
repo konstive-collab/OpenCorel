@@ -352,6 +352,84 @@ mod tests{
         assert!(trace_pixels(&img,frame(),TraceSettings::default()).is_err());
         assert!(trace_pixels(&img,frame(),settings()).is_ok());
     }
+
+    // Independent even-odd point test for the exact (unrounded) contours.
+    // Pixel centers never lie on the grid-aligned boundary.
+    fn contains_pixel(shape:&Shape,x:f32,y:f32)->bool{
+        let Shape::CompoundPath{contours}=shape else{panic!("expected native contours")};
+        let mut inside=false;
+        for ring in contours{
+            assert!(ring.closed);
+            let mut a=ring.start;
+            for segment in &ring.segments{
+                let b=segment.end;
+                assert!(a.x==b.x||a.y==b.y,"non-axis-aligned exact trace");
+                if (a.y>y)!=(b.y>y)&&x<a.x+(y-a.y)*(b.x-a.x)/(b.y-a.y){
+                    inside=!inside;
+                }
+                a=b;
+            }
+            assert_eq!(a,ring.start);
+        }
+        inside
+    }
+    fn assert_binary_mask(w:u32,h:u32,mask:u32){
+        let img=RgbaImage::from_fn(w,h,|x,y|{
+            if mask&(1<<(y*w+x))!=0{black()}else{white_pixel()}
+        });
+        let frame=Bounds{x:0.,y:0.,w:w as f32,h:h as f32};
+        let result=trace_pixels(&img,frame,settings());
+        if mask==0{assert!(result.is_err());return;}
+        let result=result.unwrap_or_else(|e|panic!("mask {mask:#x}: {e}"));
+        assert_eq!(result.parts.len(),1);
+        for y in 0..h{for x in 0..w{
+            assert_eq!(contains_pixel(&result.parts[0].shape,x as f32+0.5,y as f32+0.5),
+                mask&(1<<(y*w+x))!=0,"mask {mask:#x}, pixel ({x},{y})");
+        }}
+    }
+    #[test] fn exhaustive_binary_topology_3_by_3(){
+        for mask in 0..(1<<9){assert_binary_mask(3,3,mask);}
+    }
+    #[test] fn exhaustive_binary_topology_4_by_4(){
+        // Covers every local arrangement of foreground, holes, islands,
+        // touching diagonal corners and narrow bridges on a 4x4 grid.
+        for mask in 0..(1<<16){assert_binary_mask(4,4,mask);}
+    }
+    #[test] fn exhaustive_two_color_partition_with_transparency(){
+        let colors=[Rgba([0,0,0,0]),Rgba([255,0,0,255]),Rgba([0,0,255,255])];
+        let s=TraceSettings{mode:TraceMode::Color,colors:2,..settings()};
+        for mut code in 0u32..729{
+            let mut labels=[0usize;6];
+            for label in &mut labels{*label=(code%3) as usize;code/=3;}
+            let img=RgbaImage::from_fn(3,2,|x,y|colors[labels[(y*3+x) as usize]]);
+            let result=trace_pixels(&img,Bounds{x:0.,y:0.,w:3.,h:2.},s);
+            if labels.iter().all(|v|*v==0){assert!(result.is_err());continue;}
+            let result=result.unwrap();
+            for y in 0..2{for x in 0..3{
+                let mut hits=result.parts.iter().filter(|p|
+                    contains_pixel(&p.shape,x as f32+0.5,y as f32+0.5));
+                match labels[(y*3+x) as usize]{
+                    0=>assert!(hits.next().is_none()),
+                    label=>{
+                        let expected=if label==1{"#FF0000"}else{"#0000FF"};
+                        assert_eq!(hits.next().map(|p|p.style.fill.as_str()),Some(expected));
+                        assert!(hits.next().is_none(),"overlapping palette contours");
+                    }
+                }
+            }}
+        }
+    }
+    #[test] fn noise_filter_does_not_turn_removed_ring_into_filled_hole(){
+        let img=RgbaImage::from_fn(5,5,|x,y|{
+            if (1..=3).contains(&x)&&(1..=3).contains(&y)&&(x!=2||y!=2){
+                black()
+            }else{white_pixel()}
+        });
+        assert!(trace_pixels(&img,frame(),TraceSettings{min_area:9,..settings()}).is_err());
+        let result=trace_pixels(&img,frame(),TraceSettings{min_area:8,..settings()}).unwrap();
+        assert_eq!(result.contours,2);
+        assert!(!contains_pixel(&result.parts[0].shape,35.,45.));
+    }
     #[test] fn document_trace_is_atomic_and_keeps_source(){
         let img=RgbaImage::from_pixel(4,4,black());
         let mut out=Cursor::new(Vec::new());
