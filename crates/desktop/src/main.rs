@@ -918,7 +918,7 @@ impl Editor{
                 let style=Style{fill:"none".into(),stroke:"none".into(),
                     stroke_width_mm:0.0};
                 if self.add_shape(shape,style).is_some(){
-                    self.inspector_tab=InspectorTab::Properties;
+                    self.inspector_tab=InspectorTab::Raster;
                     self.status=format!("Изображение добавлено: {}",path.display());
                 }
             }
