@@ -32,6 +32,7 @@ use masked_canvas::MaskedCanvasCache;
 mod vector_preview;
 mod raster_preview;
 mod raster_studio;
+mod trace_workspace;
 mod compound_render;
 use compound_render::CompoundCache;
 use opencorel_typography::TextOutliner;
@@ -140,6 +141,7 @@ struct Editor{
     vector_cache:VectorCache,
     raster_cache:RasterCache,
     raster_panel:raster_studio::RasterPanel,
+    trace_panel:trace_workspace::TracePanel,
     compound_cache:CompoundCache,
     masked_canvas:MaskedCanvasCache,
     rotation_degrees:f32,
@@ -255,7 +257,7 @@ impl Default for Editor{
             new_guide_x:50.0,new_guide_y:50.0,
             light_theme:false,cursor_mm:None,
             fill_cache:FillCache::default(),vector_cache:VectorCache::default(),
-            raster_cache:RasterCache::default(),raster_panel:raster_studio::RasterPanel::default(),
+            raster_cache:RasterCache::default(),raster_panel:raster_studio::RasterPanel::default(),trace_panel:trace_workspace::TracePanel::default(),
             compound_cache:CompoundCache::default(),
             masked_canvas:MaskedCanvasCache::default(),
             rotation_degrees:30.0,skew_x_degrees:15.0,skew_y_degrees:0.0,

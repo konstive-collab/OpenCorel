@@ -7,7 +7,7 @@ use opencorel_core::{Bounds, Shape, Alignment, Distribution, TextAlign, valid_pa
 use std::collections::HashSet;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum InspectorTab { Objects, Properties, Page, Export, Symbols, Raster }
+pub(super) enum InspectorTab { Objects, Properties, Page, Export, Symbols, Raster, Trace }
 
 const SWATCHES: [&str; 27] = [
     "#FFFFFF", "#E8E8E8", "#C0C0C0", "#808080", "#333333", "#000000",
@@ -346,6 +346,9 @@ impl Editor {
                     if ui.selectable_label(self.inspector_tab==InspectorTab::Export,"Центр экспорта").clicked(){
                         self.inspector_tab=InspectorTab::Export;self.show_inspector=true;ui.close_menu();
                     }
+                    if ui.selectable_label(self.inspector_tab==InspectorTab::Trace,"Векторизация растров").clicked(){
+                        self.inspector_tab=InspectorTab::Trace;self.show_inspector=true;ui.close_menu();
+                    }
                     if ui.selectable_label(self.inspector_tab==InspectorTab::Raster,"Растровая студия").clicked(){
                         self.inspector_tab=InspectorTab::Raster;self.show_inspector=true;ui.close_menu();
                     }
@@ -563,6 +566,7 @@ impl Editor {
                 ui.selectable_value(&mut self.inspector_tab,InspectorTab::Export,"Экспорт");
                 ui.selectable_value(&mut self.inspector_tab,InspectorTab::Symbols,"Символы");
                 ui.selectable_value(&mut self.inspector_tab,InspectorTab::Raster,"Растр");
+                ui.selectable_value(&mut self.inspector_tab,InspectorTab::Trace,"Трассировка");
             });
             ui.separator();
             if self.inspector_tab==InspectorTab::Objects{
@@ -581,6 +585,7 @@ impl Editor {
                             InspectorTab::Export=>self.export_docker(ui),
                             InspectorTab::Symbols=>self.symbol_library_docker(ui),
                             InspectorTab::Raster=>self.raster_studio(ui),
+                            InspectorTab::Trace=>self.trace_inspector(ui),
                             InspectorTab::Objects=>{},
                         }
                     });

@@ -2,6 +2,13 @@
 
 Goal: fast, legally independent vector graphics editor for advertising, posters and maps, especially on older Windows/Linux workstations.
 
+## v0.25 — Raster vectorization
+
+- Native editable compound contours from binary and palette-classified pixels, holes and 4-connected noise removal.
+- Bounded deterministic extraction, optional cubic corner rounding for silhouettes, preview and stats, source retention/replacement and CLI.
+- SVG/PDF and pixel-proof regression tests; CI/manual acceptance pending.
+- Color trace is limited to 16 colors and 1024-pixel working grid; centerline tracing and global curve fitting remain open.
+
 ## v0.24 — Raster Studio
 
 - Retained original PNG/JPEG, bounded edit settings and derived PNG in KDR.
