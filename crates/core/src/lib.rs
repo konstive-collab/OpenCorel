@@ -29,6 +29,7 @@ pub mod qr_vector;
 pub mod recolor;
 pub mod object_search;
 pub mod symbols;
+pub mod raster_edit;
 pub use symbols::{SymbolDefinition,SymbolInstance,SymbolLibrary,SymbolObject};
 use appearance::Appearance;
 
@@ -105,7 +106,9 @@ pub enum Shape {
     /// Self-contained bitmap artwork, using original PNG/JPEG encoded bytes.
     /// Dimensions in mm stay independent of source pixel dimensions.
     Raster { x:f32,y:f32,w:f32,h:f32, pixel_width:u32,pixel_height:u32,
-        mime:String,data_base64:String },
+        mime:String,data_base64:String,
+        #[serde(default,skip_serializing_if="Option::is_none")]
+        edit:Option<Box<raster_edit::RasterEdit>> },
 }
 
 impl Shape {
@@ -318,7 +321,7 @@ impl Document {
                         c.segments.len()*std::mem::size_of::<CubicSegment>())
                     .sum(),
                 Shape::EmbeddedSvg{svg,..}=>svg.len(),
-                Shape::Raster{data_base64,..}=>data_base64.len(),
+                shape @ Shape::Raster{..}=>raster_edit::raster_storage_bytes(shape),
                 _=>0,
             };
             total=total.saturating_add(std::mem::size_of::<Object>()
@@ -338,7 +341,7 @@ impl Document {
                     Shape::CompoundPath{contours}=>contours.iter().map(|c|
                         c.segments.len()*std::mem::size_of::<CubicSegment>()).sum(),
                     Shape::EmbeddedSvg{svg,..}=>svg.len(),
-                    Shape::Raster{data_base64,..}=>data_base64.len(),
+                    shape @ Shape::Raster{..}=>raster_edit::raster_storage_bytes(shape),
                     _=>0,
                 });
             }
@@ -701,7 +704,7 @@ impl Document {
                         return Err("Invalid embedded vector artwork".into());
                     }
                 }
-                Shape::Raster{w,h,pixel_width,pixel_height,mime,data_base64,..}=>{
+                Shape::Raster{w,h,pixel_width,pixel_height,mime,data_base64,edit,..}=>{
                     if *w<=0.0||*h<=0.0 ||
                         *pixel_width==0 || *pixel_height==0 ||
                         *pixel_width>16_000 || *pixel_height>16_000 ||
@@ -715,6 +718,9 @@ impl Document {
                         .map_err(|_|"Invalid raster base64 data")?;
                     if raw.len()>40*1024*1024 || !raster_signature_matches(mime,&raw){
                         return Err("Invalid raster image header or size".into());
+                    }
+                    if let Some(edit)=edit{
+                        edit.validate(*pixel_width,*pixel_height,mime)?;
                     }
                 }
                 _=>{}
@@ -1048,7 +1054,7 @@ mod tests{
         let mut doc=Document::default();
         doc.add(Shape::Raster{x:5.0,y:6.0,w:15.0,h:20.0,
             pixel_width:1,pixel_height:1,mime:"image/png".into(),
-            data_base64:png},Style::default());
+            data_base64:png,edit:None},Style::default());
         doc.validate().unwrap();
         assert!(doc.to_svg().contains("data:image/png;base64,"));
         let copy:Document=serde_json::from_str(&serde_json::to_string(&doc).unwrap()).unwrap();
@@ -1058,7 +1064,7 @@ mod tests{
         let mut doc=Document::default();
         let id=doc.add(Shape::Raster{x:0.0,y:0.0,w:10.0,h:10.0,
             pixel_width:100,pixel_height:100,mime:"image/jpeg".into(),
-            data_base64:"invalid!".into()},Style::default());
+            data_base64:"invalid!".into(),edit:None},Style::default());
         assert!(doc.validate().is_err());
         if let Shape::Raster{data_base64,..}=&mut doc.get_mut(id).unwrap().shape{
             *data_base64=base64::engine::general_purpose::STANDARD.encode(b"\x89PNG\r\n\x1a\n");
