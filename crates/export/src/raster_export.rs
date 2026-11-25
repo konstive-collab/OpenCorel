@@ -89,6 +89,26 @@ mod tests{
         assert!(left[0]>left[2],"left edge should be red-dominant");
         assert!(right[2]>right[0],"right edge should be blue-dominant");
     }
+    #[test] fn traced_ring_exports_as_vectors_with_transparent_hole(){
+        use opencorel_core::{Bounds,vector_trace::{TraceSettings,trace_pixels}};
+        let image=image::RgbaImage::from_fn(5,5,|x,y|if x==0||x==4||y==0||y==4{
+            image::Rgba([0,0,0,255])
+        }else{image::Rgba([255,255,255,255])});
+        let result=trace_pixels(&image,Bounds{x:0.,y:0.,w:25.4,h:25.4},
+            TraceSettings{min_area:0,..Default::default()}).unwrap();
+        let mut d=Document::default();
+        d.page.width_mm=25.4;d.page.height_mm=25.4;
+        for p in result.parts{d.add(p.shape,p.style);}
+        let svg=d.to_svg();
+        assert!(!svg.contains("<image"));
+        assert!(svg.contains("fill-rule=\"evenodd\""));
+        let bytes=raster_bytes(&d,96,ImageFormat::Png).unwrap();
+        let rendered=image::load_from_memory(&bytes).unwrap().to_rgba8();
+        assert!(rendered.get_pixel(5,5).0[0]<10);
+        assert!(rendered.get_pixel(48,48).0[0]>245);
+        let pdf=crate::pdf_bytes(&d).unwrap();
+        assert!(pdf.starts_with(b"%PDF-"));
+    }
     #[test] fn edited_raster_matches_png_proof_and_embeds_in_pdf(){
         use base64::Engine;
         use opencorel_core::raster_edit::RasterSettings;
