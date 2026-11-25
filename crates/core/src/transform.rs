@@ -331,7 +331,7 @@ mod tests{
     }
     #[test] fn raster_scales_without_touching_image_bytes(){
         let mut photo=Shape::Raster{x:10.0,y:10.0,w:50.0,h:30.0,
-            pixel_width:1,pixel_height:1,mime:"image/png".into(),data_base64:"unchanged".into()};
+            pixel_width:1,pixel_height:1,mime:"image/png".into(),data_base64:"unchanged".into(),edit:None};
         scale_shape(&mut photo,Point::default(),1.2,1.5).unwrap();
         if let Shape::Raster{w,h,data_base64,..}=photo{
             assert!((w-60.0).abs()<0.01);
@@ -375,7 +375,7 @@ mod tests{
         let mut t=Shape::Text{x:0.,y:0.,value:"Hello".into(),size_mm:12.};
         assert!(resize_shape(&mut t,Bounds{x:0.,y:0.,w:20.,h:30.}).is_err());
         let mut image=Shape::Raster{x:0.,y:0.,w:20.,h:20.,
-            pixel_width:1,pixel_height:1,mime:"image/png".into(),data_base64:"".into()};
+            pixel_width:1,pixel_height:1,mime:"image/png".into(),data_base64:"".into(),edit:None};
         assert!(rotate_90(&mut image,Point::default(),QuarterTurn::Clockwise).is_err());
     }
     #[test] fn copy_retains_fonts_and_style(){
