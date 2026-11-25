@@ -97,7 +97,7 @@ impl Document{
             return Err("Repeat exceeds the 1500-new-object / 100000-document limit".into());
         }
         let estimated_source:usize=sources.iter().map(|o|match &o.shape{
-            Shape::Raster{data_base64,..}=>data_base64.len(),
+            shape @ Shape::Raster{..}=>crate::raster_edit::raster_storage_bytes(shape),
             Shape::EmbeddedSvg{svg,..}=>svg.len(),
             Shape::Polyline{points,..}=>points.len()*8,
             Shape::Bezier{segments,..}=>segments.len()*24,
