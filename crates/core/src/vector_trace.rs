@@ -24,15 +24,18 @@ pub struct TraceSettings{
     pub max_side:u16,
     pub min_area:u16,
     pub skip_white:bool,
+    /// Optional corner rounding in percent of half the shortest incident edge.
+    /// Disabled for palette tracing to prevent gaps between adjacent colors.
+    pub round_corners:u8,
 }
 impl Default for TraceSettings{
     fn default()->Self{Self{mode:TraceMode::Dark,threshold:128,alpha_min:128,
-        colors:6,max_side:512,min_area:3,skip_white:true}}
+        colors:6,max_side:512,min_area:3,skip_white:true,round_corners:0}}
 }
 impl TraceSettings{
     pub fn validate(self)->Result<(),String>{
         if !(2..=16).contains(&self.colors)||!(32..=1024).contains(&self.max_side)
-            ||self.alpha_min==0||self.min_area>4096{
+            ||self.alpha_min==0||self.min_area>4096||self.round_corners>90{
             return Err("Invalid trace settings".into());
         }
         Ok(())
@@ -179,6 +182,28 @@ fn line(a:Point,b:Point)->CubicSegment{
     CubicSegment{control1:Point{x:a.x+(b.x-a.x)/3.,y:a.y+(b.y-a.y)/3.},
         control2:Point{x:a.x+(b.x-a.x)*2./3.,y:a.y+(b.y-a.y)*2./3.},end:b}
 }
+fn lerp(a:Point,b:Point,t:f32)->Point{Point{x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t}}
+fn rounded_ring(points:&[Point],amount:u8)->Contour{
+    let fraction=f32::from(amount)/200.;
+    let n=points.len();
+    let corners:Vec<_>=(0..n).map(|i|{
+        let previous=points[(i+n-1)%n];let current=points[i];let next=points[(i+1)%n];
+        let r=(current.x-previous.x).hypot(current.y-previous.y)
+            .min((next.x-current.x).hypot(next.y-current.y))*fraction;
+        let a=r/(current.x-previous.x).hypot(current.y-previous.y).max(1e-9);
+        let b=r/(next.x-current.x).hypot(next.y-current.y).max(1e-9);
+        (lerp(current,previous,a),current,lerp(current,next,b))
+    }).collect();
+    let start=corners[0].0;
+    let mut segments=Vec::with_capacity(n*2);
+    for i in 0..n{
+        let (a,b,c)=corners[i];
+        // Exact quadratic-to-cubic conversion through the original corner.
+        segments.push(CubicSegment{control1:lerp(a,b,2./3.),control2:lerp(c,b,2./3.),end:c});
+        segments.push(line(c,corners[(i+1)%n].0));
+    }
+    Contour{start,segments,closed:true}
+}
 pub fn trace_pixels(image:&RgbaImage,frame:Bounds,s:TraceSettings)->Result<TraceResult,String>{
     s.validate()?;
     if image.width()==0||image.height()==0||u64::from(image.width())*u64::from(image.height())>MAX_SOURCE_PIXELS{
@@ -208,13 +233,19 @@ pub fn trace_pixels(image:&RgbaImage,frame:Bounds,s:TraceSettings)->Result<Trace
         let loops=rings(&edges)?;
         let mut contours=Vec::new();
         for ring in loops{
-            result.nodes+=ring.len();result.contours+=1;
+            let rounded=s.mode!=TraceMode::Color&&s.round_corners>0;
+            result.nodes+=ring.len()*if rounded{2}else{1};result.contours+=1;
             if result.nodes>MAX_NODES||result.contours>MAX_RINGS{
                 return Err("Trace exceeds vector complexity budget; lower resolution or increase minimum area".into());
             }
-            let start=point(ring[0]);
-            let segments=(0..ring.len()).map(|i|line(point(ring[i]),point(ring[(i+1)%ring.len()]))).collect();
-            contours.push(Contour{start,segments,closed:true});
+            if rounded{
+                let points:Vec<_>=ring.into_iter().map(point).collect();
+                contours.push(rounded_ring(&points,s.round_corners));
+            }else{
+                let start=point(ring[0]);
+                let segments=(0..ring.len()).map(|i|line(point(ring[i]),point(ring[(i+1)%ring.len()]))).collect();
+                contours.push(Contour{start,segments,closed:true});
+            }
         }
         if !contours.is_empty(){
             result.parts.push(TracePart{shape:Shape::CompoundPath{contours},
@@ -289,6 +320,16 @@ mod tests{
         let r=trace_pixels(&img,frame(),settings()).unwrap();
         assert_eq!((r.contours,r.nodes),(1,4));
         assert_eq!(r.parts[0].shape.bounds(),frame());
+    }
+    #[test] fn rounded_silhouette_contains_real_curved_segments(){
+        let img=RgbaImage::from_pixel(5,5,black());
+        let r=trace_pixels(&img,frame(),TraceSettings{round_corners:60,..settings()}).unwrap();
+        assert_eq!((r.contours,r.nodes),(1,8));
+        let Shape::CompoundPath{contours}=&r.parts[0].shape else{panic!()};
+        let c=&contours[0];let s=&c.segments[0];
+        let cross=(s.control1.x-c.start.x)*(s.end.y-c.start.y)
+            -(s.control1.y-c.start.y)*(s.end.x-c.start.x);
+        assert!(cross.abs()>0.01);
     }
     #[test] fn ring_preserves_hole_and_diagonal_islands(){
         let img=RgbaImage::from_fn(5,5,|x,y|if x==0||x==4||y==0||y==4{black()}else{white_pixel()});
