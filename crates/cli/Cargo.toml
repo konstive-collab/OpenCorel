@@ -12,3 +12,5 @@ opencorel-export = { path = "../export" }
 opencorel-formats = { path = "../formats" }
 
 opencorel-typography = { path = "../typography" }
+
+serde_json.workspace = true
