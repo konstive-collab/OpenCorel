@@ -358,6 +358,29 @@ mod tests{
         assert!(reopened.to_svg().contains(data_base64));
         assert!(!reopened.to_svg().contains(&edit.as_ref().unwrap().source_base64));
     }
+    #[test] fn extracted_original_is_exact_and_output_is_not_overwritten(){
+        let s=sample();
+        let changed=adjusted_shape(&s,RasterSettings{invert:true,..Default::default()}).unwrap();
+        let folder=tempfile::tempdir().unwrap();
+        let path=folder.path().join("original.png");
+        extract_raster(&changed,"original",&path).unwrap();
+        let Shape::Raster{data_base64,..}=&s else{panic!()};
+        assert_eq!(std::fs::read(&path).unwrap(),STANDARD.decode(data_base64).unwrap());
+        assert!(extract_raster(&changed,"adjusted",&path).is_err());
+        assert!(extract_raster(&changed,"original",&folder.path().join("wrong.jpg")).is_err());
+    }
+    #[test] fn edited_raster_survives_symbol_copy_and_page_duplication(){
+        let mut d=Document::default();
+        let id=d.add(sample(),Style::default());
+        d.apply_raster_edit(id,RasterSettings{grayscale:true,..Default::default()}).unwrap();
+        let before=d.get(id).unwrap().shape.clone();
+        let page=d.duplicate_page().unwrap();
+        assert_eq!(d.objects[0].shape,before);
+        d.switch_page(1).unwrap();
+        assert_eq!(d.get(id).unwrap().shape,before);
+        d.switch_page(page).unwrap();
+        d.validate().unwrap();
+    }
     #[test] fn resampling_and_legacy_json(){
         let source=sample();
         let value=serde_json::to_value(&source).unwrap();
