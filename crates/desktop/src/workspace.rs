@@ -42,6 +42,7 @@ impl Editor {
     pub(super) fn reset_document(&mut self){
         self.checkpoint();
         self.doc=Default::default();
+        self.raster_panel=Default::default();
         self.internal_symbol_clipboard.clear();
         self.batch_page_selection=None;
         self.active_node=None;self.node_drag=None;
