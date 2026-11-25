@@ -300,7 +300,7 @@ fn benchmark(number:&str)->Result<(),String>{
 }
 
 fn raster_adjust(src:&str,dst:&str,page:&str,object:&str,settings:&str)->Result<(),String>{
-    if src==dst{return Err("Choose a different output path".into());}
+    if src==dst||std::path::Path::new(dst).exists(){return Err("Choose a new output file".into());}
     if !matches!(opencorel_formats::extension(std::path::Path::new(dst)).as_str(),"kdr"|"ocd"){
         return Err("Raster adjustment output must be KDR or OCD to preserve the original source".into());
     }
