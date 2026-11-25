@@ -244,6 +244,29 @@ pub fn adjusted_shape(shape:&Shape,settings:RasterSettings)->Result<Shape,String
         edit:Some(Box::new(RasterEdit{source_width:sw,source_height:sh,
             source_mime:sm.clone(),source_base64:source.clone(),settings}))})
 }
+/// Extract exactly the stored original or current encoded payload. Refuses
+/// mismatched filename extensions and existing output files.
+pub fn extract_raster(shape:&Shape,kind:&str,path:&std::path::Path)->Result<(),String>{
+    let Shape::Raster{mime,data_base64,edit,..}=shape else{return Err("Object is not raster artwork".into());};
+    let (mime,data)=match kind{
+        "original"=>edit.as_ref().map_or((mime,data_base64),|e|(&e.source_mime,&e.source_base64)),
+        "adjusted"=>(mime,data_base64),
+        _=>return Err("Use original or adjusted".into()),
+    };
+    let ext=path.extension().and_then(|e|e.to_str()).unwrap_or("").to_ascii_lowercase();
+    if !matches!((mime.as_str(),ext.as_str()),("image/png","png")|("image/jpeg","jpg"|"jpeg")){
+        return Err(format!("Destination extension does not match {mime}"));
+    }
+    let bytes=source_bytes(data)?;
+    let parent=path.parent().filter(|p|!p.as_os_str().is_empty())
+        .unwrap_or_else(||std::path::Path::new("."));
+    let mut tmp=tempfile::Builder::new().prefix(".opencorel-image-").tempfile_in(parent)
+        .map_err(|e|e.to_string())?;
+    tmp.write_all(&bytes).map_err(|e|e.to_string())?;
+    tmp.as_file().sync_all().map_err(|e|e.to_string())?;
+    tmp.persist_noclobber(path).map_err(|e|e.error.to_string())?;
+    Ok(())
+}
 pub fn raster_storage_bytes(shape:&Shape)->usize{
     match shape{
         Shape::Raster{data_base64,edit,..}=>data_base64.len().saturating_add(
