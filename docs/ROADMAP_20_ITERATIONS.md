@@ -53,6 +53,7 @@ No estimated dates are asserted. Capabilities marked "research", especially CDR 
 | I03 v0.11 | Implemented in source; manual export/alpha-mask QA remains | [#19](https://github.com/konstive-collab/OpenCorel/pull/19) | historical CI pending verification | Vector clipping, KDR, SVG/PDF and geometry-aware hit test |
 | I04–I08 | Partial delivery in later source versions; manual acceptance remains | — | — | Transforms, appearance, text, pages and guides need acceptance against the original criteria |
 | I09 v0.23 | Implemented in source; manual UI acceptance pending | [#37](https://github.com/konstive-collab/OpenCorel/pull/37) | [Windows + Linux passed](https://github.com/konstive-collab/OpenCorel/actions/runs/45471502966) | KDR-linked symbols, update propagation, OCLIB import/export, document-embedded assets, copy/paste, array and page-transfer preservation |
-| I10–I11 | Planned | — | — | Raster editing and vector interchange hardening |
+| I10 v0.24 | Implementation in source; CI and manual acceptance pending | PR pending | Pending | Raster editing, crop, orientation controls, alpha/color adjustments, original retention, batch and CLI; EXIF normalization remains open |
+| I11 | Planned | — | — | Vector interchange hardening |
 | I12 v1.0 RC | Implemented in source; manual crash/restart and UI QA pending | [#36](https://github.com/konstive-collab/OpenCorel/pull/36) | [Windows + Linux passed](https://github.com/konstive-collab/OpenCorel/actions/runs/45440702114) | Atomic KDR snapshots, startup recovery prompt, destructive-action guard, panic reports; manual recovery simulation still required |
 | I13–I20 | Planned | — | — | Not implemented |

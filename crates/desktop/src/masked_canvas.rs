@@ -152,7 +152,7 @@ fn document_fingerprint(doc:&Document,width:u32,height:u32)->u64{
                 for value in [x,y,w,height]{hash_float(*value,&mut h);}
                 large_string_signature(svg,&mut h);source_format.hash(&mut h);
             }
-            Shape::Raster{x,y,w,h:height,pixel_width,pixel_height,mime,data_base64}=>{
+            Shape::Raster{x,y,w,h:height,pixel_width,pixel_height,mime,data_base64,..}=>{
                 for value in [x,y,w,height]{hash_float(*value,&mut h);}
                 pixel_width.hash(&mut h);pixel_height.hash(&mut h);
                 mime.hash(&mut h);large_string_signature(data_base64,&mut h);

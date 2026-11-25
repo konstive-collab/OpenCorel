@@ -164,7 +164,7 @@ mod tests{
         bytes[..8].copy_from_slice(b"\x89PNG\r\n\x1a\n");
         doc.add(Shape::Raster{x:1.0,y:1.0,w:100.0,h:100.0,
             pixel_width:100,pixel_height:100,mime:"image/png".into(),
-            data_base64:base64::engine::general_purpose::STANDARD.encode(&bytes)},
+            data_base64:base64::engine::general_purpose::STANDARD.encode(&bytes),edit:None},
             Style::default());
         let path=doc_dir.path().join("large.kdr");
         save_kdr(&doc,&path).unwrap();

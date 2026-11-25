@@ -7,7 +7,7 @@ use opencorel_core::{Bounds, Shape, Alignment, Distribution, TextAlign, valid_pa
 use std::collections::HashSet;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum InspectorTab { Objects, Properties, Page, Export, Symbols }
+pub(super) enum InspectorTab { Objects, Properties, Page, Export, Symbols, Raster }
 
 const SWATCHES: [&str; 27] = [
     "#FFFFFF", "#E8E8E8", "#C0C0C0", "#808080", "#333333", "#000000",
@@ -42,6 +42,7 @@ impl Editor {
     pub(super) fn reset_document(&mut self){
         self.checkpoint();
         self.doc=Default::default();
+        self.raster_panel=Default::default();
         self.internal_symbol_clipboard.clear();
         self.batch_page_selection=None;
         self.active_node=None;self.node_drag=None;
@@ -345,6 +346,9 @@ impl Editor {
                     if ui.selectable_label(self.inspector_tab==InspectorTab::Export,"Центр экспорта").clicked(){
                         self.inspector_tab=InspectorTab::Export;self.show_inspector=true;ui.close_menu();
                     }
+                    if ui.selectable_label(self.inspector_tab==InspectorTab::Raster,"Растровая студия").clicked(){
+                        self.inspector_tab=InspectorTab::Raster;self.show_inspector=true;ui.close_menu();
+                    }
                     if ui.selectable_label(self.inspector_tab==InspectorTab::Symbols,"Библиотека символов").clicked(){
                         self.inspector_tab=InspectorTab::Symbols;self.show_inspector=true;ui.close_menu();
                     }
@@ -558,6 +562,7 @@ impl Editor {
                 ui.selectable_value(&mut self.inspector_tab,InspectorTab::Page,"Лист");
                 ui.selectable_value(&mut self.inspector_tab,InspectorTab::Export,"Экспорт");
                 ui.selectable_value(&mut self.inspector_tab,InspectorTab::Symbols,"Символы");
+                ui.selectable_value(&mut self.inspector_tab,InspectorTab::Raster,"Растр");
             });
             ui.separator();
             if self.inspector_tab==InspectorTab::Objects{
@@ -575,6 +580,7 @@ impl Editor {
                             InspectorTab::Page=>self.inspector_page(ui),
                             InspectorTab::Export=>self.export_docker(ui),
                             InspectorTab::Symbols=>self.symbol_library_docker(ui),
+                            InspectorTab::Raster=>self.raster_studio(ui),
                             InspectorTab::Objects=>{},
                         }
                     });

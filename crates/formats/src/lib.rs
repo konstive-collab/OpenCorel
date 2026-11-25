@@ -75,7 +75,7 @@ pub fn import_raster_shape(path:impl AsRef<Path>)->Result<Shape,String>{
     let data_base64=base64::engine::general_purpose::STANDARD.encode(data);
     let shape=Shape::Raster{x:0.0,y:0.0,
         w:width as f32*25.4/96.0,h:height as f32*25.4/96.0,
-        pixel_width:width,pixel_height:height,mime,data_base64};
+        pixel_width:width,pixel_height:height,mime,data_base64,edit:None};
     Ok(shape)
 }
 fn load_raster(path:&Path)->Result<OpenResult,String>{

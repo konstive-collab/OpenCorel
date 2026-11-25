@@ -143,7 +143,7 @@ mod tests{
             pixel_width:100,pixel_height:100,mime:"image/png".into(),
             data_base64:base64::Engine::encode(
                 &base64::engine::general_purpose::STANDARD,
-                b"\x89PNG\r\n\x1a\nfake")},Style::default());
+                b"\x89PNG\r\n\x1a\nfake"),edit:None},Style::default());
         let issues=check(&doc,PreflightOptions::default());
         assert!(issues.iter().any(|i|i.code=="IMAGE_DPI"));
         assert!(issues.iter().any(|i|i.code=="OUTSIDE_PAGE"));
@@ -173,7 +173,7 @@ mod tests{
             pixel_width:300,pixel_height:300,mime:"image/png".into(),
             data_base64:base64::Engine::encode(
                 &base64::engine::general_purpose::STANDARD,
-                b"\x89PNG\r\n\x1a\nfake")},Style::default());
+                b"\x89PNG\r\n\x1a\nfake"),edit:None},Style::default());
         let issues=check(&doc,PreflightOptions::default());
         assert!(!issues.iter().any(|i|i.code=="IMAGE_DPI"));
     }

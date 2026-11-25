@@ -38,7 +38,7 @@ fn object_bytes(object:&Object)->usize{
     std::mem::size_of::<Object>()+object.style.fill.len()+object.style.stroke.len()
     +object.text_format.family.len()+
     match &object.shape{
-        Shape::Raster{data_base64,..}=>data_base64.len(),
+        shape @ Shape::Raster{..}=>opencorel_core::raster_edit::raster_storage_bytes(shape),
         Shape::EmbeddedSvg{svg,..}=>svg.len(),
         Shape::Text{value,..}=>value.len(),
         Shape::Polyline{points,..}=>points.len()*std::mem::size_of::<Point>(),

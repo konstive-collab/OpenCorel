@@ -221,7 +221,7 @@ fn symbol_object_bytes(object:&SymbolObject)->usize{
                 std::mem::size_of::<crate::Contour>()+
                 c.segments.len()*std::mem::size_of::<crate::CubicSegment>()).sum(),
             Shape::EmbeddedSvg{svg,..}=>svg.len(),
-            Shape::Raster{data_base64,..}=>data_base64.len(),
+            shape @ Shape::Raster{..}=>crate::raster_edit::raster_storage_bytes(shape),
             _=>0,
         }
 }

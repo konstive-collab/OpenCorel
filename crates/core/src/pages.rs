@@ -232,7 +232,7 @@ impl Document{
         let objects=self.inactive_pages.values().flat_map(|p|p.objects.iter())
             .map(|o|{
                 let geometry=match &o.shape{
-                    Shape::Raster{data_base64,..}=>data_base64.len(),
+                    shape @ Shape::Raster{..}=>crate::raster_edit::raster_storage_bytes(shape),
                     Shape::EmbeddedSvg{svg,..}=>svg.len(),
                     Shape::Text{value,..}=>value.len(),
                     Shape::Polyline{points,..}=>points.len()*std::mem::size_of::<Point>(),
