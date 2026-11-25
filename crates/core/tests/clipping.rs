@@ -70,7 +70,7 @@ fn raster_can_be_clipped_but_not_used_as_source(){
     let bitmap=doc.add(Shape::Raster{
         x:0.0,y:0.0,w:50.0,h:50.0,pixel_width:1,pixel_height:1,
         mime:"image/png".into(),
-        data_base64:"iVBORw0KGgo=".into(),
+        data_base64:"iVBORw0KGgo=".into(),edit:None,
     },Style::default());
     assert!(doc.set_clip(bitmap,mask).is_err());
     doc.set_clip(mask,bitmap).unwrap();
