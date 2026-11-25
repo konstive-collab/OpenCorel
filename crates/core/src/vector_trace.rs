@@ -49,7 +49,7 @@ fn bucket(c:[u8;4])->usize{
     ((c[0] as usize>>4)<<8)|((c[1] as usize>>4)<<4)|(c[2] as usize>>4)
 }
 fn white(c:[u8;4])->bool{c[0]>=245&&c[1]>=245&&c[2]>=245}
-fn eligible(c:[u8;4],s:TraceSettings)->bool{c[3]>=s.alpha_min&&(!s.skip_white||!white(c))}
+fn eligible(c:[u8;4],s:TraceSettings)->bool{c[3]>=s.alpha_min&&(s.mode==TraceMode::Light||!s.skip_white||!white(c))}
 fn classify(img:&RgbaImage,s:TraceSettings)->(Vec<u8>,Vec<[u8;3]>){
     if s.mode!=TraceMode::Color{
         let labels=img.pixels().map(|p|{
@@ -92,6 +92,29 @@ fn classify(img:&RgbaImage,s:TraceSettings)->(Vec<u8>,Vec<[u8;3]>){
 fn distance(a:[u8;3],b:[u8;3])->i32{
     a.into_iter().zip(b).map(|(a,b)|(i32::from(a)-i32::from(b)).pow(2)).sum()
 }
+/// Remove whole 4-connected foreground components, not individual rings:
+/// dropping an outer ring while retaining its hole would create new artwork.
+fn remove_small_islands(labels:&mut [u8],w:u32,h:u32,min_area:u16){
+    if min_area<=1{return;}
+    let width=w as usize;let height=h as usize;
+    let mut seen=vec![false;labels.len()];
+    let mut queue=Vec::new();
+    for start in 0..labels.len(){
+        if seen[start]||labels[start]==0{continue;}
+        let label=labels[start];queue.clear();queue.push(start);seen[start]=true;
+        let mut cursor=0;
+        while cursor<queue.len(){
+            let p=queue[cursor];cursor+=1;
+            let x=p%width;let y=p/width;
+            let neighbors=[(x>0).then(||p-1),(x+1<width).then(||p+1),
+                (y>0).then(||p-width),(y+1<height).then(||p+width)];
+            for n in neighbors.into_iter().flatten(){
+                if !seen[n]&&labels[n]==label{seen[n]=true;queue.push(n);}
+            }
+        }
+        if queue.len()<usize::from(min_area){for &p in &queue{labels[p]=0;}}
+    }
+}
 type Vertex=(u32,u32);
 #[derive(Clone,Copy)]
 struct Edge{start:Vertex,end:Vertex,dir:u8}
@@ -113,7 +136,7 @@ fn edges_for(labels:&[u8],w:u32,h:u32,label:u8,budget:&mut usize)->Result<Vec<Ed
     Ok(edges)
 }
 fn turn_rank(a:u8,b:u8)->u8{match (b+4-a)%4{1=>0,0=>1,3=>2,_=>3}}
-fn rings(edges:&[Edge],min_area:u16)->Result<Vec<Vec<Vertex>>,String>{
+fn rings(edges:&[Edge])->Result<Vec<Vec<Vertex>>,String>{
     let mut outgoing:HashMap<Vertex,[Option<usize>;4]>=HashMap::new();
     for (i,e) in edges.iter().enumerate(){
         let slots=outgoing.entry(e.start).or_default();
@@ -138,14 +161,6 @@ fn rings(edges:&[Edge],min_area:u16)->Result<Vec<Vec<Vertex>>,String>{
             if next==first{break;}
             current=next;
         }
-        let mut area2=0i64;
-        for i in 0..vertices.len(){
-            let a=vertices[i];let b=vertices[(i+1)%vertices.len()];
-            area2+=i64::from(a.0)*i64::from(b.1)-i64::from(b.0)*i64::from(a.1);
-        }
-        // Ignore only small positive foreground islands. Preserve holes
-        // regardless of area so an existing counter is never silently filled.
-        if area2>0&&area2<2*i64::from(min_area){continue;}
         let mut simplified=Vec::new();
         for i in 0..vertices.len(){
             let a=vertices[(i+vertices.len()-1)%vertices.len()];
@@ -182,14 +197,15 @@ pub fn trace_pixels(image:&RgbaImage,frame:Bounds,s:TraceSettings)->Result<Trace
         &scaled
     }else{image};
     let (w,h)=img.dimensions();
-    let (labels,palette)=classify(img,s);
+    let (mut labels,palette)=classify(img,s);
+    remove_small_islands(&mut labels,w,h,s.min_area);
     let mut result=TraceResult{parts:Vec::new(),width:w,height:h,contours:0,nodes:0};
     let mut budget=0usize;
     let point=|(x,y):Vertex|Point{x:frame.x+frame.w*x as f32/w as f32,
         y:frame.y+frame.h*y as f32/h as f32};
     for (index,color) in palette.iter().enumerate(){
         let edges=edges_for(&labels,w,h,index as u8+1,&mut budget)?;
-        let loops=rings(&edges,s.min_area)?;
+        let loops=rings(&edges)?;
         let mut contours=Vec::new();
         for ring in loops{
             result.nodes+=ring.len();result.contours+=1;
