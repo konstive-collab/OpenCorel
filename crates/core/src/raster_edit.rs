@@ -12,7 +12,7 @@ pub const MAX_ENCODED_BYTES:usize=40*1024*1024;
 pub const MAX_EDIT_DOCUMENT_BYTES:usize=80*1024*1024;
 
 #[derive(Clone,Copy,Debug,PartialEq,Eq,Serialize,Deserialize)]
-#[serde(default)]
+#[serde(default,deny_unknown_fields)]
 pub struct RasterSettings{
     /// Crop margins in thousandths of the original, unrotated image.
     pub left:u16,pub top:u16,pub right:u16,pub bottom:u16,
@@ -90,10 +90,13 @@ pub struct RasterEdit{
 }
 impl RasterEdit{
     pub fn source_bytes(&self)->usize{self.source_base64.len()+self.source_mime.len()}
-    pub fn validate(&self,w:u32,h:u32,mime:&str)->Result<(),String>{
+    pub fn validate(&self,w:u32,h:u32,mime:&str,derived:&[u8])->Result<(),String>{
         self.settings.validate()?;
         if mime!="image/png"||self.settings==RasterSettings::default(){
             return Err("Edited raster must contain a derived PNG and non-default settings".into());
+        }
+        if checked_dimensions(derived,mime)?!=(w,h){
+            return Err("Derived raster dimensions do not match metadata".into());
         }
         let raw=source_bytes(&self.source_base64)?;
         let dims=checked_dimensions(&raw,&self.source_mime)?;
