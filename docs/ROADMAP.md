@@ -2,6 +2,16 @@
 
 Goal: fast, legally independent vector graphics editor for advertising, posters and maps, especially on older Windows/Linux workstations.
 
+## v0.24 — Raster Studio
+
+- Retained original PNG/JPEG, bounded edit settings and derived PNG in KDR.
+- Crop, rotate, mirror, resample, RGB tonal correction, effects, transparency and chroma-key removal.
+- Before/after thumbnails, explicit apply, reset, original/result extraction, atomic selected-image batch and CLI JSON automation.
+- Original source bytes included in document/history, symbol, array, clipboard and page memory estimates.
+- Existing SVG/PDF/PNG/JPEG renderers consume the derived payload; tests check raster pixels and PDF image objects.
+- Limits: 24 MP source for editing, 40 MiB per encoded payload, 80 MiB estimated document growth budget, 32 objects per batch. Existing 40 MP import remains available. EXIF normalization, brush/mask editing, AI segmentation and ICC/CMYK remain future work.
+- Automated CI and manual UI acceptance pending.
+
 ## v0.23 — Linked symbols and local component libraries
 
 - Document-local symbol definitions and linked instances stored as additive, serde-default KDR metadata; schema version remains unchanged.
