@@ -7,6 +7,7 @@ use opencorel_core::raster_edit::RasterSettings;
 pub(super) struct RasterPanel{
     target:Option<(u64,u64,RasterSettings)>,
     draft:RasterSettings,
+    thumbnails:super::raster_preview::RasterCache,
 }
 impl Editor{
     fn apply_raster_studio(&mut self,id:u64,settings:RasterSettings){
@@ -36,7 +37,7 @@ impl Editor{
             ui.label("Выберите только одно изображение.");return;
         }
         let Some(object)=self.doc.get(id) else{return;};
-        let Shape::Raster{pixel_width,pixel_height,edit,..}=&object.shape else{
+        let Shape::Raster{pixel_width,pixel_height,mime,data_base64,edit,..}=&object.shape else{
             self.raster_panel.target=None;
             ui.label("Выбранный объект не является растром.");return;
         };
@@ -54,11 +55,48 @@ impl Editor{
         if self.raster_panel.target!=Some(target){
             self.raster_panel.target=Some(target);
             self.raster_panel.draft=applied;
+            self.raster_panel.thumbnails.clear();
         }
-        let s=&mut self.raster_panel.draft;
+
         ui.label(format!("Исходник: {sw} × {sh} px • текущий: {pixel_width} × {pixel_height} px"));
+        // Small before/after comparison of the stored source and applied result.
+        // Do not regenerate the full-resolution image on slider events.
+        let source=edit.as_ref().map_or(data_base64.as_str(),|e|e.source_base64.as_str());
+        ui.horizontal(|ui|{
+            let width=(ui.available_width()*0.48).clamp(36.,160.);
+            for (key,label,bytes,pw,ph) in [(1,"Исходник",source,sw,sh),
+                (2,"Применено",data_base64.as_str(),*pixel_width,*pixel_height)]{
+                ui.vertical(|ui|{
+                    ui.small(label);
+                    let (response,painter)=ui.allocate_painter(egui::vec2(width,96.),egui::Sense::hover());
+                    let ratio=(pw as f32/ph.max(1) as f32).max(0.001);
+                    let w=width.min(96.*ratio);let h=(w/ratio).min(96.);
+                    let rect=egui::Rect::from_center_size(response.rect.center(),egui::vec2(w,h));
+                    painter.rect_filled(rect,0.,egui::Color32::from_gray(120));
+                    self.raster_panel.thumbnails.paint(ui.ctx(),&painter,key,bytes,rect);
+                });
+            }
+        });
+        let source_mime=edit.as_ref().map_or(mime.as_str(),|e|e.source_mime.as_str());
+        let current_mime=mime.as_str();
+        let mut extract=None;
+        ui.horizontal_wrapped(|ui|{
+            if ui.small_button("Извлечь исходник").clicked(){extract=Some(("original",source_mime.to_owned()));}
+            if ui.small_button("Извлечь результат").clicked(){extract=Some(("adjusted",current_mime.to_owned()));}
+        });
+        if let Some((kind,format))=extract{
+            let ext=if format=="image/jpeg"{"jpg"}else{"png"};
+            if let Some(path)=rfd::FileDialog::new().add_filter("Image",&[ext])
+                .set_file_name(format!("raster-{id}-{kind}.{ext}")).save_file(){
+                self.status=match opencorel_core::raster_edit::extract_raster(&object.shape,kind,&path){
+                    Ok(())=>format!("Изображение сохранено: {}",path.display()),
+                    Err(e)=>format!("Извлечение не выполнено: {e}"),
+                };
+            }
+        }
         ui.small("Кадр на листе остаётся прежним. Изменения рассчитываются из исходника, а не из предыдущего результата.");
         ui.separator();
+        let s=&mut self.raster_panel.draft;
         ui.horizontal_wrapped(|ui|{
             if ui.button("Уровни 15–240").on_hover_text("Фиксированный пресет уровней: 15–240").clicked(){s.black=15;s.white=240;}
             if ui.button("Ч/Б").clicked(){*s=RasterSettings{grayscale:true,..Default::default()};}
