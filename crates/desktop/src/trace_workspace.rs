@@ -8,6 +8,10 @@ pub(super) struct TracePanel{
     settings:TraceSettings,
     replace:bool,
     report:String,
+    preview_svg:Option<String>,
+    preview_key:Option<(u64,u64,usize,usize,TraceSettings)>,
+    preview_cache:super::vector_preview::VectorCache,
+    preview_ratio:f32,
 }
 impl Editor{
     fn execute_trace(&mut self,id:u64,settings:TraceSettings,replace:bool){
@@ -21,6 +25,9 @@ impl Editor{
                 self.active_node=None;self.node_drag=None;
                 self.fill_cache.entries.clear();self.compound_cache.clear();
                 self.raster_cache.clear();self.masked_canvas=Default::default();
+                self.trace_panel.preview_svg=None;
+                self.trace_panel.preview_cache.clear();
+                self.trace_panel.preview_key=None;
                 self.trace_panel.report=format!("{} цветов, {} контуров, {} узлов; сетка {}×{}.",
                     ids.len(),result.contours,result.nodes,result.width,result.height);
                 self.status=format!("Векторизация завершена: {}. Ctrl+Z — отмена.",self.trace_panel.report);
@@ -60,12 +67,43 @@ impl Editor{
         });
         let settings=*s;
         let replace=self.trace_panel.replace;
+        let Shape::Raster{data_base64,..}=&object.shape else{return;};
+        let key=(self.doc.active_page_id,id,data_base64.as_ptr() as usize,data_base64.len(),settings);
+        if self.trace_panel.preview_key!=Some(key){
+            self.trace_panel.preview_svg=None;
+            self.trace_panel.preview_cache.clear();
+            self.trace_panel.preview_key=Some(key);
+            self.trace_panel.report.clear();
+        }
         if !allowed{ui.colored_label(egui::Color32::LIGHT_RED,"Нужен отдельный растр без маски на доступном слое.");}
-        if ui.add_enabled(allowed,egui::Button::new("Оценить контуры")).clicked(){
+        if ui.add_enabled(allowed,egui::Button::new("Построить предпросмотр")).clicked(){
+            self.trace_panel.preview_cache.clear();
+            self.trace_panel.preview_svg=None;
             self.trace_panel.report=match trace_shape(&object.shape,settings){
-                Ok(r)=>format!("{} цветов, {} контуров, {} узлов; сетка {}×{}.",r.parts.len(),r.contours,r.nodes,r.width,r.height),
+                Ok(r)=>{
+                    let frame=object.bounds();
+                    let mut doc=opencorel_core::Document::default();
+                    doc.page.width_mm=frame.w;
+                    doc.page.height_mm=frame.h;
+                    for p in &r.parts{
+                        let mut shape=p.shape.clone();shape.translate(-frame.x,-frame.y);
+                        doc.add(shape,p.style.clone());
+                    }
+                    self.trace_panel.preview_svg=Some(doc.to_svg());
+                    self.trace_panel.preview_ratio=frame.w/frame.h;
+                    format!("{} цветов, {} контуров, {} узлов; сетка {}×{}.",r.parts.len(),r.contours,r.nodes,r.width,r.height)
+                }
                 Err(e)=>e,
             };
+        }
+        if let Some(svg)=self.trace_panel.preview_svg.as_ref(){
+            let width=ui.available_width().clamp(80.,300.);
+            let ratio=self.trace_panel.preview_ratio.clamp(0.001,1000.);
+            let w=width.min(200.*ratio);let h=(w/ratio).min(200.);
+            let (response,painter)=ui.allocate_painter(egui::vec2(width,h),egui::Sense::hover());
+            let rect=egui::Rect::from_center_size(response.rect.center(),egui::vec2(w,h));
+            painter.rect_filled(rect,0.,egui::Color32::WHITE);
+            self.trace_panel.preview_cache.paint(ui.ctx(),&painter,1,svg,rect);
         }
         if ui.add_enabled(allowed,egui::Button::new("Преобразовать в кривые")).clicked(){
             self.execute_trace(id,settings,replace);
