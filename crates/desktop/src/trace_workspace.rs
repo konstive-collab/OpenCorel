@@ -54,7 +54,10 @@ impl Editor{
         });
         if s.mode==TraceMode::Color{
             ui.add(egui::Slider::new(&mut s.colors,2..=16).text("Цветов"));
-        }else{ui.add(egui::Slider::new(&mut s.threshold,0..=255).text("Порог яркости"));}
+        }else{
+            ui.add(egui::Slider::new(&mut s.threshold,0..=255).text("Порог яркости"));
+            ui.add(egui::Slider::new(&mut s.round_corners,0..=90).text("Скругление углов %"));
+        }
         ui.add(egui::Slider::new(&mut s.alpha_min,1..=255).text("Порог альфа"));
         ui.add(egui::Slider::new(&mut s.max_side,32..=1024).text("Детализация px"));
         ui.add(egui::Slider::new(&mut s.min_area,0..=100).text("Мин. площадь px²"));
@@ -109,7 +112,7 @@ impl Editor{
             self.execute_trace(id,settings,replace);
         }
         if !self.trace_panel.report.is_empty(){ui.label(&self.trace_panel.report);}
-        ui.small("Точная граница по пиксельной сетке с удалением коллинеарных узлов. Автоматическая аппроксимация плавными кривыми пока не реализована.");
+        ui.small("Граница по пиксельной сетке с удалением коллинеарных узлов. Для силуэтов доступно локальное скругление настоящими кривыми Безье; цветной режим сохраняет общие границы без скругления.");
     }
 }
 #[cfg(test)]
