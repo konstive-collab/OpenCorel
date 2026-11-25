@@ -291,6 +291,48 @@ impl Document{
         }
         Ok(result)
     }
+    /// Atomic same-parameter batch processing, with a strict working-set cap.
+    /// A locked, grouped, missing, duplicated or invalid raster cancels the
+    /// entire operation before any object is changed.
+    pub fn prepare_raster_batch(&self,ids:&[u64],settings:RasterSettings)
+        ->Result<Vec<(u64,Shape)>,String>{
+        settings.validate()?;
+        if ids.is_empty()||ids.len()>32{return Err("Choose 1–32 raster objects per batch".into());}
+        let mut unique=std::collections::HashSet::new();
+        for id in ids{
+            if !unique.insert(*id){return Err("Duplicate raster ID in batch".into());}
+            let o=self.get(*id).ok_or("Raster object not found")?;
+            if !matches!(o.shape,Shape::Raster{..})||o.group_id.is_some()||
+                !self.layer(o.layer_id).is_some_and(|l|l.visible&&!l.locked){
+                return Err(format!("Raster #{id} must be ungrouped and on an editable layer"));
+            }
+        }
+        let original_size=self.estimated_size_bytes();
+        let mut size=original_size;
+        let mut pending_bytes=0usize;
+        let mut prepared=Vec::with_capacity(ids.len());
+        for id in ids{
+            let o=self.get(*id).ok_or("Raster object not found")?;
+            let shape=adjusted_shape(&o.shape,settings)
+                .map_err(|e|format!("Raster #{id}: {e}"))?;
+            let bytes=raster_storage_bytes(&shape);
+            size=size.saturating_sub(raster_storage_bytes(&o.shape)).saturating_add(bytes);
+            pending_bytes=pending_bytes.saturating_add(bytes);
+            if (size>MAX_EDIT_DOCUMENT_BYTES&&size>original_size)||
+                pending_bytes>MAX_EDIT_DOCUMENT_BYTES{
+                return Err("Raster batch exceeds memory budget; reduce resolution or split the selection".into());
+            }
+            prepared.push((*id,shape));
+        }
+        Ok(prepared)
+    }
+    pub fn apply_raster_batch(&mut self,ids:&[u64],settings:RasterSettings)->Result<(),String>{
+        let prepared=self.prepare_raster_batch(ids,settings)?;
+        for (id,shape) in prepared{
+            self.get_mut(id).ok_or("Raster object not found")?.shape=shape;
+        }
+        Ok(())
+    }
     pub fn apply_raster_edit(&mut self,id:u64,settings:RasterSettings)->Result<(),String>{
         let result=self.prepare_raster_edit(id,settings)?;
         self.get_mut(id).ok_or("Raster object not found")?.shape=result;
@@ -379,6 +421,21 @@ mod tests{
         d.switch_page(1).unwrap();
         assert_eq!(d.get(id).unwrap().shape,before);
         d.switch_page(page).unwrap();
+        d.validate().unwrap();
+    }
+    #[test] fn batch_adjusts_all_or_none(){
+        let mut d=Document::default();
+        let a=d.add(sample(),Style::default());
+        let layer=d.add_layer("second".into());
+        let b=d.add_to_layer(sample(),Style::default(),layer);
+        let params=RasterSettings{invert:true,..Default::default()};
+        d.layers.iter_mut().find(|l|l.id==layer).unwrap().locked=true;
+        let before=d.clone();
+        assert!(d.apply_raster_batch(&[a,b],params).is_err());
+        assert_eq!(d,before);
+        d.layers.iter_mut().find(|l|l.id==layer).unwrap().locked=false;
+        d.apply_raster_batch(&[a,b],params).unwrap();
+        assert_eq!(d.get(a).unwrap().shape,d.get(b).unwrap().shape);
         d.validate().unwrap();
     }
     #[test] fn resampling_and_legacy_json(){
