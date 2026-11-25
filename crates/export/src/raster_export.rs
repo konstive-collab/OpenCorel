@@ -89,6 +89,35 @@ mod tests{
         assert!(left[0]>left[2],"left edge should be red-dominant");
         assert!(right[2]>right[0],"right edge should be blue-dominant");
     }
+    #[test] fn edited_raster_matches_png_proof_and_embeds_in_pdf(){
+        use base64::Engine;
+        use opencorel_core::raster_edit::RasterSettings;
+        let mut png=Cursor::new(Vec::new());
+        let input=image::RgbaImage::from_pixel(2,2,image::Rgba([255,0,0,255]));
+        DynamicImage::ImageRgba8(input).write_to(&mut png,ImageFormat::Png).unwrap();
+        let mut d=Document::default();
+        d.page.width_mm=25.4;d.page.height_mm=25.4;
+        let id=d.add(Shape::Raster{x:0.,y:0.,w:25.4,h:25.4,pixel_width:2,pixel_height:2,
+            mime:"image/png".into(),
+            data_base64:base64::engine::general_purpose::STANDARD.encode(png.into_inner()),
+            edit:None},Style::default());
+        d.apply_raster_edit(id,RasterSettings{invert:true,..Default::default()}).unwrap();
+        let bytes=raster_bytes(&d,96,ImageFormat::Png).unwrap();
+        let output=image::load_from_memory(&bytes).unwrap().to_rgba8();
+        let p=output.get_pixel(48,48).0;
+        assert!(p[0]<10&&p[1]>245&&p[2]>245,"expected cyan, got {p:?}");
+        let pdf=crate::pdf_bytes(&d).unwrap();
+        assert!(pdf.starts_with(b"%PDF-"));
+        let parsed=lopdf::Document::load_mem(&pdf).unwrap();
+        assert!(parsed.objects.values().any(|object|
+            object.as_stream().ok().and_then(|stream|stream.dict.get(b"Subtype").ok())
+                .and_then(|kind|kind.as_name().ok())==Some(b"Image".as_slice())));
+        d.apply_raster_edit(id,RasterSettings{key_enabled:true,key_color:[255,0,0],
+            key_tolerance:0,key_softness:0,..Default::default()}).unwrap();
+        let bytes=raster_bytes(&d,96,ImageFormat::Png).unwrap();
+        let p=image::load_from_memory(&bytes).unwrap().to_rgba8().get_pixel(48,48).0;
+        assert!(p[0]>245&&p[1]>245&&p[2]>245,"transparent image must reveal white proof page");
+    }
     #[test] fn jpeg_png_proofs_have_expected_dimensions(){
         let mut d=Document::default();
         d.page.width_mm=25.4;d.page.height_mm=12.7;
