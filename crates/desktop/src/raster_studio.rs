@@ -5,19 +5,24 @@ use opencorel_core::raster_edit::RasterSettings;
 
 #[derive(Default)]
 pub(super) struct RasterPanel{
-    target:Option<(u64,u64,RasterSettings)>,
+    target:Option<(u64,u64,RasterSettings,Vec<u64>)>,
     draft:RasterSettings,
     thumbnails:super::raster_preview::RasterCache,
 }
 impl Editor{
     fn apply_raster_studio(&mut self,id:u64,settings:RasterSettings){
-        match self.doc.prepare_raster_edit(id,settings){
-            Ok(shape)=>{
-                if self.doc.get(id).is_some_and(|o|o.shape==shape){
+        self.apply_raster_studio_batch(&[id],settings);
+    }
+    fn apply_raster_studio_batch(&mut self,ids:&[u64],settings:RasterSettings){
+        match self.doc.prepare_raster_batch(ids,settings){
+            Ok(prepared)=>{
+                if prepared.iter().all(|(id,shape)|self.doc.get(*id).is_some_and(|o|&o.shape==shape)){
                     self.status="Изображение не изменилось".into();return;
                 }
                 self.checkpoint();
-                if let Some(object)=self.doc.get_mut(id){object.shape=shape;}
+                for (id,shape) in prepared{
+                    if let Some(object)=self.doc.get_mut(id){object.shape=shape;}
+                }
                 self.raster_cache.clear();
                 self.masked_canvas=Default::default();
                 self.status="Растровая обработка применена. Исходник сохранён; Ctrl+Z — отменить.".into();
@@ -32,10 +37,14 @@ impl Editor{
             self.raster_panel.target=None;
             ui.label("Выберите одно растровое изображение на холсте.");return;
         };
-        if self.selection_ids().len()!=1{
+        let ids=self.selection_ids();
+        if ids.is_empty()||ids.len()>32||ids.iter().any(|id|self.doc.get(*id).is_none_or(|o|
+            !matches!(o.shape,Shape::Raster{..})||o.group_id.is_some()||
+            !self.doc.layer(o.layer_id).is_some_and(|l|l.visible&&!l.locked))){
             self.raster_panel.target=None;
-            ui.label("Выберите только одно изображение.");return;
+            ui.label("Выберите 1–32 несгруппированных изображения на доступных слоях.");return;
         }
+        if ids.len()>1{ui.label(format!("Пакет: {} изображений. Предпросмотр — основной объект; параметры применяются ко всем.",ids.len()));}
         let Some(object)=self.doc.get(id) else{return;};
         let Shape::Raster{pixel_width,pixel_height,mime,data_base64,edit,..}=&object.shape else{
             self.raster_panel.target=None;
@@ -51,8 +60,8 @@ impl Editor{
         let (sw,sh,applied)=edit.as_ref().map_or(
             (*pixel_width,*pixel_height,RasterSettings::default()),
             |e|(e.source_width,e.source_height,e.settings));
-        let target=(self.doc.active_page_id,id,applied);
-        if self.raster_panel.target!=Some(target){
+        let target=(self.doc.active_page_id,id,applied,ids.clone());
+        if self.raster_panel.target.as_ref()!=Some(&target){
             self.raster_panel.target=Some(target);
             self.raster_panel.draft=applied;
             self.raster_panel.thumbnails.clear();
@@ -162,12 +171,12 @@ impl Editor{
         }
         let params=*s;
         ui.separator();
-        let apply=ui.add_enabled(size.is_ok()&&params!=applied,
+        let apply=ui.add_enabled(size.is_ok()&&(params!=applied||ids.len()>1),
             egui::Button::new("Применить к изображению")).clicked();
-        let reset=ui.add_enabled(applied!=RasterSettings::default(),
+        let reset=ui.add_enabled(applied!=RasterSettings::default()||ids.len()>1,
             egui::Button::new("Восстановить исходник")).clicked();
-        if reset{self.apply_raster_studio(id,RasterSettings::default());}
-        else if apply{self.apply_raster_studio(id,params);}
+        if reset{self.apply_raster_studio_batch(&ids,RasterSettings::default());}
+        else if apply{self.apply_raster_studio_batch(&ids,params);}
     }
 }
 #[cfg(test)]
