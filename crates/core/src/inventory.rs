@@ -47,9 +47,9 @@ impl Inventory{
                         .or_default()+=1;
                 }
                 Shape::EmbeddedSvg{..}=>self.embedded_svg+=1,
-                Shape::Raster{data_base64,..}=>{
+                shape @ Shape::Raster{..}=>{
                     self.raster_images+=1;
-                    self.estimated_image_bytes+=data_base64.len()*3/4;
+                    self.estimated_image_bytes+=crate::raster_edit::raster_storage_bytes(shape)*3/4;
                 }
             }
         }
