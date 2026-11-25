@@ -11,7 +11,7 @@ pub(super) enum Command{
     CopyStyle,PasteStyle,MeasureWidth,MeasureHeight,ZoomSelection,
     SelectAll,Duplicate,Group,Ungroup,AlignCenterX,AlignCenterY,
     MoveUp,MoveDown,Objects,Properties,ZoomFit,ToggleGrid,
-    ToggleGuides,ToggleTheme,Preflight,GenerateQR,Recolor,FindObjects,PathConvert,PathSimplify,PathJoin,TextFind,TextUpper,TextLower,TextTitle,TextSentence,Help,
+    ToggleGuides,ToggleTheme,Preflight,GenerateQR,Recolor,FindObjects,PathConvert,PathSimplify,PathJoin,TextFind,TextUpper,TextLower,TextTitle,TextSentence,RasterStudio,VectorTrace,Symbols,Help,
 }
 const COMMANDS:&[(Command,&str,&str,&str)]=&[
     (Command::New,"Новый документ","Файл","Ctrl+N"),
@@ -69,6 +69,9 @@ const COMMANDS:&[(Command,&str,&str,&str)]=&[
     (Command::TextLower,"Текст: строчные","Текст",""),
     (Command::TextTitle,"Текст: Каждое Слово","Текст",""),
     (Command::TextSentence,"Текст: начало предложений","Текст",""),
+    (Command::RasterStudio,"Растровая студия: коррекция изображения","Растр",""),
+    (Command::VectorTrace,"Векторизация растров: трассировка","Растр",""),
+    (Command::Symbols,"Библиотека символов OCLIB","Окно",""),
     (Command::Help,"Инструкция и горячие клавиши","Справка","F1"),
 ];
 impl Editor{
@@ -136,6 +139,9 @@ impl Editor{
             Command::TextLower=>self.run_text_case(opencorel_core::text_workflow::TextCase::Lower),
             Command::TextTitle=>self.run_text_case(opencorel_core::text_workflow::TextCase::Title),
             Command::TextSentence=>self.run_text_case(opencorel_core::text_workflow::TextCase::Sentence),
+            Command::RasterStudio=>{self.inspector_tab=InspectorTab::Raster;self.show_inspector=true;}
+            Command::VectorTrace=>{self.inspector_tab=InspectorTab::Trace;self.show_inspector=true;}
+            Command::Symbols=>{self.inspector_tab=InspectorTab::Symbols;self.show_inspector=true;}
             Command::Help=>self.show_welcome=true,
         }
     }
