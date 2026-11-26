@@ -16,6 +16,7 @@ pub(super) struct GeometryPanel{
     extract_start:f64,
     extract_end:f64,
     sample_step:f64,
+    preserve_cubic:bool,
 }
 impl Editor{
     fn apply_path_array(&mut self,guide:u64,motif:u64,settings:PathArraySettings){
@@ -41,6 +42,17 @@ impl Editor{
                 self.status="Создана редактируемая ломаная; исходник сохранён. Ctrl+Z — отмена.".into();
             }
             Err(e)=>self.status=format!("Контур: {e}"),
+        }
+    }
+    fn apply_cubic_extract(&mut self,id:u64,start:f64,end:f64,tolerance:f64){
+        let mut draft=self.doc.clone();
+        match draft.extract_cubic_interval(id,start,end,tolerance){
+            Ok(copy)=>{
+                self.checkpoint();self.doc=draft;self.selected=Some(copy);self.multi_selected.clear();
+                self.active_node=None;self.node_drag=None;self.fill_cache.entries.clear();self.compound_cache.clear();
+                self.status="Извлечён участок кривой Безье; исходник сохранён. Ctrl+Z — отмена.".into();
+            }
+            Err(e)=>self.status=format!("Кривая: {e}"),
         }
     }
     pub(super) fn geometry_docker(&mut self,ui:&mut egui::Ui){
@@ -83,11 +95,15 @@ impl Editor{
             ui.add(egui::DragValue::new(&mut panel.extract_end).range(0.001..=200_000.).speed(0.1).prefix("До: ").suffix(" мм"));
             let tolerance=f64::from(panel.settings.tolerance_mm);
             let extract=PathRange::Interval{start_mm:panel.extract_start,end_mm:panel.extract_end};
+            ui.checkbox(&mut panel.preserve_cubic,"Сохранить кривые Безье при извлечении");
+            let preserve=panel.preserve_cubic;
+            let start=panel.extract_start;let end=panel.extract_end;
             let cut=ui.button("Извлечь участок").clicked();
             ui.add(egui::DragValue::new(&mut panel.sample_step).range(0.001..=100_000.).speed(0.1).prefix("Шаг: ").suffix(" мм"));
             let uniform=PathRange::Uniform{maximum_step_mm:panel.sample_step};
             let resample=ui.button("Равномерные узлы").clicked();
-            if cut{self.apply_path_extract(ids[0],extract,tolerance);}
+            if cut&&preserve{self.apply_cubic_extract(ids[0],start,end,tolerance);}
+            else if cut{self.apply_path_extract(ids[0],extract,tolerance);}
             else if resample{self.apply_path_extract(ids[0],uniform,tolerance);}
             return;
         }
