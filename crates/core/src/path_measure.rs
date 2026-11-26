@@ -86,8 +86,10 @@ impl MeasuredContour{
         let a=self.vertices[i];let b=self.vertices[i+1];
         let segment=self.distances[i+1]-self.distances[i];
         if segment<=0.{return Err("Degenerate path segment".into());}
-        let t=((offset-self.distances[i])/segment).clamp(0.,1.) as f32;
-        Ok(PathSample{point:lerp(a,b,t),tangent:Point{
+        let t=((offset-self.distances[i])/segment).clamp(0.,1.);
+        let point=Point{x:(f64::from(a.x)+(f64::from(b.x)-f64::from(a.x))*t) as f32,
+            y:(f64::from(a.y)+(f64::from(b.y)-f64::from(a.y))*t) as f32};
+        Ok(PathSample{point,tangent:Point{
             x:((f64::from(b.x)-f64::from(a.x))/segment) as f32,
             y:((f64::from(b.y)-f64::from(a.y))/segment) as f32},distance_mm:offset})
     }
