@@ -238,6 +238,47 @@ impl Editor{
 mod tests{
     use super::*;
     use opencorel_core::{Shape,Style,Point};
+    #[test] fn cubic_extract_preserves_curve_and_undo(){
+        let mut e=Editor::default();e.doc=Default::default();
+        let a=e.doc.add(Shape::Bezier{start:Point{x:0.,y:0.},segments:vec![
+            opencorel_core::CubicSegment{control1:Point{x:0.,y:100.},
+                control2:Point{x:100.,y:100.},end:Point{x:100.,y:0.}}],closed:false},Style::default());
+        let before=e.doc.clone();
+        e.apply_cubic_extract(a,30.,60.,0.001);
+        assert_eq!(e.doc.objects.len(),2);
+        let new=e.selected.unwrap();
+        assert_ne!(new,a);
+        assert!(matches!(e.doc.get(new).unwrap().shape,Shape::Bezier{..}));
+        let after=e.doc.clone();
+        e.undo();assert_eq!(e.doc,before);
+        e.redo();assert_eq!(e.doc,after);
+    }
+    #[test] fn blend_is_undoable_and_invalid_blend_does_not_mutate(){
+        let mut e=Editor::default();e.doc=Default::default();
+        let a=e.doc.add(Shape::Rectangle{x:10.,y:10.,w:20.,h:20.},Style::default());
+        let b=e.doc.add(Shape::Ellipse{x:50.,y:50.,w:10.,h:20.},Style::default());
+        let before=e.doc.clone();
+        e.apply_blend(a,b,BlendSettings{steps:0,..Default::default()});
+        assert_eq!(e.doc,before);
+        e.apply_blend(a,b,BlendSettings{steps:3,..Default::default()});
+        assert_eq!(e.doc.objects.len(),5);
+        let after=e.doc.clone();
+        e.undo();assert_eq!(e.doc,before);
+        e.redo();assert_eq!(e.doc,after);
+    }
+    #[test] fn offset_is_undoable_and_empty_region_does_not_mutate(){
+        let mut e=Editor::default();e.doc=Default::default();
+        let a=e.doc.add(Shape::Rectangle{x:10.,y:10.,w:20.,h:20.},Style::default());
+        let before=e.doc.clone();
+        e.apply_vector_offset(a,OffsetSettings{distance_mm:-50.,..Default::default()},false);
+        assert_eq!(e.doc,before);
+        e.apply_vector_offset(a,OffsetSettings{mode:OffsetMode::Border,corner:Corner::Bevel,
+            distance_mm:2.,..Default::default()},false);
+        assert_eq!(e.doc.objects.len(),2);
+        let after=e.doc.clone();
+        e.undo();assert_eq!(e.doc,before);
+        e.redo();assert_eq!(e.doc,after);
+    }
     #[test] fn array_is_one_undoable_operation(){
         let mut e=Editor::default();e.doc=Default::default();
         let a=e.doc.add(Shape::Polyline{points:vec![Point{x:0.,y:0.},Point{x:100.,y:0.}],closed:false},Style::default());
