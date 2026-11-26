@@ -3,6 +3,7 @@ use super::Editor;
 use eframe::egui;
 use opencorel_core::path_array::{PathArraySettings,Spacing};
 use opencorel_core::path_measure::measure_shape;
+use opencorel_core::path_extract::PathRange;
 
 #[derive(Default)]
 pub(super) struct GeometryPanel{
@@ -12,6 +13,9 @@ pub(super) struct GeometryPanel{
     step:f32,
     reversed:bool,
     report:String,
+    extract_start:f64,
+    extract_end:f64,
+    sample_step:f64,
 }
 impl Editor{
     fn apply_path_array(&mut self,guide:u64,motif:u64,settings:PathArraySettings){
@@ -26,6 +30,17 @@ impl Editor{
                 self.status="Массив вдоль контура создан. Ctrl+Z — отмена.".into();
             }
             Err(error)=>self.status=format!("Массив: {error}"),
+        }
+    }
+    fn apply_path_extract(&mut self,id:u64,range:PathRange,tolerance:f64){
+        let mut draft=self.doc.clone();
+        match draft.extract_path_object(id,range,tolerance){
+            Ok(copy)=>{
+                self.checkpoint();self.doc=draft;self.selected=Some(copy);self.multi_selected.clear();
+                self.active_node=None;self.node_drag=None;self.fill_cache.entries.clear();self.compound_cache.clear();
+                self.status="Создана редактируемая ломаная; исходник сохранён. Ctrl+Z — отмена.".into();
+            }
+            Err(e)=>self.status=format!("Контур: {e}"),
         }
     }
     pub(super) fn geometry_docker(&mut self,ui:&mut egui::Ui){
@@ -58,6 +73,22 @@ impl Editor{
             }
             ui.small("Для самопересекающихся кривых ориентированная площадь не равна площади заливки.");
             if !self.geometry_panel.report.is_empty(){ui.label(&self.geometry_panel.report);}
+            ui.separator();
+            ui.heading("Извлечение и пересэмплирование");
+            ui.small("Создаётся отдельная приближённая ломаная; исходные кривые сохраняются. Равномерное пересэмплирование может срезать углы.");
+            let panel=&mut self.geometry_panel;
+            if panel.extract_end<=0.{panel.extract_end=10.;}
+            if panel.sample_step<=0.{panel.sample_step=2.;}
+            ui.add(egui::DragValue::new(&mut panel.extract_start).range(0.0..=100_000.0).speed(0.1).prefix("От: ").suffix(" мм"));
+            ui.add(egui::DragValue::new(&mut panel.extract_end).range(0.001..=200_000.).speed(0.1).prefix("До: ").suffix(" мм"));
+            let tolerance=f64::from(panel.settings.tolerance_mm);
+            let extract=PathRange::Interval{start_mm:panel.extract_start,end_mm:panel.extract_end};
+            let cut=ui.button("Извлечь участок").clicked();
+            ui.add(egui::DragValue::new(&mut panel.sample_step).range(0.001..=100_000.).speed(0.1).prefix("Шаг: ").suffix(" мм"));
+            let uniform=PathRange::Uniform{maximum_step_mm:panel.sample_step};
+            let resample=ui.button("Равномерные узлы").clicked();
+            if cut{self.apply_path_extract(ids[0],extract,tolerance);}
+            else if resample{self.apply_path_extract(ids[0],uniform,tolerance);}
             return;
         }
         if ids.len()!=2{ui.label("Для массива выберите ровно два объекта.");return;}
