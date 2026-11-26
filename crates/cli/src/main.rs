@@ -7,6 +7,8 @@ use opencorel_typography::TextOutliner;
 fn main()->ExitCode{
     let args:Vec<_>=env::args().collect();
     let outcome=match args.as_slice(){
+        [_,op,src,dst,page,id,settings] if op=="vector-offset" => vector_offset(src,dst,page,id,settings,false),
+        [_,op,src,dst,page,id,settings,flag] if op=="vector-offset"&&flag=="--source-stroke" => vector_offset(src,dst,page,id,settings,true),
         [_,op,src,dst,page,a,b,settings] if op=="vector-blend" => vector_blend(src,dst,page,a,b,settings),
         [_,op,src,dst,page,id,start,end,tolerance] if op=="extract-cubic" => extract_cubic(src,dst,page,id,start,end,tolerance),
         [_,op,src,page,id,tolerance] if op=="measure-path" => measure_path(src,page,id,tolerance),
@@ -268,7 +270,7 @@ fn main()->ExitCode{
             .and_then(|r|save_document(&r.document,dst)),
         [_,op,src,dst] if op=="export-svg" => open_any(src)
             .and_then(|r|save_document(&r.document,dst)),
-        _=>{eprintln!("Usage:\n  opencorel-cli vector-blend IN.kdr OUT.kdr PAGE_ID FIRST_ID SECOND_ID SETTINGS.json\n  opencorel-cli extract-cubic IN.kdr OUT.kdr PAGE_ID OBJECT_ID START_MM END_MM TOLERANCE_MM\n  opencorel-cli measure-path IN.kdr PAGE_ID OBJECT_ID TOLERANCE_MM\n  opencorel-cli path-array IN.kdr OUT.kdr PAGE_ID GUIDE_ID MOTIF_ID SETTINGS.json\n  opencorel-cli trace-raster IN.kdr OUT.kdr PAGE_ID OBJECT_ID SETTINGS.json [--replace]\n  opencorel-cli raster-adjust IN.kdr OUT.kdr PAGE_ID OBJECT_ID SETTINGS.json\n  opencorel-cli raster-batch IN.kdr OUT.kdr PAGE_ID ID1,ID2 SETTINGS.json\n  opencorel-cli raster-extract IN.kdr OUT.png PAGE_ID OBJECT_ID original|adjusted\n  opencorel-cli benchmark COUNT\n  opencorel-cli new FILE.kdr\n  opencorel-cli inventory FILE.kdr\n  opencorel-cli qr-code IN.kdr OUT.kdr URL_OR_TEXT SIZE_MM\n  opencorel-cli recolor-rgb IN.kdr OUT.kdr #RRGGBB #RRGGBB\n  opencorel-cli find-objects FILE.kdr QUERY\n  opencorel-cli find-text FILE.kdr QUERY\n  opencorel-cli replace-text IN.kdr OUT.kdr QUERY REPLACEMENT\n  opencorel-cli gradient-preset IN.kdr OUT.kdr OBJECT_ID sunrise|ocean|forest|sunset|steel|candy|monochrome\n  opencorel-cli inspect FILE.kdr\n  opencorel-cli pages FILE.kdr\n  opencorel-cli add-page IN.kdr OUT.kdr WIDTH_MM HEIGHT_MM\n  opencorel-cli duplicate-page IN.kdr OUT.kdr\n  opencorel-cli batch-svg FILE.kdr DIRECTORY\n  opencorel-cli batch-pdf FILE.kdr DIRECTORY\n  opencorel-cli export-pdf-book FILE.kdr DOCUMENT.pdf\n  opencorel-cli export-trim-pdf FILE.kdr TRIM.pdf\n  opencorel-cli export-trim-svg FILE.kdr TRIM.svg\n  opencorel-cli preflight FILE.kdr\n  opencorel-cli convert INPUT OUTPUT\n  opencorel-cli outline-text INPUT.kdr OUTPUT.kdr\n  opencorel-cli export-bitmap FILE.kdr FILE.png DPI\n  opencorel-cli export-svg FILE.kdr FILE.svg\n  opencorel-cli export-pdf FILE.kdr FILE.pdf\n  opencorel-cli plotter-preflight FILE.kdr\n  opencorel-cli export-plt FILE.kdr FILE.plt\n  opencorel-cli dxf-preflight FILE.kdr\n  opencorel-cli export-dxf FILE.kdr FILE.dxf\n  opencorel-cli import-svg FILE.svg FILE.kdr");
+        _=>{eprintln!("Usage:\n  opencorel-cli vector-offset IN.kdr OUT.kdr PAGE_ID OBJECT_ID SETTINGS.json [--source-stroke]\n  opencorel-cli vector-blend IN.kdr OUT.kdr PAGE_ID FIRST_ID SECOND_ID SETTINGS.json\n  opencorel-cli extract-cubic IN.kdr OUT.kdr PAGE_ID OBJECT_ID START_MM END_MM TOLERANCE_MM\n  opencorel-cli measure-path IN.kdr PAGE_ID OBJECT_ID TOLERANCE_MM\n  opencorel-cli path-array IN.kdr OUT.kdr PAGE_ID GUIDE_ID MOTIF_ID SETTINGS.json\n  opencorel-cli trace-raster IN.kdr OUT.kdr PAGE_ID OBJECT_ID SETTINGS.json [--replace]\n  opencorel-cli raster-adjust IN.kdr OUT.kdr PAGE_ID OBJECT_ID SETTINGS.json\n  opencorel-cli raster-batch IN.kdr OUT.kdr PAGE_ID ID1,ID2 SETTINGS.json\n  opencorel-cli raster-extract IN.kdr OUT.png PAGE_ID OBJECT_ID original|adjusted\n  opencorel-cli benchmark COUNT\n  opencorel-cli new FILE.kdr\n  opencorel-cli inventory FILE.kdr\n  opencorel-cli qr-code IN.kdr OUT.kdr URL_OR_TEXT SIZE_MM\n  opencorel-cli recolor-rgb IN.kdr OUT.kdr #RRGGBB #RRGGBB\n  opencorel-cli find-objects FILE.kdr QUERY\n  opencorel-cli find-text FILE.kdr QUERY\n  opencorel-cli replace-text IN.kdr OUT.kdr QUERY REPLACEMENT\n  opencorel-cli gradient-preset IN.kdr OUT.kdr OBJECT_ID sunrise|ocean|forest|sunset|steel|candy|monochrome\n  opencorel-cli inspect FILE.kdr\n  opencorel-cli pages FILE.kdr\n  opencorel-cli add-page IN.kdr OUT.kdr WIDTH_MM HEIGHT_MM\n  opencorel-cli duplicate-page IN.kdr OUT.kdr\n  opencorel-cli batch-svg FILE.kdr DIRECTORY\n  opencorel-cli batch-pdf FILE.kdr DIRECTORY\n  opencorel-cli export-pdf-book FILE.kdr DOCUMENT.pdf\n  opencorel-cli export-trim-pdf FILE.kdr TRIM.pdf\n  opencorel-cli export-trim-svg FILE.kdr TRIM.svg\n  opencorel-cli preflight FILE.kdr\n  opencorel-cli convert INPUT OUTPUT\n  opencorel-cli outline-text INPUT.kdr OUTPUT.kdr\n  opencorel-cli export-bitmap FILE.kdr FILE.png DPI\n  opencorel-cli export-svg FILE.kdr FILE.svg\n  opencorel-cli export-pdf FILE.kdr FILE.pdf\n  opencorel-cli plotter-preflight FILE.kdr\n  opencorel-cli export-plt FILE.kdr FILE.plt\n  opencorel-cli dxf-preflight FILE.kdr\n  opencorel-cli export-dxf FILE.kdr FILE.dxf\n  opencorel-cli import-svg FILE.svg FILE.kdr");
             return ExitCode::FAILURE;}
     };
     match outcome{
@@ -425,5 +427,25 @@ fn vector_blend(src:&str,dst:&str,page:&str,a:&str,b:&str,settings:&str)->Result
     let ids=doc.blend_objects(first,second,params)?;
     save_document(&doc,dst)?;
     println!("Created {} intermediate editable objects",ids.len());
+    Ok(())
+}
+
+fn vector_offset(src:&str,dst:&str,page:&str,id:&str,settings:&str,use_stroke:bool)->Result<(),String>{
+    if src==dst||std::path::Path::new(dst).exists(){return Err("Choose a new output file".into());}
+    if !matches!(opencorel_formats::extension(std::path::Path::new(dst)).as_str(),"kdr"|"ocd"){
+        return Err("Offset output must be KDR or OCD".into());
+    }
+    if std::fs::metadata(settings).map_err(|e|e.to_string())?.len()>16384{
+        return Err("Offset settings exceed 16 KiB".into());
+    }
+    let params:opencorel_core::vector_offset::OffsetSettings=
+        serde_json::from_slice(&std::fs::read(settings).map_err(|e|e.to_string())?)
+            .map_err(|e|format!("Invalid offset settings: {e}"))?;
+    let mut doc=open_any(src)?.document;
+    doc.switch_page(page.parse::<u64>().map_err(|_|"Invalid page ID")?)?;
+    let id=id.parse::<u64>().map_err(|_|"Invalid object ID")?;
+    let new=doc.create_offset_object(id,params,use_stroke)?;
+    save_document(&doc,dst)?;
+    println!("Created editable offset object #{new}");
     Ok(())
 }
