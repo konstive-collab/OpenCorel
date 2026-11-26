@@ -153,6 +153,41 @@ pub fn move_node(shape:&mut Shape,address:NodeAddress,to:Point)->Result<(),Strin
     if !valid(to){return Err("Node coordinates must be finite and within ±100000 mm".into());}
     let Some(old)=point_at(shape,address) else{return Err("No such editable node".into());};
     let delta=Point{x:to.x-old.x,y:to.y-old.y};
+    // An explicitly closed path has two stored addresses for one logical
+    // anchor. Treat either address as the same seam and translate both
+    // attached controls exactly once, including the single-segment case.
+    fn seam(start:&mut Point,segments:&mut [CubicSegment],closed:bool,
+        index:Option<usize>,to:Point)->Option<Result<(),String>>{
+        let last=segments.len().checked_sub(1)?;
+        if !closed||segments[last].end!=*start||index.is_some_and(|i|i!=last){return None;}
+        let d=Point{x:to.x-start.x,y:to.y-start.y};
+        for p in [segments[0].control1,segments[last].control2]{
+            if !valid(Point{x:p.x+d.x,y:p.y+d.y}){
+                return Some(Err("Moving the seam would place a control outside safe bounds".into()));
+            }
+        }
+        *start=to;segments[last].end=to;
+        shift(&mut segments[0].control1,d);shift(&mut segments[last].control2,d);
+        Some(Ok(()))
+    }
+    let seam_result=match (&mut *shape,address){
+        (Shape::Bezier{start,segments,closed},NodeAddress::BezierStart)=>
+            seam(start,segments,*closed,None,to),
+        (Shape::Bezier{start,segments,closed},NodeAddress::BezierEnd(i))=>
+            seam(start,segments,*closed,Some(i),to),
+        (Shape::CompoundPath{contours},NodeAddress::CompoundStart(j))=>{
+            let c=&mut contours[j];seam(&mut c.start,&mut c.segments,c.closed,None,to)
+        }
+        (Shape::CompoundPath{contours},NodeAddress::CompoundEnd(j,i))=>{
+            let c=&mut contours[j];seam(&mut c.start,&mut c.segments,c.closed,Some(i),to)
+        }
+        (Shape::Polyline{points,closed:true},NodeAddress::Polyline(i))
+            if points.len()>1&&points.first()==points.last()&&(i==0||i==points.len()-1)=>{
+            let last=points.len()-1;points[0]=to;points[last]=to;Some(Ok(()))
+        }
+        _=>None,
+    };
+    if let Some(result)=seam_result{return result;}
     // Moving an anchor also moves attached Bézier handles. Check their
     // destination BEFORE touching geometry: otherwise a legal anchor target
     // could overflow an existing handle and make the project unsaveable.
@@ -1065,5 +1100,49 @@ mod tests{
         assert!(matches!(nearest_segment(&shape,Point{x:10.,y:0.2},1.),
             Some((SegmentAddress::Polyline(0),_))));
         assert!(nearest_segment(&shape,Point{x:10.,y:10.},1.).is_none());
+    }
+}
+#[cfg(test)]
+mod seam_regression{
+    use super::*;
+    fn p(x:f32,y:f32)->Point{Point{x,y}}
+    fn loop_shape()->Shape{
+        Shape::Bezier{start:p(0.,0.),segments:vec![
+            CubicSegment{control1:p(5.,0.),control2:p(10.,5.),end:p(10.,10.)},
+            CubicSegment{control1:p(5.,10.),control2:p(0.,5.),end:p(0.,0.)}],closed:true}
+    }
+    #[test] fn both_seam_addresses_move_same_logical_anchor(){
+        let mut a=loop_shape();let mut b=a.clone();
+        move_node(&mut a,NodeAddress::BezierStart,p(2.,3.)).unwrap();
+        move_node(&mut b,NodeAddress::BezierEnd(1),p(2.,3.)).unwrap();
+        assert_eq!(a,b);
+        let Shape::Bezier{start,segments,..}=a else{panic!()};
+        assert_eq!(start,p(2.,3.));assert_eq!(segments[1].end,start);
+        assert_eq!(segments[0].control1,p(7.,3.));
+        assert_eq!(segments[1].control2,p(2.,8.));
+    }
+    #[test] fn compound_and_single_segment_seams_stay_closed(){
+        let mut shape=Shape::CompoundPath{contours:vec![crate::Contour{start:p(0.,0.),
+            segments:vec![CubicSegment{control1:p(3.,0.),control2:p(0.,3.),end:p(0.,0.)}],closed:true}]};
+        move_node(&mut shape,NodeAddress::CompoundEnd(0,0),p(10.,20.)).unwrap();
+        let Shape::CompoundPath{contours}=shape else{panic!()};
+        let c=&contours[0];
+        assert_eq!(c.start,p(10.,20.));assert_eq!(c.segments[0].end,c.start);
+        assert_eq!(c.segments[0].control1,p(13.,20.));assert_eq!(c.segments[0].control2,p(10.,23.));
+    }
+    #[test] fn overflow_is_atomic_and_open_duplicates_are_not_linked(){
+        let mut shape=loop_shape();let before=shape.clone();
+        assert!(move_node(&mut shape,NodeAddress::BezierStart,p(100_000.,0.)).is_err());
+        assert_eq!(shape,before);
+        let mut poly=Shape::Polyline{points:vec![p(0.,0.),p(5.,5.),p(0.,0.)],closed:false};
+        move_node(&mut poly,NodeAddress::Polyline(0),p(1.,1.)).unwrap();
+        let Shape::Polyline{points,..}=poly else{panic!()};
+        assert_eq!(points[2],p(0.,0.));
+    }
+    #[test] fn explicit_polyline_closure_is_preserved(){
+        let mut poly=Shape::Polyline{points:vec![p(0.,0.),p(5.,5.),p(5.,0.),p(0.,0.)],closed:true};
+        move_node(&mut poly,NodeAddress::Polyline(3),p(1.,2.)).unwrap();
+        let Shape::Polyline{points,..}=poly else{panic!()};
+        assert_eq!(points[0],p(1.,2.));assert_eq!(points[3],points[0]);
     }
 }

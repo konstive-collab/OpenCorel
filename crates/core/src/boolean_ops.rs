@@ -145,7 +145,7 @@ fn ellipse(x:f32,y:f32,w:f32,h:f32)->Result<Polygon<f64>,String>{
     }
     Ok(Polygon::new(close_loop(out)?,vec![]))
 }
-fn shape_to_polygon(shape:&Shape)->Result<MultiPolygon<f64>,String>{
+pub(crate) fn shape_to_polygon(shape:&Shape)->Result<MultiPolygon<f64>,String>{
     let result=match shape{
         Shape::Rectangle{x,y,w,h}=>MultiPolygon(vec![rectangle(*x,*y,*w,*h)?]),
         Shape::Ellipse{x,y,w,h}=>MultiPolygon(vec![ellipse(*x,*y,*w,*h)?]),
@@ -230,6 +230,9 @@ fn combine_inner(a:&Shape,b:&Shape,operation:BooleanOperation)
         BooleanOperation::Intersect=>ga.intersection(&gb),
         BooleanOperation::Xor=>ga.xor(&gb),
     };
+    polygon_to_shape(&result)
+}
+pub(crate) fn polygon_to_shape(result:&MultiPolygon<f64>)->Result<Option<Shape>,String>{
     if result.0.is_empty()||result.unsigned_area()<1e-8{return Ok(None);}
     let count:usize=result.0.iter().map(|p|1+p.interiors().len()).sum();
     if count>MAX_CONTOURS{

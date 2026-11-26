@@ -7,7 +7,7 @@ use opencorel_core::{Bounds, Shape, Alignment, Distribution, TextAlign, valid_pa
 use std::collections::HashSet;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum InspectorTab { Objects, Properties, Page, Export, Symbols, Raster, Trace }
+pub(super) enum InspectorTab { Objects, Properties, Page, Export, Symbols, Raster, Trace, Geometry }
 
 const SWATCHES: [&str; 27] = [
     "#FFFFFF", "#E8E8E8", "#C0C0C0", "#808080", "#333333", "#000000",
@@ -567,6 +567,7 @@ impl Editor {
                 ui.selectable_value(&mut self.inspector_tab,InspectorTab::Symbols,"Символы");
                 ui.selectable_value(&mut self.inspector_tab,InspectorTab::Raster,"Растр");
                 ui.selectable_value(&mut self.inspector_tab,InspectorTab::Trace,"Трассировка");
+                ui.selectable_value(&mut self.inspector_tab,InspectorTab::Geometry,"Геометрия");
             });
             ui.separator();
             if self.inspector_tab==InspectorTab::Objects{
@@ -586,6 +587,7 @@ impl Editor {
                             InspectorTab::Symbols=>self.symbol_library_docker(ui),
                             InspectorTab::Raster=>self.raster_studio(ui),
                             InspectorTab::Trace=>self.trace_inspector(ui),
+                            InspectorTab::Geometry=>self.geometry_docker(ui),
                             InspectorTab::Objects=>{},
                         }
                     });
