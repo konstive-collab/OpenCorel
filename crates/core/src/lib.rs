@@ -31,6 +31,7 @@ pub mod object_search;
 pub mod symbols;
 pub mod raster_edit;
 pub mod vector_trace;
+pub mod path_measure;
 pub use symbols::{SymbolDefinition,SymbolInstance,SymbolLibrary,SymbolObject};
 use appearance::Appearance;
 
