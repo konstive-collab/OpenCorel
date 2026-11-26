@@ -4,6 +4,7 @@ use eframe::egui;
 use opencorel_core::path_array::{PathArraySettings,Spacing};
 use opencorel_core::path_measure::measure_shape;
 use opencorel_core::path_extract::PathRange;
+use opencorel_core::vector_blend::{BlendSettings,BlendEasing};
 
 #[derive(Default)]
 pub(super) struct GeometryPanel{
@@ -17,6 +18,8 @@ pub(super) struct GeometryPanel{
     extract_end:f64,
     sample_step:f64,
     preserve_cubic:bool,
+    blend_mode:bool,
+    blend:BlendSettings,
 }
 impl Editor{
     fn apply_path_array(&mut self,guide:u64,motif:u64,settings:PathArraySettings){
@@ -53,6 +56,20 @@ impl Editor{
                 self.status="Извлечён участок кривой Безье; исходник сохранён. Ctrl+Z — отмена.".into();
             }
             Err(e)=>self.status=format!("Кривая: {e}"),
+        }
+    }
+    fn apply_blend(&mut self,a:u64,b:u64,s:BlendSettings){
+        let mut draft=self.doc.clone();
+        match draft.blend_objects(a,b,s){
+            Ok(ids)=>{
+                self.checkpoint();self.doc=draft;
+                self.selected=ids.first().copied();
+                self.multi_selected=ids.into_iter().skip(1).collect();
+                self.active_node=None;self.node_drag=None;
+                self.fill_cache.entries.clear();self.compound_cache.clear();
+                self.status="Переход создан из редактируемых контуров. Ctrl+Z — отмена.".into();
+            }
+            Err(e)=>self.status=format!("Переход: {e}"),
         }
     }
     pub(super) fn geometry_docker(&mut self,ui:&mut egui::Ui){
@@ -108,6 +125,30 @@ impl Editor{
             return;
         }
         if ids.len()!=2{ui.label("Для массива выберите ровно два объекта.");return;}
+        ui.horizontal_wrapped(|ui|{
+            ui.selectable_value(&mut self.geometry_panel.blend_mode,false,"Массив");
+            ui.selectable_value(&mut self.geometry_panel.blend_mode,true,"Переход");
+        });
+        if self.geometry_panel.blend_mode{
+            ui.heading("Переход между объектами");
+            let s=&mut self.geometry_panel.blend;
+            ui.add(egui::Slider::new(&mut s.steps,1..=256).text("Промежуточных объектов"));
+            ui.add(egui::Slider::new(&mut s.samples,3..=1024).text("Узлов на контур"));
+            ui.add(egui::DragValue::new(&mut s.tolerance_mm).range(0.001..=10.).speed(0.01).suffix(" мм"));
+            ui.checkbox(&mut s.align_seam,"Совместить начало замкнутых контуров");
+            ui.checkbox(&mut s.allow_reverse,"Согласовать направление");
+            ui.checkbox(&mut s.interpolate_style,"Интерполировать базовые RGB-цвета и толщину");
+            ui.horizontal_wrapped(|ui|{
+                ui.selectable_value(&mut s.easing,BlendEasing::Linear,"Линейный");
+                ui.selectable_value(&mut s.easing,BlendEasing::EaseIn,"Ускорение");
+                ui.selectable_value(&mut s.easing,BlendEasing::EaseOut,"Замедление");
+                ui.selectable_value(&mut s.easing,BlendEasing::SmoothStep,"Плавный");
+            });
+            let params=*s;
+            if ui.button("Построить переход").clicked(){self.apply_blend(ids[0],ids[1],params);}
+            ui.small("Исходники сохраняются. Промежуточные объекты — приближённые ломаные; сложные заливки, эффекты и составные контуры не интерполируются.");
+            return;
+        }
         ui.heading("Массив вдоль пути");
         ui.small("Первый выделенный объект — направляющая, второй — образец.");
         ui.checkbox(&mut self.geometry_panel.reversed,"Поменять роли объектов");
