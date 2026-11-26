@@ -34,6 +34,7 @@ pub mod vector_trace;
 pub mod path_measure;
 pub mod path_array;
 pub mod path_extract;
+pub mod cubic_interval;
 pub use symbols::{SymbolDefinition,SymbolInstance,SymbolLibrary,SymbolObject};
 use appearance::Appearance;
 
