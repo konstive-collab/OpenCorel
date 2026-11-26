@@ -5,6 +5,7 @@ use opencorel_core::path_array::{PathArraySettings,Spacing};
 use opencorel_core::path_measure::measure_shape;
 use opencorel_core::path_extract::PathRange;
 use opencorel_core::vector_blend::{BlendSettings,BlendEasing};
+use opencorel_core::vector_offset::{OffsetSettings,OffsetMode,Corner};
 
 #[derive(Default)]
 pub(super) struct GeometryPanel{
@@ -20,6 +21,8 @@ pub(super) struct GeometryPanel{
     preserve_cubic:bool,
     blend_mode:bool,
     blend:BlendSettings,
+    offset:OffsetSettings,
+    offset_source_stroke:bool,
 }
 impl Editor{
     fn apply_path_array(&mut self,guide:u64,motif:u64,settings:PathArraySettings){
@@ -72,6 +75,49 @@ impl Editor{
             Err(e)=>self.status=format!("Переход: {e}"),
         }
     }
+    fn apply_vector_offset(&mut self,id:u64,s:OffsetSettings,use_stroke:bool){
+        let mut draft=self.doc.clone();
+        match draft.create_offset_object(id,s,use_stroke){
+            Ok(new)=>{
+                self.checkpoint();self.doc=draft;
+                self.selected=Some(new);self.multi_selected.clear();
+                self.active_node=None;self.node_drag=None;
+                self.fill_cache.entries.clear();self.compound_cache.clear();
+                self.status="Создан редактируемый контур. Ctrl+Z — отмена.".into();
+            }
+            Err(e)=>self.status=format!("Смещение: {e}"),
+        }
+    }
+    fn offset_controls(&mut self,ui:&mut egui::Ui,id:u64){
+        ui.separator();
+        ui.heading("Контур и обводка");
+        let s=&mut self.geometry_panel.offset;
+        ui.horizontal_wrapped(|ui|{
+            ui.selectable_value(&mut s.mode,OffsetMode::Region,"Смещение");
+            ui.selectable_value(&mut s.mode,OffsetMode::Border,"Кайма");
+            ui.selectable_value(&mut s.mode,OffsetMode::Stroke,"Обводка");
+        });
+        if s.mode==OffsetMode::Stroke{
+            ui.checkbox(&mut self.geometry_panel.offset_source_stroke,"Использовать толщину исходной обводки");
+            if s.distance_mm<=0.{s.distance_mm=2.;}
+        }
+        let source_stroke=s.mode==OffsetMode::Stroke&&self.geometry_panel.offset_source_stroke;
+        ui.add_enabled_ui(!source_stroke,|ui|{
+            ui.add(egui::DragValue::new(&mut s.distance_mm)
+                .range(if s.mode==OffsetMode::Stroke{0.001..=5000.}else{-5000.0..=5000.})
+                .speed(0.1).suffix(" мм").prefix(if s.mode==OffsetMode::Stroke{"Толщина: "}else{"Смещение: "}));
+        });
+        ui.horizontal_wrapped(|ui|{
+            ui.selectable_value(&mut s.corner,Corner::Round,"Круглые");
+            ui.selectable_value(&mut s.corner,Corner::Bevel,"Скошенные");
+            ui.selectable_value(&mut s.corner,Corner::Miter,"Острые");
+        });
+        if s.mode==OffsetMode::Stroke{ui.checkbox(&mut s.square_cap,"Квадратные окончания");}
+        ui.add(egui::DragValue::new(&mut s.tolerance_mm).range(0.001..=10.).speed(0.01).prefix("Допуск пути: ").suffix(" мм"));
+        let params=*s;
+        if ui.button("Создать контур").clicked(){self.apply_vector_offset(id,params,source_stroke);}
+        ui.small("Положительное смещение наружу, отрицательное внутрь. Обводка преобразуется в сплошную заливку; пунктиры и эффекты не учитываются. Исходник сохраняется.");
+    }
     pub(super) fn geometry_docker(&mut self,ui:&mut egui::Ui){
         ui.heading("Геометрия");
         let ids=self.selection_ids();
@@ -122,6 +168,7 @@ impl Editor{
             if cut&&preserve{self.apply_cubic_extract(ids[0],start,end,tolerance);}
             else if cut{self.apply_path_extract(ids[0],extract,tolerance);}
             else if resample{self.apply_path_extract(ids[0],uniform,tolerance);}
+            self.offset_controls(ui,ids[0]);
             return;
         }
         if ids.len()!=2{ui.label("Для массива выберите ровно два объекта.");return;}
