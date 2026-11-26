@@ -33,6 +33,7 @@ pub mod raster_edit;
 pub mod vector_trace;
 pub mod path_measure;
 pub mod path_array;
+pub mod path_extract;
 pub use symbols::{SymbolDefinition,SymbolInstance,SymbolLibrary,SymbolObject};
 use appearance::Appearance;
 
