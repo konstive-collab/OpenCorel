@@ -7,6 +7,8 @@ use opencorel_typography::TextOutliner;
 fn main()->ExitCode{
     let args:Vec<_>=env::args().collect();
     let outcome=match args.as_slice(){
+        [_,op,src,page,id,tolerance] if op=="measure-path" => measure_path(src,page,id,tolerance),
+        [_,op,src,dst,page,guide,motif,settings] if op=="path-array" => path_array(src,dst,page,guide,motif,settings),
         [_,op,src,dst,page_id,object_id,settings] if op=="trace-raster" => trace_raster(src,dst,page_id,object_id,settings,false),
         [_,op,src,dst,page_id,object_id,settings,flag] if op=="trace-raster"&&flag=="--replace" => trace_raster(src,dst,page_id,object_id,settings,true),
         [_,op,src,dst,page_id,object_id,settings] if op=="raster-adjust"||op=="raster-batch" => raster_adjust(src,dst,page_id,object_id,settings),
@@ -264,7 +266,7 @@ fn main()->ExitCode{
             .and_then(|r|save_document(&r.document,dst)),
         [_,op,src,dst] if op=="export-svg" => open_any(src)
             .and_then(|r|save_document(&r.document,dst)),
-        _=>{eprintln!("Usage:\n  opencorel-cli trace-raster IN.kdr OUT.kdr PAGE_ID OBJECT_ID SETTINGS.json [--replace]\n  opencorel-cli raster-adjust IN.kdr OUT.kdr PAGE_ID OBJECT_ID SETTINGS.json\n  opencorel-cli raster-batch IN.kdr OUT.kdr PAGE_ID ID1,ID2 SETTINGS.json\n  opencorel-cli raster-extract IN.kdr OUT.png PAGE_ID OBJECT_ID original|adjusted\n  opencorel-cli benchmark COUNT\n  opencorel-cli new FILE.kdr\n  opencorel-cli inventory FILE.kdr\n  opencorel-cli qr-code IN.kdr OUT.kdr URL_OR_TEXT SIZE_MM\n  opencorel-cli recolor-rgb IN.kdr OUT.kdr #RRGGBB #RRGGBB\n  opencorel-cli find-objects FILE.kdr QUERY\n  opencorel-cli find-text FILE.kdr QUERY\n  opencorel-cli replace-text IN.kdr OUT.kdr QUERY REPLACEMENT\n  opencorel-cli gradient-preset IN.kdr OUT.kdr OBJECT_ID sunrise|ocean|forest|sunset|steel|candy|monochrome\n  opencorel-cli inspect FILE.kdr\n  opencorel-cli pages FILE.kdr\n  opencorel-cli add-page IN.kdr OUT.kdr WIDTH_MM HEIGHT_MM\n  opencorel-cli duplicate-page IN.kdr OUT.kdr\n  opencorel-cli batch-svg FILE.kdr DIRECTORY\n  opencorel-cli batch-pdf FILE.kdr DIRECTORY\n  opencorel-cli export-pdf-book FILE.kdr DOCUMENT.pdf\n  opencorel-cli export-trim-pdf FILE.kdr TRIM.pdf\n  opencorel-cli export-trim-svg FILE.kdr TRIM.svg\n  opencorel-cli preflight FILE.kdr\n  opencorel-cli convert INPUT OUTPUT\n  opencorel-cli outline-text INPUT.kdr OUTPUT.kdr\n  opencorel-cli export-bitmap FILE.kdr FILE.png DPI\n  opencorel-cli export-svg FILE.kdr FILE.svg\n  opencorel-cli export-pdf FILE.kdr FILE.pdf\n  opencorel-cli plotter-preflight FILE.kdr\n  opencorel-cli export-plt FILE.kdr FILE.plt\n  opencorel-cli dxf-preflight FILE.kdr\n  opencorel-cli export-dxf FILE.kdr FILE.dxf\n  opencorel-cli import-svg FILE.svg FILE.kdr");
+        _=>{eprintln!("Usage:\n  opencorel-cli measure-path IN.kdr PAGE_ID OBJECT_ID TOLERANCE_MM\n  opencorel-cli path-array IN.kdr OUT.kdr PAGE_ID GUIDE_ID MOTIF_ID SETTINGS.json\n  opencorel-cli trace-raster IN.kdr OUT.kdr PAGE_ID OBJECT_ID SETTINGS.json [--replace]\n  opencorel-cli raster-adjust IN.kdr OUT.kdr PAGE_ID OBJECT_ID SETTINGS.json\n  opencorel-cli raster-batch IN.kdr OUT.kdr PAGE_ID ID1,ID2 SETTINGS.json\n  opencorel-cli raster-extract IN.kdr OUT.png PAGE_ID OBJECT_ID original|adjusted\n  opencorel-cli benchmark COUNT\n  opencorel-cli new FILE.kdr\n  opencorel-cli inventory FILE.kdr\n  opencorel-cli qr-code IN.kdr OUT.kdr URL_OR_TEXT SIZE_MM\n  opencorel-cli recolor-rgb IN.kdr OUT.kdr #RRGGBB #RRGGBB\n  opencorel-cli find-objects FILE.kdr QUERY\n  opencorel-cli find-text FILE.kdr QUERY\n  opencorel-cli replace-text IN.kdr OUT.kdr QUERY REPLACEMENT\n  opencorel-cli gradient-preset IN.kdr OUT.kdr OBJECT_ID sunrise|ocean|forest|sunset|steel|candy|monochrome\n  opencorel-cli inspect FILE.kdr\n  opencorel-cli pages FILE.kdr\n  opencorel-cli add-page IN.kdr OUT.kdr WIDTH_MM HEIGHT_MM\n  opencorel-cli duplicate-page IN.kdr OUT.kdr\n  opencorel-cli batch-svg FILE.kdr DIRECTORY\n  opencorel-cli batch-pdf FILE.kdr DIRECTORY\n  opencorel-cli export-pdf-book FILE.kdr DOCUMENT.pdf\n  opencorel-cli export-trim-pdf FILE.kdr TRIM.pdf\n  opencorel-cli export-trim-svg FILE.kdr TRIM.svg\n  opencorel-cli preflight FILE.kdr\n  opencorel-cli convert INPUT OUTPUT\n  opencorel-cli outline-text INPUT.kdr OUTPUT.kdr\n  opencorel-cli export-bitmap FILE.kdr FILE.png DPI\n  opencorel-cli export-svg FILE.kdr FILE.svg\n  opencorel-cli export-pdf FILE.kdr FILE.pdf\n  opencorel-cli plotter-preflight FILE.kdr\n  opencorel-cli export-plt FILE.kdr FILE.plt\n  opencorel-cli dxf-preflight FILE.kdr\n  opencorel-cli export-dxf FILE.kdr FILE.dxf\n  opencorel-cli import-svg FILE.svg FILE.kdr");
             return ExitCode::FAILURE;}
     };
     match outcome{
@@ -350,5 +352,40 @@ fn trace_raster(src:&str,dst:&str,page:&str,object:&str,settings:&str,replace:bo
     let (ids,result)=doc.trace_raster(id,params,replace)?;
     save_document(&doc,dst)?;
     println!("Traced {} editable colors, {} contours, {} nodes",ids.len(),result.contours,result.nodes);
+    Ok(())
+}
+
+fn measure_path(src:&str,page:&str,id:&str,tolerance:&str)->Result<(),String>{
+    let mut doc=open_any(src)?.document;
+    doc.switch_page(page.parse::<u64>().map_err(|_|"Invalid page ID")?)?;
+    let id=id.parse::<u64>().map_err(|_|"Invalid object ID")?;
+    let tolerance=tolerance.parse::<f64>().map_err(|_|"Invalid tolerance")?;
+    let contours=opencorel_core::path_measure::measure_shape(
+        &doc.get(id).ok_or("Object not found")?.shape,tolerance)?;
+    for (i,c) in contours.iter().enumerate(){
+        println!("Contour {}: length_mm={:.6}, closed={}, signed_area_mm2={:?}",
+            i+1,c.length_mm(),c.closed,c.signed_area_mm2());
+    }
+    println!("Total length_mm={:.6}",contours.iter().map(|c|c.length_mm()).sum::<f64>());
+    Ok(())
+}
+fn path_array(src:&str,dst:&str,page:&str,guide:&str,motif:&str,settings:&str)->Result<(),String>{
+    if src==dst||std::path::Path::new(dst).exists(){return Err("Choose a new output file".into());}
+    if !matches!(opencorel_formats::extension(std::path::Path::new(dst)).as_str(),"kdr"|"ocd"){
+        return Err("Path array output must be KDR or OCD".into());
+    }
+    if std::fs::metadata(settings).map_err(|e|e.to_string())?.len()>16384{
+        return Err("Path array settings exceed 16 KiB".into());
+    }
+    let params:opencorel_core::path_array::PathArraySettings=
+        serde_json::from_slice(&std::fs::read(settings).map_err(|e|e.to_string())?)
+            .map_err(|e|format!("Invalid path array settings: {e}"))?;
+    let mut doc=open_any(src)?.document;
+    doc.switch_page(page.parse::<u64>().map_err(|_|"Invalid page ID")?)?;
+    let guide=guide.parse::<u64>().map_err(|_|"Invalid guide ID")?;
+    let motif=motif.parse::<u64>().map_err(|_|"Invalid motif ID")?;
+    let ids=doc.repeat_along_path(guide,motif,params)?;
+    save_document(&doc,dst)?;
+    println!("Created {} editable objects",ids.len());
     Ok(())
 }
